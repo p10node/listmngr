@@ -1,0 +1,11 @@
+{
+  "http_etag": "phase1",
+  "start": 0,
+  "total_size": 1,
+  "entries": [
+    {
+      "mail_host": "example.com",
+      "description": "Example domain"
+    }
+  ]
+}

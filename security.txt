@@ -1,0 +1,5 @@
+Contact: https://github.com/p10node/listmngr/security/advisories/new
+Policy: https://github.com/p10node/listmngr/blob/main/docs/SECURITY.md
+Preferred-Languages: en, vi
+Canonical: https://github.com/p10node/listmngr/blob/main/security.txt
+Expires: 2027-09-04T00:00:00Z

@@ -1,0 +1,10 @@
+{
+  "list_id": "dev.example.com",
+  "fqdn_listname": "dev@example.com",
+  "display_name": "Developers",
+  "description": "Discussion",
+  "advertised": true,
+  "preferred_language": "en",
+  "archive_policy": "public",
+  "archive_rendering_mode": "text"
+}

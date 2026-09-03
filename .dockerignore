@@ -1,0 +1,28 @@
+# Source-control and local metadata
+.git
+.gitignore
+.github
+.hermes
+.DS_Store
+**/.DS_Store
+
+# Local secrets and runtime state
+.env
+.env.*
+!.env.example
+data
+*.db
+*.sqlite*
+
+# Build/test output
+target
+coverage
+reports
+*.profraw
+*.lcov
+
+# Editor/OS files
+.idea
+.vscode
+*.swp
+*~

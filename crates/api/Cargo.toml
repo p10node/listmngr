@@ -1,0 +1,30 @@
+[package]
+name = "listmngr-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+chrono.workspace = true
+dashmap.workspace = true
+http.workspace = true
+ipnet.workspace = true
+listmngr-core = { path = "../core", version = "0.1.0" }
+listmngr-db = { path = "../db", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+serde_urlencoded.workspace = true
+sqlx = { workspace = true, features = ["any"] }
+tokio.workspace = true
+tower-http.workspace = true
+utoipa.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tower.workspace = true

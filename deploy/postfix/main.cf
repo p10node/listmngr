@@ -1,0 +1,19 @@
+# Phase 0 deployment documentation. DO NOT enable before Phase 2 LMTP acceptance.
+# listmngr currently has no LMTP listener; enabling these directives would defer
+# valid mail to a dead endpoint.
+#
+# Planned Phase 2 shape (review domains/map paths before activation):
+# relay_domains = hash:/var/lib/listmngr/postfix/domains
+# transport_maps = hash:/var/lib/listmngr/postfix/transport
+# local_recipient_maps = hash:/var/lib/listmngr/postfix/virtual
+# listmngr_destination_recipient_limit = 1
+#
+# Example generated transport row:
+# example.org  lmtp:[127.0.0.1]:8024
+#
+# Activation gate:
+#   postmap /var/lib/listmngr/postfix/{domains,transport,virtual}
+#   postfix check
+#   postmap -q example.org hash:/var/lib/listmngr/postfix/domains
+#   postmap -q list@example.org hash:/var/lib/listmngr/postfix/virtual
+# Then reload Postfix only after Phase 2 end-to-end acceptance.

@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    environment:
+      POSTGRES_USER: listmngr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in an env file}
+      POSTGRES_DB: listmngr
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U listmngr -d listmngr"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+  listmngr:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      LISTMNGR__DATABASE__URL: postgres://listmngr:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in an env file}@postgres:5432/listmngr
+      LISTMNGR__WEB__LISTEN: 0.0.0.0:8000
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "127.0.0.1:${LISTMNGR_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/listmngr", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  postgres-data:

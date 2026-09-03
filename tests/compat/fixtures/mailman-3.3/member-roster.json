@@ -1,0 +1,14 @@
+{
+  "http_etag": "phase1",
+  "start": 0,
+  "total_size": 1,
+  "entries": [
+    {
+      "list_id": "dev.example.com",
+      "email": "subscriber@example.net",
+      "role": "member",
+      "subscription_mode": "as_address",
+      "display_name": "Subscriber"
+    }
+  ]
+}

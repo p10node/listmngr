@@ -3,7 +3,7 @@
 > Mailman 3 alternative (Core + Postorius + HyperKitty + mailman-web + django-mailman3 + mailmanclient) viết bằng Rust.
 > Single binary, feature parity, UI hiện đại, security-first.
 
-Trạng thái: bản nháp 2026-09-03. Repo chưa có code. Version crates kiểm tra trên crates.io ngày 2026-09-03.
+Trạng thái: đang triển khai 2026-09-04. Manifest và `Cargo.lock` là nguồn sự thật cho version dependency khả dụng; xem ADR-0003.
 
 ## 0. Tóm tắt 1 phút
 
@@ -723,20 +723,22 @@ Hai prefix: `/3.1/` (compat, JSON shape giống Mailman 3.3 để `mailmanclient
 
 ## 7. Roadmap
 
-Effort tương đối: S < M < L < XL. Mỗi phase kết thúc = tag `v0.<phase>.0`, CHANGELOG, FEATURE_PARITY cập nhật.
+Effort tương đối: S < M < L < XL. A phase tag is created only after its acceptance gates pass and CHANGELOG/FEATURE_PARITY carry the evidence; a package version alone does not imply phase completion. ADR-0003 establishes `0.1.0` as the current unreleased Phase 1 development baseline, so the earlier mechanical `v0.<phase>.0` rule does not apply retroactively to Phase 0.
 
 ### Phase 0 — Bootstrap (S)
 
-Mục tiêu: workspace compile, chạy `serve` trả healthz, CI xanh.
+Mục tiêu: workspace compile, chạy `serve` trả healthz, CI xanh. Checkbox indicates artifact presence only; formal completion follows the ID-based acceptance ledger in `FEATURE_PARITY.md`.
 
-- [ ] Workspace 9 crates rỗng (lib + bin), `[workspace.dependencies]` pin, lints, `rust-toolchain.toml`, rustfmt/clippy/deny config
-- [ ] `listmngr-core`: `Config` (figment), `Error`, ids (`ListId`, `UserId`…), enums cơ bản
-- [ ] `listmngr-db`: pool init (pg/sqlite), `migrate!()` infra, migration `0000_init`
-- [ ] `listmngr` CLI: `version`, `conf`, `info`, `migrate`, `serve` (axum `/healthz`, `/readyz`, `/metrics` stub), tracing init
-- [ ] CI GitHub Actions: fmt, clippy `-D warnings`, test (pg service), deny, audit; cache
-- [ ] Dockerfile multi-stage, docker-compose (pg), `.env.example`
-- [ ] Docs: CLAUDE.md, README, ARCHITECTURE, FEATURE_PARITY skeleton, SECURITY skeleton, ADR-0001 (DB queue), ADR-0002 (SSR+htmx)
-- Acceptance: `cargo build --workspace`, `cargo test`, `docker compose up` → `curl /healthz` 200.
+- [x] Workspace 9 crates (lib + bin), `[workspace.dependencies]`, lints, exact Rust toolchain, rustfmt/clippy/deny config
+- [x] `listmngr-core`: `Config` (figment), `Error`, ids (`ListId`, `UserId`…), enums cơ bản
+- [x] `listmngr-db`: pool init (pg/sqlite), `migrate!()` infra, migration `0000_init`
+- [x] `listmngr` CLI: `version`, `conf`, `info`, `migrate`, `serve` (axum `/healthz`, `/readyz`, `/metrics` stub), tracing init
+- [x] **P0-08** CI GitHub Actions: blocking fmt, locked build, clippy `-D warnings`, tests, mandatory `TEST_POSTGRES_URL` migration/connectivity gate, deny, audit; cache
+- [x] **P0-09** Multi-stage static-musl/scratch non-root Dockerfile, PostgreSQL Compose with runtime credentials, `.env.example`, `.dockerignore`, tool-free healthcheck
+- [x] **P0-10** Hardened systemd unit with managed state/working directory, syscall filter, and kernel/device/filesystem protections
+- [x] **P0-11** Actionable CLAUDE, README, ARCHITECTURE, FEATURE_PARITY, SECURITY, disclosure, deploy/MTA-boundary docs, and ADRs
+- [x] **SEC-10** Supply-chain/deployment baseline: lockfile, pinned CI/action/tool/image inputs, deny/audit policy, full AGPLv3 text, least-privilege container/systemd artifacts
+- Acceptance: `scripts/check-phase0-artifacts.sh`; `cargo build --locked --workspace`; `cargo test --locked --workspace --all-targets`; `TEST_POSTGRES_URL=… scripts/test-postgres.sh`; `docker compose --env-file .env -f deploy/docker-compose.yml up --build --wait` → host `/healthz` and `/readyz` 200. Artifact checkboxes do not assert these live gates passed; evidence/status is recorded in `docs/FEATURE_PARITY.md`.
 
 ### Phase 1 — Core domain, DB, REST cơ bản (M)
 
@@ -859,7 +861,7 @@ Mục tiêu: parity Core hoàn chỉnh (trừ NNTP/DMARC wrap).
 
 | # | Câu hỏi | Khuyến nghị |
 |---|---|---|
-| 1 | License | Mailman = GPL-3.0. listmngr là code mới, không derive → tự chọn. Khuyến nghị **AGPL-3.0** (giữ tinh thần copyleft cho hosted service) hoặc **Apache-2.0** nếu muốn adoption doanh nghiệp. |
+| 1 | License | **Đã chốt: AGPL-3.0-or-later**; xem ADR-0003 và `LICENSE`. |
 | 2 | DB | Postgres-first, SQLite hỗ trợ đầy đủ nhưng single-node. Query viết portable, dùng `sqlx::query` runtime + test cả 2 backend (không dùng macro compile-time để tránh 2 bộ query). |
 | 3 | Frontend | SSR askama + htmx (khuyến nghị) vs Leptos/Dioxus. SSR: đơn giản, CSP strict, không WASM bundle, dễ i18n. |
 | 4 | Tên | crate prefix `listmngr-*`, binary `listmngr`, env `LISTMNGR__*`, header `X-Listmngr-*`. Có cần alias `X-Mailman-*` cho compat? (khuyến nghị: emit cả 2 trong P2, config tắt). |
