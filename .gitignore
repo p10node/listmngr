@@ -1,0 +1,7 @@
+target/
+.DS_Store
+.env
+*.db
+data/
+playwright-report/
+test-results/
