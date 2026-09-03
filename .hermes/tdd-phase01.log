@@ -1,0 +1,269 @@
+Traceback (most recent call last):
+  File "/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/.hermes/phase01_contract_test.py", line 9, in <module>
+    assert not missing, f"missing workspace bootstrap files: {missing}"
+           ^^^^^^^^^^^
+AssertionError: missing workspace bootstrap files: ['Cargo.toml', 'rust-toolchain.toml', 'deny.toml', 'rustfmt.toml', 'clippy.toml', 'crates/core/Cargo.toml', 'crates/db/Cargo.toml', 'crates/mail/Cargo.toml', 'crates/pipeline/Cargo.toml', 'crates/runners/Cargo.toml', 'crates/archive/Cargo.toml', 'crates/api/Cargo.toml', 'crates/web/Cargo.toml', 'crates/cli/Cargo.toml']
+
+[GREEN bootstrap] workspace contract passed
+
+[GREEN core domain/config/styles] 5 tests passed
+
+[GREEN database migrations/repositories/auth/audit] 4 tests passed on SQLite
+
+[GREEN CLI Phase 0-1] version/conf/info/migrate/domain/list/user/member CRUD passed
+[GREEN REST/auth/rate-limit/OpenAPI] 3 integration tests passed
+
+[RED config secret_file/redaction]
+error: cannot update the lock file /Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/Cargo.lock because --locked was passed to prevent this
+help: to generate the lock file without accessing the network, remove the --locked flag and use --offline instead.
+[RED retry after lock refresh]
+   Compiling libc v0.2.189
+   Compiling once_cell v1.21.4
+   Compiling getrandom v0.4.3
+   Compiling errno v0.3.14
+   Compiling rustix v1.1.4
+   Compiling uuid v1.26.0
+   Compiling listmngr-core v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/core)
+   Compiling tempfile v3.27.0
+error[E0599]: no method named `redacted_json` found for struct `listmngr_core::Config` in the current scope
+  --> crates/core/tests/domain.rs:53:27
+   |
+53 |     let rendered = config.redacted_json().to_string();
+   |                           ^^^^^^^^^^^^^ method not found in `listmngr_core::Config`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `listmngr-core` (test "domain") due to 1 previous error
+
+[GREEN config secret_file/redaction]
+   Compiling listmngr-core v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.17s
+     Running unittests src/lib.rs (target/debug/deps/listmngr_core-b76f376fab4a966d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/domain.rs (target/debug/deps/domain-71d3c23285883dd4)
+
+running 1 test
+test secret_file_overrides_inline_secret_and_redacted_view_hides_both ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+
+[GREEN CLI config/info redaction]
+   Compiling listmngr-core v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/core)
+   Compiling listmngr-db v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/db)
+   Compiling listmngr-api v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/api)
+   Compiling listmngr v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.57s
+     Running unittests src/main.rs (target/debug/deps/listmngr-2a82567603f5d085)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/deps/cli-791f27074b0db8d8)
+
+running 1 test
+test cli_conf_and_info_never_expose_database_credentials ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 1.34s
+
+
+[RED atomic write+audit]
+   Compiling listmngr-core v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/core)
+   Compiling listmngr-db v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/db)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.41s
+     Running unittests src/lib.rs (target/debug/deps/listmngr_db-80fbd2d54d6ebd13)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/repositories.rs (target/debug/deps/repositories-dff61ff044f96ab1)
+
+running 1 test
+test audit_insert_failure_rolls_back_business_write ... FAILED
+
+failures:
+
+---- audit_insert_failure_rolls_back_business_write stdout ----
+
+thread 'audit_insert_failure_rolls_back_business_write' (1051738) panicked at crates/db/tests/repositories.rs:179:5:
+assertion `left == right` failed: business write must roll back with audit
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    audit_insert_failure_rolls_back_business_write
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p listmngr-db --test repositories`
+
+[GREEN atomic write+audit]
+   Compiling listmngr-db v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/db)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.03s
+     Running unittests src/lib.rs (target/debug/deps/listmngr_db-80fbd2d54d6ebd13)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/repositories.rs (target/debug/deps/repositories-dff61ff044f96ab1)
+
+running 1 test
+test audit_insert_failure_rolls_back_business_write ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.01s
+
+
+[RED user/member PATCH persistence]
+   Compiling listmngr-db v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/db)
+   Compiling listmngr-api v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.42s
+     Running unittests src/lib.rs (target/debug/deps/listmngr_api-6b97365a78e7457c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/rest.rs (target/debug/deps/rest-0678dcccaf46e4d8)
+
+running 1 test
+test user_and_member_patch_persist_mutable_fields ... FAILED
+
+failures:
+
+---- user_and_member_patch_persist_mutable_fields stdout ----
+
+thread 'user_and_member_patch_persist_mutable_fields' (1056143) panicked at crates/api/tests/rest.rs:158:5:
+assertion `left == right` failed
+  left: String("Admin")
+ right: "Renamed"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    user_and_member_patch_persist_mutable_fields
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.29s
+
+error: test failed, to rerun pass `-p listmngr-api --test rest`
+
+[GREEN user/member PATCH persistence]
+   Compiling listmngr-core v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/core)
+   Compiling listmngr-db v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/db)
+   Compiling listmngr-api v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.05s
+     Running unittests src/lib.rs (target/debug/deps/listmngr_api-6b97365a78e7457c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/rest.rs (target/debug/deps/rest-0678dcccaf46e4d8)
+
+running 1 test
+test user_and_member_patch_persist_mutable_fields ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.29s
+
+
+[RED Argon2 config + zxcvbn]
+   Compiling listmngr-core v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/core)
+   Compiling listmngr-db v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/db)
+error[E0599]: no associated function or constant named `connect_with_security` found for struct `listmngr_db::Database` in the current scope
+   --> crates/db/tests/repositories.rs:199:24
+    |
+199 |     let db = Database::connect_with_security("sqlite::memory:", 1, &security)
+    |                        ^^^^^^^^^^^^^^^^^^^^^ associated function or constant not found in `listmngr_db::Database`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `listmngr-db` (test "repositories") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+
+[GREEN Argon2 config + zxcvbn]
+ Downloading crates ...
+  Downloaded derive_builder_macro v0.20.2
+  Downloaded darling_macro v0.20.11
+  Downloaded darling v0.20.11
+  Downloaded derive_builder v0.20.2
+  Downloaded darling_core v0.20.11
+  Downloaded derive_builder_core v0.20.2
+  Downloaded fancy-regex v0.18.0
+  Downloaded zxcvbn v3.1.1
+   Compiling ident_case v1.0.1
+   Compiling strsim v0.11.1
+   Compiling fnv v1.0.7
+   Compiling either v1.18.0
+   Compiling regex-automata v0.4.18
+   Compiling bit-vec v0.8.0
+   Compiling time-core v0.1.9
+   Compiling powerfmt v0.2.0
+   Compiling deranged v0.5.8
+   Compiling num-conv v0.2.2
+   Compiling bit-set v0.8.0
+   Compiling sqlx-core v0.8.6
+   Compiling itertools v0.14.0
+   Compiling darling_core v0.20.11
+   Compiling time v0.3.55
+   Compiling darling_macro v0.20.11
+   Compiling darling v0.20.11
+   Compiling fancy-regex v0.18.0
+   Compiling regex v1.13.1
+   Compiling sqlx-sqlite v0.8.6
+   Compiling sqlx-postgres v0.8.6
+   Compiling derive_builder_core v0.20.2
+   Compiling derive_builder_macro v0.20.2
+   Compiling derive_builder v0.20.2
+   Compiling zxcvbn v3.1.1
+   Compiling sqlx-macros-core v0.8.6
+   Compiling sqlx-macros v0.8.6
+   Compiling sqlx v0.8.6
+   Compiling listmngr-db v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/db)
+error[E0308]: mismatched types
+   --> crates/db/src/lib.rs:303:52
+    |
+303 |         if zxcvbn::zxcvbn(password, &[]).score() < self.db.password_min_score {
+    |            -------------------------------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Score`, found `u8`
+    |            |
+    |            expected because this is `Score`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `listmngr-db` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `listmngr-db` (lib test) due to 1 previous error
+
+[GREEN retry Argon2 config + zxcvbn]
+   Compiling listmngr-db v0.1.0 (/Users/pierreneter/WD/workplace--pierreneter/oss/listmngr-full/crates/db)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.87s
+     Running unittests src/lib.rs (target/debug/deps/listmngr_db-9684da394490fca7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/repositories.rs (target/debug/deps/repositories-9f64f5e225692c28)
+
+running 1 test
+test password_uses_configured_argon2id_and_zxcvbn_policy ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.25s
+
+[RED members mass endpoint]
+Existing test returned 405 because /members/mass referenced no handler and workspace did not compile.
+
+[GREEN members mass per-row endpoint]
+cargo test -p listmngr-api --test rest mass_members_reports_each_row_and_compat_serializer_is_distinct -- --exact --nocapture
+result: ok. 1 passed; 0 failed; 5 filtered out
+
+[RED direct/effective preferences]
+cargo test -p listmngr-api --test rest direct_and_effective_preferences_are_distinct_at_every_scope -- --exact --nocapture
+failed: member direct preferences incorrectly included inherited hide_address.
+
+[GREEN direct/effective preferences]
+result: ok. 1 passed; 0 failed; 6 filtered out

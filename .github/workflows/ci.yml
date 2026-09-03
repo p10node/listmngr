@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env:
+          POSTGRES_USER: listmngr
+          POSTGRES_PASSWORD: listmngr-ci-only
+          POSTGRES_DB: listmngr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U listmngr -d listmngr"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      TEST_POSTGRES_URL: postgres://listmngr:listmngr-ci-only@127.0.0.1:5432/listmngr
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, pinned 2026-09-04
+        with:
+          toolchain: 1.88.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - run: scripts/check-phase0-artifacts.sh
+      - run: cargo fmt --all --check
+      - run: cargo build --locked --workspace
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --workspace --all-targets
+      - name: Mandatory PostgreSQL migration and connectivity test
+        run: scripts/test-postgres.sh
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+        with:
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.2
+      - run: cargo deny check
+      # RUSTSEC-2023-0071 is an unfixed rsa crate present only in Cargo.lock via
+      # SQLx's disabled MySQL graph; `cargo tree --target all -i rsa` is empty.
+      # cargo-deny still checks the active graph and this exception must be
+      # removed when SQLx drops the lock-only edge or an rsa fix is published.
+      - run: cargo audit --ignore RUSTSEC-2023-0071
+
+  container:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: cp .env.example .env
+      - run: docker compose --env-file .env -f deploy/docker-compose.yml config --quiet
+      - run: docker compose --env-file .env -f deploy/docker-compose.yml up -d --build --wait
+      - run: curl --fail --show-error http://127.0.0.1:8000/healthz
+      - run: curl --fail --show-error http://127.0.0.1:8000/readyz
+      - if: always()
+        run: docker compose --env-file .env -f deploy/docker-compose.yml down -v

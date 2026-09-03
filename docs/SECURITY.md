@@ -1,0 +1,49 @@
+# Security policy and threat model
+
+## Supported versions
+
+No public release is currently declared. Security fixes target the current development branch until a release support matrix is published. Version `0.1.0` is an unreleased package baseline, not a support guarantee.
+
+## Assets, actors, and trust boundaries
+
+Assets include database and SMTP credentials, API token secrets, subscriber identity and preferences, list configuration, audit history, and service availability. Actors include anonymous clients, members, moderators, list/domain owners, server owners, the MTA, operators, reverse proxies, and hostile mail/web clients.
+
+Primary boundaries are public HTTP to Axum, authenticated adapters to repositories, process to PostgreSQL, MTA to the future LMTP listener, and operator configuration to the process. Phase 2 mail processing is not yet an implemented boundary.
+
+## STRIDE analysis
+
+| Threat | Example | Present mitigation | Residual/operational requirement |
+|---|---|---|---|
+| Spoofing | Forged bearer/basic identity | SHA-256 token digest, constant-time comparison, expiry/revocation, peer CIDR checks | Terminate TLS; do not trust unsanitized forwarding headers |
+| Tampering | Unaudited member/config write | Scope/resource checks and atomic business-write plus audit transaction | Protect DB credentials and backups; review migration privileges |
+| Repudiation | Privileged action denied later | Structured append-oriented audit actor/target/diff model | Centralize/retain logs outside an attacker-controlled host |
+| Information disclosure | DSN/password in output or image context | Config redaction, `.dockerignore`, no shell in runtime image | Never commit `.env`; use `url_file` or protected environment files |
+| Denial of service | Repeated invalid auth or oversized input | Peer-keyed pre-auth limits and input bounds | Reverse-proxy limits and resource monitoring remain required |
+| Elevation of privilege | Scoped token crosses list/domain | Resource-bound authorization checks | Regression tests must cover every new write endpoint |
+
+## Deployment controls
+
+The Compose application uses a static musl binary in `scratch`, numeric UID/GID 1000, a read-only root filesystem, all capabilities dropped, `no-new-privileges`, and a bounded tmpfs. The healthcheck executes `listmngr status`; no shell or `curl` is installed. PostgreSQL credentials are supplied at runtime and must match the application URL.
+
+The systemd unit creates `/var/lib/listmngr` with `StateDirectory`, fixes its working directory, clears capabilities, and restricts syscalls, address families, devices, kernel interfaces, home access, and host filesystem writes. Operators must validate the unit on their target Linux/systemd version before rollout and relax protections only with documented runtime evidence.
+
+Base images, GitHub Actions, and CI tools are pinned. `Cargo.lock`, `cargo deny`, and `cargo audit` are blocking controls. Pinning reduces unintended drift but does not replace periodic reviewed upgrades.
+
+### Temporary audit exception
+
+`Cargo.lock` contains `rsa 0.9.10` through SQLx's disabled MySQL dependency graph. RUSTSEC-2023-0071 has no fixed release, while `cargo tree --locked --target all -i rsa` returns no active dependency path for this PostgreSQL/SQLite build. CI therefore runs `cargo audit --ignore RUSTSEC-2023-0071` with an inline explanation; all other advisories remain blocking, and `cargo deny check` evaluates the active graph without this exception. Remove the exception when SQLx no longer records the edge or a fixed `rsa` is available.
+
+## Secret handling
+
+- Do not put production secrets in `.env.example`, Compose YAML, command lines, issue reports, logs, or screenshots.
+- `.env` is ignored from Docker context and must remain untracked.
+- Prefer `database.url_file` or `/etc/listmngr/listmngr.env` with root ownership and mode `0600`.
+- Rotate any credential suspected of exposure; redact it before attaching diagnostics.
+
+## Vulnerability reporting
+
+Please use the repository's **private security advisory** form:
+
+<https://github.com/pierreneter/listmngr/security/advisories/new>
+
+Do not file public exploit details. Include the affected version/commit, minimal reproduction, impact, environment, and any suggested remediation. Do not include live credentials or personal subscriber data. Response timing depends on maintainer availability; no fixed SLA is promised while the project is unreleased. The machine-readable policy is at [`../security.txt`](../security.txt).
