@@ -9,7 +9,16 @@ fn canonical_schema(mut lines: Vec<String>) -> String {
 }
 
 fn expected_phase_one_schema() -> String {
-    canonical_schema(PHASE_ONE_SCHEMA.lines().map(str::to_owned).collect())
+    // Preserve the frozen Phase 1 corpus; additive migrations have their own corpus.
+    canonical_schema(
+        PHASE_ONE_SCHEMA
+            .lines()
+            .chain(include_str!("fixtures/phase2-queue-schema.snapshot").lines())
+            .chain(include_str!("fixtures/phase2-mail-policy-schema.snapshot").lines())
+            .chain(include_str!("fixtures/phase2-delivery-attempt-schema.snapshot").lines())
+            .map(str::to_owned)
+            .collect(),
+    )
 }
 
 async fn sqlite_semantic_schema(db: &Database) -> String {

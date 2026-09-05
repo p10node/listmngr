@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod errors;
+mod queue;
 mod status;
 
 use anyhow::{Context, Result, bail};
@@ -47,6 +48,11 @@ enum Command {
     Token {
         #[command(subcommand)]
         command: TokenCommand,
+    },
+    /// Durable queue operations; does not start delivery workers.
+    Queue {
+        #[command(subcommand)]
+        command: queue::Command,
     },
 }
 #[derive(Debug, Subcommand)]
@@ -256,6 +262,31 @@ fn print_config(config: &Config, key: Option<&str>) -> Result<()> {
     }
     Ok(())
 }
+/// Waits for `SIGTERM` (or Ctrl+C) and then signals graceful shutdown: axum
+/// stops accepting new connections and the mail role (if any) stops
+/// accepting new work and claiming new queue jobs.
+async fn shutdown_signal(tx: tokio::sync::watch::Sender<bool>) {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        let Ok(mut signal) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        else {
+            return;
+        };
+        signal.recv().await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
+    tracing::info!("shutdown signal received");
+    let _ = tx.send(true);
+}
 async fn run_database(command: Command, config: Config) -> Result<()> {
     let db = Database::connect_with_security(
         &config.database.url,
@@ -269,33 +300,79 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
             println!("migrations applied");
         }
 
-        Command::Serve => {
-            db.migrate().await.context(errors::MigrationFailure)?;
-            let address: std::net::SocketAddr = config
-                .web
-                .listen
-                .parse()
-                .map_err(|_| listmngr_core::Error::Validation("invalid web.listen".into()))?;
-            let listener = tokio::net::TcpListener::bind(address).await?;
-            tracing::info!(%address,"HTTP server listening");
-            axum::serve(
-                listener,
-                listmngr_api::router(db, config)
-                    .into_make_service_with_connect_info::<std::net::SocketAddr>(),
-            )
-            .await?;
-        }
+        Command::Serve => serve_database(db, config).await?,
         Command::Domains { command } => domains(&db, command).await?,
         Command::Lists { command } => lists(&db, command).await?,
         Command::Members { command } => members(&db, command).await?,
         Command::User { command } => users(&db, command).await?,
         Command::Token { command } => tokens(&db, command).await?,
+        Command::Queue { command } => queue::run(&db, command).await?,
         Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
             bail!("command does not use database")
         }
     }
     Ok(())
 }
+async fn serve_database(db: Database, config: Config) -> Result<()> {
+    db.migrate().await.context(errors::MigrationFailure)?;
+    let address: std::net::SocketAddr = config
+        .web
+        .listen
+        .parse()
+        .map_err(|_| listmngr_core::Error::Validation("invalid web.listen".into()))?;
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    tracing::info!(%address,"HTTP server listening");
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    // The mail role is opt-in (`mta.enabled`, fail-closed-validated at
+    // config load) and binds its LMTP socket synchronously here, so a
+    // bind failure aborts startup instead of dying silently in the
+    // background after the HTTP server already reports healthy.
+    let mail_role = if config.mta.enabled {
+        let role = listmngr_runners::MailRoleConfig::from_core(&config)?;
+        let lmtp_listener = listmngr_runners::bind_lmtp(&role).await?;
+        let mail_db = db.clone();
+        let mail_config = config.clone();
+        let mail_shutdown = shutdown_rx.clone();
+        Some(tokio::spawn(async move {
+            listmngr_runners::serve_mail_role(
+                mail_db,
+                mail_config,
+                role,
+                lmtp_listener,
+                mail_shutdown,
+            )
+            .await
+        }))
+    } else {
+        None
+    };
+    let http = std::future::IntoFuture::into_future(
+        axum::serve(
+            listener,
+            listmngr_api::router(db, config)
+                .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown_signal(shutdown_tx.clone())),
+    );
+    tokio::pin!(http);
+    if let Some(mut task) = mail_role {
+        tokio::select! {
+            result = &mut http => {
+                let _ = shutdown_tx.send(true);
+                task.await.context("mail role task panicked")??;
+                result?;
+            }
+            result = &mut task => {
+                let _ = shutdown_tx.send(true);
+                result.context("mail role task panicked")??;
+            }
+        }
+    } else {
+        http.await?;
+    }
+    Ok(())
+}
+
 async fn domains(db: &Database, command: DomainCommand) -> Result<()> {
     match command {
         DomainCommand::Add { host, description } => println!(

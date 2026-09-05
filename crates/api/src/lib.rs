@@ -305,6 +305,10 @@ impl utoipa::Modify for SecurityAddon {
         list_templates,
         roster,
         list_member,
+        list_held,
+        list_held_count,
+        list_held_get,
+        list_held_moderate,
         members_create,
         members_mass,
         members_find,
@@ -353,7 +357,8 @@ impl utoipa::Modify for SecurityAddon {
         Preferences, listmngr_core::Domain, listmngr_core::MailingList, listmngr_core::Member,
         listmngr_core::User, listmngr_core::Address, listmngr_db::NewUser,
         listmngr_db::NewList, listmngr_db::NewMember, listmngr_db::MemberMassResult,
-        listmngr_db::Template
+        listmngr_db::Template,
+        HeldMessageResponse, HeldMessagePageResponse, CountResponse, ModerateInput
     )),
     modifiers(&SecurityAddon)
 )]
@@ -589,6 +594,12 @@ fn phase_one_routes() -> Router<AppState> {
         .route("/lists/{id}/templates", get(list_templates))
         .route("/lists/{id}/roster/{role}", get(roster))
         .route("/lists/{id}/member/{email}", get(list_member))
+        .route("/lists/{id}/held", get(list_held))
+        .route("/lists/{id}/held/count", get(list_held_count))
+        .route(
+            "/lists/{id}/held/{held_id}",
+            get(list_held_get).post(list_held_moderate),
+        )
         .route("/members", post(members_create))
         .route("/members/mass", post(members_mass))
         .route("/members/find", post(members_find))
@@ -1419,7 +1430,7 @@ async fn lists_get(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    let id: ListId = id.parse()?;
+    let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
     Ok(Json(list_value(s.flavor, &s.db.lists().get(&id).await?)))
 }
@@ -1960,6 +1971,221 @@ async fn list_member(
         .find(|member| member.list_id == id)
         .ok_or(ApiError(Error::NotFound(email)))?;
     Ok(Json(member_value(&s, member).await?))
+}
+
+const HELD_OUT_MAX_ATTEMPTS: i64 = 8;
+
+/// Held-message wire shape for `mailmanclient`'s `HeldMessage`.
+///
+/// Fields: `hold_date`, `message_id`, `msg`, `reason`, `request_id`,
+/// `self_link`, `sender`, `subject`, `type`. Documented separately since the
+/// flavor-specific runtime JSON is built by hand (see `held_entry_value`),
+/// like `list_value`.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct HeldMessageResponse {
+    pub hold_date: String,
+    pub message_id: String,
+    pub msg: String,
+    pub reason: String,
+    pub request_id: String,
+    pub self_link: String,
+    pub sender: String,
+    pub subject: String,
+    pub r#type: String,
+}
+page_response!(HeldMessagePageResponse, HeldMessageResponse);
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+struct CountResponse {
+    count: usize,
+}
+
+/// Recipients a currently-held message would deliver to on accept: enabled,
+/// regular-delivery members honoring `receive_own_postings`. Mirrors
+/// `listmngr_runners::resolve_recipients`; both call the same pure
+/// `listmngr_pipeline::policy::select_recipients` and must stay in sync, but
+/// each crate resolves its own DB candidates (the API crate does not, and
+/// should not, depend on the runners crate).
+async fn resolve_held_recipients(
+    s: &AppState,
+    list_id: &ListId,
+    sender_email: &str,
+) -> ApiResult<Vec<String>> {
+    let members = s.db.members().roster(list_id, MemberRole::Member).await?;
+    let mut candidates = Vec::with_capacity(members.len());
+    for member in &members {
+        let address = s.db.addresses().get_by_id(member.address_id).await?;
+        let preferences = s.db.preferences().resolve_member(member.id, "en").await?;
+        candidates.push(listmngr_pipeline::CandidateRecipient {
+            email: address.email,
+            delivery_status: preferences
+                .delivery_status
+                .unwrap_or(DeliveryStatus::Enabled),
+            delivery_mode: preferences.delivery_mode.unwrap_or(DeliveryMode::Regular),
+            receive_own_postings: preferences.receive_own_postings.unwrap_or(true),
+        });
+    }
+    Ok(listmngr_pipeline::select_recipients(
+        &candidates,
+        sender_email,
+    ))
+}
+
+async fn held_entry_value(
+    s: &AppState,
+    list: &listmngr_core::MailingList,
+    held: &listmngr_db::moderation::HeldMessage,
+) -> ApiResult<Value> {
+    let message = s.db.mail_queue().message(held.message_id).await?;
+    let hold_date = chrono::DateTime::from_timestamp_millis(held.hold_date)
+        .map(|value| value.to_rfc3339())
+        .unwrap_or_default();
+    let prefix = match s.flavor {
+        ApiFlavor::Compat31 => "/3.1",
+        ApiFlavor::V1 => "/api/v1",
+    };
+    Ok(json!({
+        "hold_date": hold_date,
+        "message_id": message.external_id,
+        // A lossy UTF-8 preview of the exact stored bytes; the database
+        // (`mail_queue().message`) keeps the authoritative exact bytes.
+        "msg": String::from_utf8_lossy(&message.raw),
+        "reason": held.reason,
+        "request_id": held.id.0.to_string(),
+        "self_link": format!("{prefix}/lists/{}/held/{}", list.id, held.id.0),
+        "sender": held.sender,
+        "subject": held.subject,
+        "type": "held_message",
+    }))
+}
+
+fn parse_held_id(value: &str) -> ApiResult<listmngr_db::moderation::HeldId> {
+    value
+        .parse::<uuid::Uuid>()
+        .map(listmngr_db::moderation::HeldId)
+        .map_err(|_| ApiError(Error::Validation("held message id".into())))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/lists/{id}/held",
+    params(PageQuery, ("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = HeldMessagePageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+async fn list_held(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(page_query): Query<PageQuery>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<Json<Value>> {
+    let id = parse_list_path(s.flavor, &id)?;
+    authorize_list(&s, &h, peer(c), "moderation", &id).await?;
+    let list = s.db.lists().get(&id).await?;
+    let held = s.db.moderation().list_pending(&id).await?;
+    let mut entries = Vec::with_capacity(held.len());
+    for item in &held {
+        entries.push(held_entry_value(&s, &list, item).await?);
+    }
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
+}
+#[utoipa::path(
+    get,
+    path = "/api/v1/lists/{id}/held/count",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = CountResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+async fn list_held_count(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<Json<Value>> {
+    let id = parse_list_path(s.flavor, &id)?;
+    authorize_list(&s, &h, peer(c), "moderation", &id).await?;
+    let held = s.db.moderation().list_pending(&id).await?;
+    Ok(Json(json!({ "count": held.len() })))
+}
+#[utoipa::path(
+    get,
+    path = "/api/v1/lists/{id}/held/{held_id}",
+    params(("id" = String, Path, description = "id path parameter"), ("held_id" = String, Path, description = "held_id path parameter")),
+    responses((status = 200, description = "Successful operation", body = HeldMessageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+async fn list_held_get(
+    State(s): State<AppState>,
+    Path((id, held_id)): Path<(String, String)>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<Json<Value>> {
+    let id = parse_list_path(s.flavor, &id)?;
+    authorize_list(&s, &h, peer(c), "moderation", &id).await?;
+    let held = s.db.moderation().get(parse_held_id(&held_id)?).await?;
+    if held.list_id != id {
+        return Err(ApiError(Error::NotFound("held message".into())));
+    }
+    let list = s.db.lists().get(&id).await?;
+    Ok(Json(held_entry_value(&s, &list, &held).await?))
+}
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ModerateInput {
+    action: String,
+    comment: Option<String>,
+}
+#[utoipa::path(
+    post,
+    path = "/api/v1/lists/{id}/held/{held_id}",
+    params(("id" = String, Path, description = "id path parameter"), ("held_id" = String, Path, description = "held_id path parameter")),
+    request_body(content((ModerateInput = "application/json"), (ModerateInput = "application/x-www-form-urlencoded"))),
+    responses((status = 204, description = "Deleted"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+async fn list_held_moderate(
+    State(s): State<AppState>,
+    Path((id, held_id)): Path<(String, String)>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    JsonOrForm(v): JsonOrForm<ModerateInput>,
+) -> ApiResult<StatusCode> {
+    use listmngr_db::moderation::ReviewAction;
+    let id = parse_list_path(s.flavor, &id)?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "moderation", &id).await?;
+    let held_id = parse_held_id(&held_id)?;
+    let held = s.db.moderation().get(held_id).await?;
+    if held.list_id != id {
+        return Err(ApiError(Error::NotFound("held message".into())));
+    }
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let reason = v.comment.unwrap_or_default();
+    let action = match v.action.as_str() {
+        "accept" => ReviewAction::Accept(listmngr_db::mail_queue::ChildJob {
+            queue: listmngr_db::mail_queue::Queue::Out,
+            max_attempts: HELD_OUT_MAX_ATTEMPTS,
+            recipients: resolve_held_recipients(&s, &id, &held.sender).await?,
+        }),
+        "reject" => ReviewAction::Reject,
+        "discard" => ReviewAction::Discard,
+        "defer" => ReviewAction::Defer,
+        other => {
+            return Err(ApiError(Error::Validation(format!(
+                "moderation action {other:?} is not implemented"
+            ))));
+        }
+    };
+    s.db.moderation()
+        .review(
+            held_id,
+            &audit_context(&auth, addr),
+            &action,
+            &reason,
+            now_ms,
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(
     get,

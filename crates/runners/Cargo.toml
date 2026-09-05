@@ -13,3 +13,17 @@ workspace = true
 
 [dependencies]
 listmngr-core = { path = "../core", version = "0.1.0" }
+listmngr-db = { path = "../db", version = "0.1.0" }
+listmngr-mail = { path = "../mail", version = "0.1.0" }
+listmngr-pipeline = { path = "../pipeline", version = "0.1.0" }
+chrono.workspace = true
+sqlx = { workspace = true, features = ["any"] }
+tokio = { workspace = true, features = ["io-util", "time", "sync", "signal", "net", "rt"] }
+tracing.workspace = true
+uuid.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "time", "sync", "signal", "net", "rt", "test-util"] }
+tempfile = "3.23.0"

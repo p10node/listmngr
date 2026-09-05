@@ -572,6 +572,11 @@ impl Config {
         if let Some(spec) = &config.security.rate_limit.api_pre_auth {
             validate_rate_limit("api_pre_auth", spec)?;
         }
+        if config.mta.enabled && config.mta.smtp_tls != "plaintext_trusted_relay" {
+            return Err(Error::Validation(
+                "mta.smtp_tls must be \"plaintext_trusted_relay\" (the only implemented mode) to enable mta.enabled; TLS is not implemented and will not be silently downgraded".into(),
+            ));
+        }
         Ok(config)
     }
 
@@ -630,12 +635,23 @@ config_struct!(MessageStoreConfig {
     backend: String = "fs".into(),
     path: String = "data/messages".into()
 });
+// `enabled` is the master opt-in switch for the whole mail role (LMTP +
+// processing + outbound); the safe default is off. `smtp_tls` only accepts
+// `"plaintext_trusted_relay"` when `enabled` is true: that is the sole
+// implemented mode (explicit, unencrypted, local/trusted relay only). Any
+// other value is a request for a guarantee (opportunistic/required TLS) this
+// runtime cannot provide; `Config::load` fails closed instead of silently
+// sending in plaintext.
 config_struct!(MtaConfig {
+    enabled: bool = false,
+    local_hostname: String = "listmngr.invalid".into(),
     incoming: String = "none".into(),
     lmtp_listen: String = "127.0.0.1:8024".into(),
     smtp_relay: String = "127.0.0.1:25".into(),
     smtp_tls: String = "opportunistic".into(),
     max_recipients: u32 = 500,
+    max_message_bytes: u32 = 10_485_760,
+    command_timeout_secs: u32 = 30,
     postfix_map_dir: String = "data/postfix".into(),
     verp_delimiter: String = "+".into(),
     verp_format: String = "{bounces}+{local}={domain}".into()

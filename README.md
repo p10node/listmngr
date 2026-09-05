@@ -1,6 +1,8 @@
 # listmngr
 
-`listmngr` is a security-focused mailing-list manager written in Rust. The current package version is **0.1.0 (unreleased development)** and is licensed **AGPL-3.0-or-later**. Phase 1 is implemented and locally verified by the PostgreSQL, SQLite, CLI, REST, preference-layering, and `mailmanclient==3.3.5` checks recorded in [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md). This is not a release or a claim that later roadmap phases are complete; the Phase 2 mail path is not implemented.
+`listmngr` is a security-focused mailing-list manager written in Rust, version **0.1.0 (unreleased development)**, licensed **AGPL-3.0-or-later**. Phase 1 has recorded local acceptance evidence. The current development checkpoint adds a **bounded, opt-in plaintext trusted-relay LMTP → held moderation → SMTP path**, durable queue attempts and conservative uncertainty quarantine through migration `0004_delivery_attempt_token.sql`.
+
+**This is not production-ready, full Phase 2 acceptance, or a Mailman replacement.** R1 (partial LMTP batch commit on timeout) and O1 (lease clock across database lock waits) remain open P1 findings. Current locked workspace tests/build/Clippy passed as reported by the parent verifier; the current PostgreSQL attempt gate timed out and has **no PASS**. Earlier PostgreSQL and pinned-client passes predate migration 0004. See [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md) for the evidence boundary; [`docs/PLAN.md`](docs/PLAN.md) remains the normative product target.
 
 ## Prerequisites
 
@@ -114,6 +116,82 @@ validate and normalize complete email addresses, including IDNA domains.
 Runtime errors emit a stable `error[CLI-…]` category and a correlation UUID,
 without raw error chains, input values, or database credentials. Usage errors are
 also redacted; use `--help` for command syntax.
+
+## Durable queue tools (Phase 2 foundation)
+
+Run `listmngr migrate` before using the queue commands. Intake currently stores
+the original bytes in the database and atomically creates a submission, an inbound
+job, and an audit event. The injection command itself does not send mail or start a listener; an independently running enabled mail role can consume the job.
+
+```sh
+listmngr queue inject dev.example.com ./message.eml --sender alice@example.com
+listmngr queue ls --queue in
+listmngr queue show JOB_UUID
+# Raw mail is only emitted when explicitly requested. Protect the exported file.
+listmngr queue show JOB_UUID --raw > /protected/path/message.eml
+```
+
+Injection requires an existing list, a valid envelope sender, and one supported
+`Message-ID` header. The intake bound is 10 MiB. Metadata parsing currently accepts
+modern dot-atom Message-IDs, not the full obsolete RFC syntax. Duplicate
+Message-IDs do not discard distinct submissions or overwrite their bodies.
+Queue listing returns at most 1,000 records in ID order, including retained jobs.
+The hash in submission routing metadata is the Mailman archive identifier;
+blob identity separately uses SHA-256 of the exact raw bytes.
+
+An opt-in mail role is now wired into `serve` when `mta.enabled` is true.
+Keep deployment MTA snippets disabled while the remaining acceptance and
+operational review obligations are open. The standalone filesystem-store library is not selected by
+CLI intake; filesystem/DB lifecycle and garbage collection integration remain
+future work. See the Phase 2 evidence boundary in `docs/FEATURE_PARITY.md`.
+
+## Experimental mail role and held-message REST
+
+The mail role is disabled by default. Enabling `mta.enabled` also requires
+`mta.smtp_tls = "plaintext_trusted_relay"`; unsupported TLS modes fail configuration
+validation rather than silently downgrading. Use only an isolated development
+fixture or a trusted, restricted relay network. Mail transport TLS and SMTP AUTH
+are not implemented. Keep the deployment MTA snippets disabled pending acceptance
+and operational review.
+
+`serve` connects the LMTP session library, durable database intake, pure inbound
+posting policy, and inbound/outbound workers with lease renewal and shutdown
+supervision. Held REST under `/api/v1` and `/3.1` supports read/count and
+accept/reject/discard/defer with authorization, pending-state fencing, persisted
+comments, and transactional user/token/peer-IP audit attribution. Unsupported
+forwarding fields/actions fail closed. Reject records a disposition; it does not
+send a rejection notice or bounce.
+
+Before SMTP commands, `begin_delivery` commits selected recipients as
+ambiguous/in-flight with an owning attempt token and `queue.delivery_begin` audit.
+TCP connection establishment may precede that commit. `finish_delivery` resolves
+owned reservations and finalizes the job atomically. Known transient results
+restore pending/retry; omitted reserved results, cancellation, or outcome/audit
+rollback leave uncertainty quarantined and excluded from automatic retry. Missing
+*unreserved* outcomes remain pending. A done job is not proof that all recipients
+were sent mail. Even never-sent attempts can require manual reconciliation; no
+operator resolution command/UI or exactly-once SMTP guarantee is provided. The
+SMTP client returns the final DATA result without waiting for QUIT.
+
+Focused SQLite real-TCP sink, failed-audit, cancellation, pool-reopen/reclaim, and
+mixed-outcome tests cover this bounded O2/O3 repair. Full current PostgreSQL
+verification remains blocked by the attempt-gate timeout, and R1/O1 remain open.
+No DKIM/DMARC/ARC, bounce processing, digests, subscription workflows, archive,
+administration UI, or Mailman migration is claimed.
+
+The pinned client harness runs both Phase 1 and real LMTP nonmember → held REST
+→ SMTP flows against a disposable SQLite-backed binary. The parent reran this
+gate successfully on the migration-0004 candidate before committing; this does
+not close PostgreSQL acceptance or R1/O1. To rerun after the locked build:
+
+```sh
+uv run --with-requirements tests/compat/requirements-mailmanclient.txt python scripts/test-mailmanclient.py
+```
+
+The maintained helper is `scripts/mailmanclient_held.py`. The harness checks held
+count/list/get/properties/raw preview, defer comments, scope denial, unsupported
+options, accept/replay with one sink delivery, and reject/discard without delivery.
+These are bounded fixture assertions, not full Mailman compatibility.
 
 ## Configuration and deployment
 

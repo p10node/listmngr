@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the pinned real client against an isolated, disposable Phase 1 server.
+"""Run the pinned real client against an isolated Phase 1 + bounded held server.
 
 Build the binary first and install tests/compat/requirements-mailmanclient.txt.
 No development configuration, database, or credentials are consumed.
@@ -17,6 +17,8 @@ import urllib.error
 import urllib.request
 
 
+from mailmanclient_held import mail_role, run_held
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -26,7 +28,7 @@ def main():
         raise SystemExit("Build first: cargo build --locked --workspace")
     env = {key: value for key, value in os.environ.items() if not key.startswith("LISTMNGR")}
     env["RUST_LOG"] = "warn"
-    with tempfile.TemporaryDirectory(prefix="listmngr-compat-") as directory:
+    with tempfile.TemporaryDirectory(prefix="listmngr-compat-") as directory, mail_role(env) as (lmtp_port, sink):
         env["LISTMNGR__DATABASE__URL"] = f"sqlite://{directory}/compat.sqlite?mode=rwc"
         env["LISTMNGR__API__COMPAT_BASIC_AUTH"] = "true"
         with socket.socket() as reservation:
@@ -79,6 +81,8 @@ def main():
             )
             if result.returncode:
                 raise RuntimeError(f"real-client gate failed (exit {result.returncode})")
+            run_held(client_env["LISTMNGR_COMPAT_URL"], token, cli, user["id"],
+                     directory, lmtp_port, sink)
         finally:
             server.terminate()
             try:
