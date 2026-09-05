@@ -2,6 +2,9 @@
 
 //! Portable PostgreSQL/SQLite repositories for the Phase 1 model.
 
+pub mod mail_queue;
+pub mod moderation;
+
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,

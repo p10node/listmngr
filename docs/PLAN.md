@@ -3,7 +3,32 @@
 > Mailman 3 alternative (Core + Postorius + HyperKitty + mailman-web + django-mailman3 + mailmanclient) viết bằng Rust.
 > Single binary, feature parity, UI hiện đại, security-first.
 
-Trạng thái: đang triển khai 2026-09-04. Manifest và `Cargo.lock` là nguồn sự thật cho version dependency khả dụng; xem ADR-0003.
+## Implementation status — development checkpoint (2026-09-06)
+
+This document is the **normative product contract and future roadmap**, not an
+inventory of delivered features. Its original requirements, examples, phase
+checkboxes, and acceptance criteria below remain intact; planned commands/config,
+schema sketches, full parity, and security guarantees are not current runtime
+instructions. Use README/ARCHITECTURE for the implemented surface and
+[FEATURE_PARITY.md](FEATURE_PARITY.md) for revision-specific evidence. Dependency
+manifests and `Cargo.lock` are authoritative for installed versions (ADR-0003).
+
+The actual implementation is Phase 1 plus a bounded, opt-in **plaintext trusted-
+relay LMTP → held moderation → SMTP** path with database intake, durable queue
+attempts and uncertainty quarantine through migration `0004_delivery_attempt_token.sql`.
+Parent verification reports current locked workspace tests/build/Clippy passing.
+The current PostgreSQL attempt gate timed out: **no current PostgreSQL PASS**.
+Earlier PostgreSQL passes predate 0004 and remain historical evidence only.
+The parent independently reran pinned `mailmanclient==3.3.5` Phase 1 + held
+successfully on the current SQLite-backed candidate before committing.
+
+**R1 (partial LMTP batch commit on timeout) and O1 (lease clock after database
+lock waits) remain OPEN P1 findings.** The bounded O2/O3 repair does not close
+them. This is a development checkpoint, not production readiness, full Phase 2,
+or a Mailman replacement. Transport TLS/SMTP AUTH, DKIM/DMARC/ARC, bounces,
+digests, workflows, archive, administration UI, and migration remain outside the
+implemented mail slice. No additional feature implementation is implied by this
+checkpoint. The original normative contract follows in its existing language.
 
 ## 0. Tóm tắt 1 phút
 
@@ -757,6 +782,18 @@ Mục tiêu: tạo domain/list/user/member qua REST + CLI; `mailmanclient` subse
 ### Phase 2 — Mail path (L)
 
 Mục tiêu: gửi thư vào list → member nhận; hold/accept qua REST.
+
+Current bounded status (not completion of the checkboxes below): database raw
+intake, claim/lease/retry/shunt, standalone filesystem storage, CLI
+`queue inject/show/ls`, heartbeat, repository `unshunt`, atomic child handoff,
+opt-in supervisor and LMTP/inbound/outbound workers, held REST, and durable
+attempt quarantine are implemented. CLI `queue unshunt`, selectable filesystem
+intake and lifecycle/GC are not implemented. The current mail role requires
+`mta.enabled` and `mta.smtp_tls = "plaintext_trusted_relay"`; it does not implement
+the target TLS/authentication configuration shown earlier. R1 and O1 remain OPEN
+P1s; the current PostgreSQL attempt gate timed out. Full Phase 2 requirements and
+acceptance below remain unchanged and open. See `FEATURE_PARITY.md` for
+P2-STORE/P2-QUEUE/P2-CLI/P2-RUNTIME, held, and O2/O3 evidence.
 
 - [ ] Message store (fs, db) + `messages` index + `Message-ID-Hash`
 - [ ] Queue (`queue_jobs`) + claim/backoff/shunt + runner supervisor + graceful shutdown

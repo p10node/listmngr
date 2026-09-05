@@ -36,6 +36,16 @@ cargo test --locked -p listmngr-db --test schema_contract \
   live_postgres_matches_the_exact_sqlite_semantic_corpus -- --ignored --exact
 cargo test --locked -p listmngr-api --test postgres_auth \
   postgres_scoped_user_routes_allow_inside_and_deny_outside_bounds -- --ignored --exact
+cargo test --locked -p listmngr-db --test mail_queue \
+  postgres_isolated_mail_queue_contract -- --ignored --exact
+cargo test --locked -p listmngr-db --test mail_queue_runtime \
+  postgres_isolated_heartbeat_deadline_is_monotonic -- --ignored --exact
+cargo test --locked -p listmngr-db --test mail_queue_runtime \
+  postgres_isolated_finish_delivery_is_fenced_and_quarantines_ambiguous -- --ignored --exact
+cargo test --locked -p listmngr-api --test held \
+  postgres_isolated_held_review_contract -- --ignored --exact
+cargo test --locked -p listmngr-runners --lib \
+  outbound::durability_tests::postgres_isolated_audit_failure_restart_never_replays_data -- --ignored --exact
 run domains add "$domain" --description 'Phase 0 PostgreSQL CI contract'
 run lists create "$list" --display-name 'Phase 0 CI contract'
 run domains ls | grep -F "$domain" >/dev/null

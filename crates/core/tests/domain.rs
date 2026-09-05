@@ -75,6 +75,40 @@ fn secret_file_permissions_fail_closed_without_disclosing_path_or_value() {
 }
 
 #[test]
+fn enabling_mail_role_without_the_explicit_trusted_relay_mode_fails_closed() {
+    for smtp_tls in ["opportunistic", "required", "none", ""] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("listmngr.toml");
+        std::fs::write(
+            &path,
+            format!("[mta]\nenabled = true\nsmtp_tls = {smtp_tls:?}\n"),
+        )
+        .unwrap();
+        let error = Config::load(Some(&path)).unwrap_err().to_string();
+        assert!(
+            error.contains("plaintext_trusted_relay"),
+            "smtp_tls={smtp_tls:?} must fail closed, got: {error}"
+        );
+    }
+    // The explicit, honestly-scoped mode is accepted.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    std::fs::write(
+        &path,
+        "[mta]\nenabled = true\nsmtp_tls = \"plaintext_trusted_relay\"\n",
+    )
+    .unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    assert!(config.mta.enabled);
+    // Disabled mail role never validates smtp_tls: existing web-only configs
+    // and tests must not start failing because of an unrelated default.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    std::fs::write(&path, "[site]\nname = \"web only\"\n").unwrap();
+    assert!(!Config::load(Some(&path)).unwrap().mta.enabled);
+}
+
+#[test]
 fn config_rejects_invalid_api_rate_limits() {
     for (key, spec) in [
         ("api", ""),

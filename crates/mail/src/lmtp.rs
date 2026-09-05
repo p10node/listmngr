@@ -1,0 +1,584 @@
+//! A real RFC 2033 LMTP session state machine over any async byte stream.
+//!
+//! This module only implements the protocol; binding a socket, applying
+//! posting policy, and durable intake are the caller's responsibility via
+//! [`LmtpHandler`]. No relaying, no unauthenticated capability claims: only
+//! the commands and extensions actually honored here are advertised.
+use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+use std::time::Duration;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::time::Instant;
+
+/// Maximum bytes in one command or data line, including its terminator.
+pub const MAX_LINE_BYTES: usize = 8192;
+
+/// Outcome of one accepted recipient's durable intake, reported as its own
+/// LMTP reply after `DATA` completes.
+///
+/// `code` must be a real 2xx/4xx/5xx SMTP reply code (e.g. `250` delivered,
+/// `451` temporary storage failure, `550` permanently invalid) so a temporary
+/// failure is retried by the peer instead of treated as a permanent bounce.
+#[derive(Debug, Clone)]
+pub struct RecipientOutcome {
+    pub code: u16,
+    /// Enhanced-status-free reply text; must never include secrets or raw error chains.
+    pub detail: String,
+}
+
+impl RecipientOutcome {
+    #[must_use]
+    pub const fn is_success(&self) -> bool {
+        self.code / 100 == 2
+    }
+}
+
+/// Caller-supplied policy and durable-intake hooks for one LMTP session.
+///
+/// Implementations must keep `deliver` fast: policy evaluation and delivery
+/// happen asynchronously afterward via the durable `in` queue, not here.
+pub trait LmtpHandler: Send {
+    fn local_hostname(&self) -> &str;
+    fn max_message_bytes(&self) -> usize;
+    fn max_recipients(&self) -> usize;
+    fn command_timeout(&self) -> Duration;
+    /// Validate and resolve one `RCPT TO` address. `Err` becomes a 550 reply
+    /// with the given (non-secret) reason; never route to relay or an unknown/
+    /// unsupported command address.
+    fn accept_recipient(
+        &mut self,
+        address: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
+    /// Durably store the exact message bytes for every previously accepted
+    /// recipient of this transaction, returning one outcome per recipient in
+    /// the same order. Must complete (or fail) before any 250 is sent.
+    fn deliver(
+        &mut self,
+        mail_from: Option<&str>,
+        recipients: &[String],
+        data: &[u8],
+    ) -> impl Future<Output = Vec<RecipientOutcome>> + Send;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    Init,
+    Greeted,
+    MailFrom,
+    RcptTo,
+}
+
+/// One `MAIL FROM`/`RCPT TO` path: absent (`<>`, a null reverse path) or an address.
+enum Path {
+    Null,
+    Address(String),
+}
+
+struct Session {
+    state: State,
+    mail_from: Path,
+    have_mail_from: bool,
+    recipients: Vec<String>,
+}
+
+impl Session {
+    const fn new() -> Self {
+        Self {
+            state: State::Init,
+            mail_from: Path::Null,
+            have_mail_from: false,
+            recipients: Vec::new(),
+        }
+    }
+
+    fn reset_transaction(&mut self) {
+        self.have_mail_from = false;
+        self.mail_from = Path::Null;
+        self.recipients.clear();
+    }
+
+    const fn mail_from_str(&self) -> Option<&str> {
+        match &self.mail_from {
+            Path::Null => None,
+            Path::Address(address) => Some(address.as_str()),
+        }
+    }
+}
+
+/// Read one line, bounded by both a byte cap and a fixed deadline (not reset
+/// per chunk, so a slow-but-steady drip cannot hold the connection open past
+/// `deadline` regardless of how it paces its bytes). Returns `Ok(None)` only
+/// on a clean EOF with no partial line pending.
+async fn read_capped_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    cap: usize,
+    deadline: Instant,
+) -> IoResult<Option<Vec<u8>>> {
+    let mut out = Vec::new();
+    loop {
+        let buf = tokio::time::timeout_at(deadline, reader.fill_buf())
+            .await
+            .map_err(|_| IoError::new(ErrorKind::TimedOut, "session deadline exceeded"))??;
+        if buf.is_empty() {
+            return Ok(if out.is_empty() { None } else { Some(out) });
+        }
+        if let Some(position) = buf.iter().position(|byte| *byte == b'\n') {
+            out.extend_from_slice(&buf[..=position]);
+            reader.consume(position + 1);
+            if out.len() > cap {
+                return Err(IoError::new(ErrorKind::InvalidData, "line too long"));
+            }
+            return Ok(Some(out));
+        }
+        let consumed = buf.len();
+        out.extend_from_slice(buf);
+        reader.consume(consumed);
+        if out.len() > cap {
+            return Err(IoError::new(ErrorKind::InvalidData, "line too long"));
+        }
+    }
+}
+
+fn trim_line(line: &[u8]) -> &[u8] {
+    let line = line.strip_suffix(b"\n").unwrap_or(line);
+    line.strip_suffix(b"\r").unwrap_or(line)
+}
+
+/// Whether `text` already starts with a well-formed `class.N.M ` enhanced
+/// status code (RFC 3463) matching `class`.
+fn has_enhanced_prefix(class: u16, text: &str) -> bool {
+    let Some(rest) = text.strip_prefix(&format!("{class}.")) else {
+        return false;
+    };
+    let Some((subject, rest)) = rest.split_once('.') else {
+        return false;
+    };
+    if subject.is_empty() || !subject.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let Some((detail, after)) = rest.split_once(' ') else {
+        return false;
+    };
+    !detail.is_empty() && detail.bytes().all(|b| b.is_ascii_digit()) && !after.is_empty()
+}
+
+/// Prepend a default `class.0.0` enhanced status code (RFC 2034/3463) to
+/// `text` unless it already carries one matching `code`'s class. Classes
+/// other than 2/4/5 (e.g. `354`'s class 3) have no enhanced-status
+/// convention and are left untouched.
+fn ensure_enhanced(code: u16, text: &str) -> String {
+    let class = code / 100;
+    if !matches!(class, 2 | 4 | 5) {
+        return text.to_owned();
+    }
+    if has_enhanced_prefix(class, text) {
+        text.to_owned()
+    } else {
+        format!("{class}.0.0 {text}")
+    }
+}
+
+async fn write_with_timeout<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    timeout: Duration,
+    bytes: &[u8],
+) -> IoResult<()> {
+    tokio::time::timeout(timeout, writer.write_all(bytes))
+        .await
+        .map_err(|_| IoError::new(ErrorKind::TimedOut, "LMTP write deadline exceeded"))??;
+    Ok(())
+}
+
+async fn flush_with_timeout<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    timeout: Duration,
+) -> IoResult<()> {
+    tokio::time::timeout(timeout, writer.flush())
+        .await
+        .map_err(|_| IoError::new(ErrorKind::TimedOut, "LMTP flush deadline exceeded"))??;
+    Ok(())
+}
+
+/// Write a reply exactly as given, with no enhanced-status injection. Only
+/// for the `LHLO` capability announcement, whose lines are keywords, not
+/// reply prose.
+///
+/// Bounded by `timeout`, exactly like every read in this module: a peer that
+/// stops reading (backpressure) must not hold the session open forever, not
+/// even while the server is only trying to report a timeout to it.
+async fn reply_raw<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    timeout: Duration,
+    code: u16,
+    lines: &[&str],
+) -> IoResult<()> {
+    let (last, head) = lines
+        .split_last()
+        .expect("reply is always called with a line");
+    for line in head {
+        write_with_timeout(writer, timeout, format!("{code}-{line}\r\n").as_bytes()).await?;
+    }
+    write_with_timeout(writer, timeout, format!("{code} {last}\r\n").as_bytes()).await?;
+    flush_with_timeout(writer, timeout).await
+}
+
+/// Write a reply, ensuring every line carries a valid enhanced status code
+/// (RFC 2034) for its class. Use [`reply_raw`] instead for the `LHLO`
+/// capability lines.
+async fn reply<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    timeout: Duration,
+    code: u16,
+    lines: &[&str],
+) -> IoResult<()> {
+    let owned: Vec<String> = lines
+        .iter()
+        .map(|line| ensure_enhanced(code, line))
+        .collect();
+    let borrowed: Vec<&str> = owned.iter().map(String::as_str).collect();
+    reply_raw(writer, timeout, code, &borrowed).await
+}
+
+/// Parse a `<...>` path. `None` means malformed input (no `Err` variant needed
+/// since callers only report a fixed 501 reply on failure).
+fn parse_path(rest: &str) -> Option<Path> {
+    let rest = rest.trim_start();
+    let open = rest.find('<')?;
+    let close = rest[open..].find('>').map(|i| open + i)?;
+    let inner = &rest[open + 1..close];
+    if inner.is_empty() {
+        Some(Path::Null)
+    } else if inner.contains(char::is_control) || inner.contains(' ') {
+        None
+    } else {
+        Some(Path::Address(inner.to_owned()))
+    }
+}
+
+async fn handle_rset<W: AsyncWrite + Unpin>(
+    session: &mut Session,
+    writer: &mut W,
+    timeout: Duration,
+) -> IoResult<()> {
+    session.reset_transaction();
+    if session.state != State::Init {
+        session.state = State::Greeted;
+    }
+    reply(writer, timeout, 250, &["ok"]).await
+}
+
+async fn handle_mail<W: AsyncWrite + Unpin>(
+    session: &mut Session,
+    writer: &mut W,
+    timeout: Duration,
+    rest: &str,
+) -> IoResult<()> {
+    if session.state == State::Init {
+        return reply(writer, timeout, 503, &["send LHLO first"]).await;
+    }
+    let Some(rest) = rest
+        .strip_prefix("FROM:")
+        .or_else(|| rest.strip_prefix("from:"))
+    else {
+        return reply(writer, timeout, 501, &["malformed MAIL FROM"]).await;
+    };
+    let Some(path) = parse_path(rest) else {
+        return reply(writer, timeout, 501, &["malformed reverse-path"]).await;
+    };
+    session.mail_from = path;
+    session.have_mail_from = true;
+    session.recipients.clear();
+    session.state = State::MailFrom;
+    reply(writer, timeout, 250, &["ok"]).await
+}
+
+async fn handle_rcpt<W: AsyncWrite + Unpin, H: LmtpHandler>(
+    session: &mut Session,
+    handler: &mut H,
+    writer: &mut W,
+    timeout: Duration,
+    rest: &str,
+) -> IoResult<()> {
+    if !session.have_mail_from {
+        return reply(writer, timeout, 503, &["send MAIL FROM first"]).await;
+    }
+    if session.recipients.len() >= handler.max_recipients() {
+        return reply(writer, timeout, 452, &["too many recipients"]).await;
+    }
+    let Some(rest) = rest
+        .strip_prefix("TO:")
+        .or_else(|| rest.strip_prefix("to:"))
+    else {
+        return reply(writer, timeout, 501, &["malformed RCPT TO"]).await;
+    };
+    match parse_path(rest) {
+        Some(Path::Address(address)) => {
+            match tokio::time::timeout(timeout, handler.accept_recipient(&address)).await {
+                Ok(Ok(())) => {
+                    session.recipients.push(address);
+                    session.state = State::RcptTo;
+                    reply(writer, timeout, 250, &["ok"]).await
+                }
+                Ok(Err(reason)) => reply(writer, timeout, 550, &[&reason]).await,
+                // The hook did not finish within the deadline: we genuinely
+                // do not know whether the recipient is valid, so this fails
+                // closed (never added to the transaction) with a transient
+                // reply rather than fabricating an acceptance or a false
+                // permanent rejection.
+                Err(_elapsed) => {
+                    reply(writer, timeout, 451, &["recipient validation timed out"]).await
+                }
+            }
+        }
+        _ => {
+            reply(
+                writer,
+                timeout,
+                501,
+                &["malformed or unsupported forward-path"],
+            )
+            .await
+        }
+    }
+}
+
+enum DataOutcome {
+    Body(Vec<u8>),
+    TooLarge,
+}
+
+async fn read_data<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    cap: usize,
+    deadline: Instant,
+) -> IoResult<DataOutcome> {
+    let mut body = Vec::new();
+    let mut oversized = false;
+    loop {
+        // The same deadline covers every line, including the post-oversize
+        // discard/drain phase: a stalled or endlessly-dripping peer cannot
+        // hold the session (or an unbounded-time drain) open past it.
+        let Some(line) = read_capped_line(reader, MAX_LINE_BYTES, deadline).await? else {
+            return Err(IoError::new(
+                ErrorKind::UnexpectedEof,
+                "connection closed mid-DATA",
+            ));
+        };
+        if line == b".\r\n" || line == b".\n" {
+            break;
+        }
+        let line: &[u8] = if line.starts_with(b"..") {
+            &line[1..]
+        } else {
+            &line
+        };
+        if !oversized {
+            if body.len() + line.len() > cap {
+                oversized = true;
+            } else {
+                body.extend_from_slice(line);
+            }
+        }
+    }
+    Ok(if oversized {
+        DataOutcome::TooLarge
+    } else {
+        DataOutcome::Body(body)
+    })
+}
+
+/// Whether the caller loop should keep reading commands or end the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Continue {
+    Yes,
+    No,
+}
+
+async fn handle_data<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin, H: LmtpHandler>(
+    session: &mut Session,
+    handler: &mut H,
+    reader: &mut R,
+    writer: &mut W,
+    timeout: Duration,
+) -> IoResult<Continue> {
+    if session.state != State::RcptTo {
+        reply(writer, timeout, 503, &["need at least one accepted RCPT"]).await?;
+        return Ok(Continue::Yes);
+    }
+    reply(
+        writer,
+        timeout,
+        354,
+        &["start mail input; end with <CRLF>.<CRLF>"],
+    )
+    .await?;
+    let deadline = Instant::now() + timeout;
+    let outcome = match read_data(reader, handler.max_message_bytes(), deadline).await {
+        Ok(outcome) => outcome,
+        Err(error) if error.kind() == ErrorKind::TimedOut => {
+            reply(
+                writer,
+                timeout,
+                421,
+                &["timed out awaiting message data; closing"],
+            )
+            .await?;
+            return Ok(Continue::No);
+        }
+        Err(error) => return Err(error),
+    };
+    match outcome {
+        DataOutcome::TooLarge => {
+            for _ in 0..session.recipients.len() {
+                reply(writer, timeout, 552, &["message exceeds size limit"]).await?;
+            }
+        }
+        DataOutcome::Body(body) => {
+            match tokio::time::timeout(
+                timeout,
+                handler.deliver(session.mail_from_str(), &session.recipients, &body),
+            )
+            .await
+            {
+                Ok(results) => {
+                    // Exactly one reply per accepted RCPT, in order: never
+                    // fewer (pad with an accounting-error reply) and never
+                    // more (a misbehaving handler returning extra outcomes
+                    // must not desync pipelining by sending replies the peer
+                    // never expected).
+                    for index in 0..session.recipients.len() {
+                        match results.get(index) {
+                            Some(result) => {
+                                reply(writer, timeout, result.code, &[&result.detail]).await?;
+                            }
+                            None => {
+                                reply(
+                                    writer,
+                                    timeout,
+                                    451,
+                                    &["internal delivery accounting error"],
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                }
+                // The durable-intake hook did not finish within the deadline:
+                // whether it already committed for some or all recipients is
+                // genuinely unknown. Never report 250 here (a false
+                // success); a uniform transient reply is the only honest
+                // answer, matching plain SMTP/LMTP's documented inability to
+                // guarantee exactly-once delivery under this kind of
+                // ambiguity.
+                Err(_elapsed) => {
+                    for _ in 0..session.recipients.len() {
+                        reply(
+                            writer,
+                            timeout,
+                            451,
+                            &["delivery outcome unknown; do not resend without checking"],
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+    }
+    session.state = State::Greeted;
+    session.reset_transaction();
+    Ok(Continue::Yes)
+}
+
+/// Drive one LMTP session to completion (`QUIT` or peer disconnect).
+/// # Errors
+/// Returns an I/O error for transport failures; protocol violations (bad
+/// commands, oversize lines) are reported to the peer, not returned here.
+pub async fn serve_session<S, H>(stream: S, handler: &mut H) -> IoResult<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+    H: LmtpHandler,
+{
+    let (read_half, mut writer) = tokio::io::split(stream);
+    let mut reader = tokio::io::BufReader::new(read_half);
+    let timeout = handler.command_timeout();
+    reply(
+        &mut writer,
+        timeout,
+        220,
+        &[&format!("{} listmngr LMTP ready", handler.local_hostname())],
+    )
+    .await?;
+
+    let mut session = Session::new();
+    loop {
+        let timeout = handler.command_timeout();
+        let deadline = Instant::now() + timeout;
+        let line = match read_capped_line(&mut reader, MAX_LINE_BYTES, deadline).await {
+            Ok(Some(line)) => line,
+            Ok(None) => return Ok(()),
+            Err(error) if error.kind() == ErrorKind::InvalidData => {
+                reply(&mut writer, timeout, 500, &["line too long"]).await?;
+                return Ok(());
+            }
+            Err(error) if error.kind() == ErrorKind::TimedOut => {
+                reply(&mut writer, timeout, 421, &["command timeout"]).await?;
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        let text = String::from_utf8_lossy(trim_line(&line)).into_owned();
+        let (verb, rest) = text.split_once(' ').unwrap_or((text.as_str(), ""));
+        match verb.to_ascii_uppercase().as_str() {
+            // RFC 2033 §4.1: an LMTP server MUST NOT implement EHLO/HELO; only LHLO.
+            "LHLO" => {
+                session.state = State::Greeted;
+                session.reset_transaction();
+                reply_raw(
+                    &mut writer,
+                    timeout,
+                    250,
+                    &[
+                        handler.local_hostname(),
+                        "PIPELINING",
+                        &format!("SIZE {}", handler.max_message_bytes()),
+                        "8BITMIME",
+                        "ENHANCEDSTATUSCODES",
+                    ],
+                )
+                .await?;
+            }
+            "EHLO" | "HELO" => {
+                reply(
+                    &mut writer,
+                    timeout,
+                    500,
+                    &["this is LMTP; use LHLO, not EHLO/HELO (RFC 2033 4.1)"],
+                )
+                .await?;
+            }
+            "NOOP" => reply(&mut writer, timeout, 250, &["ok"]).await?,
+            "RSET" => handle_rset(&mut session, &mut writer, timeout).await?,
+            "QUIT" => {
+                reply(&mut writer, timeout, 221, &["bye"]).await?;
+                return Ok(());
+            }
+            "MAIL" => handle_mail(&mut session, &mut writer, timeout, rest).await?,
+            "RCPT" => handle_rcpt(&mut session, handler, &mut writer, timeout, rest).await?,
+            "DATA" => {
+                if handle_data(&mut session, handler, &mut reader, &mut writer, timeout).await?
+                    == Continue::No
+                {
+                    return Ok(());
+                }
+            }
+            _ => {
+                reply(
+                    &mut writer,
+                    timeout,
+                    500,
+                    &["unrecognized or unsupported command"],
+                )
+                .await?;
+            }
+        }
+    }
+}

@@ -17,6 +17,8 @@ http.workspace = true
 ipnet.workspace = true
 listmngr-core = { path = "../core", version = "0.1.0" }
 listmngr-db = { path = "../db", version = "0.1.0" }
+listmngr-mail = { path = "../mail", version = "0.1.0" }
+listmngr-pipeline = { path = "../pipeline", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true

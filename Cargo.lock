@@ -1239,10 +1239,13 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "axum",
+ "chrono",
  "clap",
  "listmngr-api",
  "listmngr-core",
  "listmngr-db",
+ "listmngr-mail",
+ "listmngr-runners",
  "predicates",
  "reqwest",
  "rpassword",
@@ -1268,6 +1271,8 @@ dependencies = [
  "ipnet",
  "listmngr-core",
  "listmngr-db",
+ "listmngr-mail",
+ "listmngr-pipeline",
  "oas3",
  "prometheus-parse",
  "serde",
@@ -1331,6 +1336,11 @@ name = "listmngr-mail"
 version = "0.1.0"
 dependencies = [
  "listmngr-core",
+ "sha1",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1344,7 +1354,18 @@ dependencies = [
 name = "listmngr-runners"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "listmngr-core",
+ "listmngr-db",
+ "listmngr-mail",
+ "listmngr-pipeline",
+ "regex",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
