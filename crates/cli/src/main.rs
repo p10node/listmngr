@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod errors;
+mod status;
+
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use listmngr_core::{Address, Config, ListId, MemberRole, SubscriptionMode, TokenId, UserId};
@@ -115,17 +118,70 @@ enum UserCommand {
         email: String,
         #[arg(long)]
         display_name: String,
-        #[arg(long)]
-        password: String,
+        #[command(flatten)]
+        password: PasswordInput,
         #[arg(long)]
         server_owner: bool,
     },
     Passwd {
         id: UserId,
-        #[arg(long)]
-        password: String,
+        #[command(flatten)]
+        password: PasswordInput,
     },
 }
+#[derive(Debug, Args)]
+struct PasswordInput {
+    #[arg(long)]
+    #[cfg_attr(unix, arg(conflicts_with = "password_fd"))]
+    password_stdin: bool,
+    #[cfg(unix)]
+    #[arg(long, value_name = "FD", conflicts_with = "password_stdin")]
+    password_fd: Option<u32>,
+}
+
+fn read_password(input: &PasswordInput) -> Result<String> {
+    use std::io::Read;
+    let reader: Option<Box<dyn Read>> = if input.password_stdin {
+        Some(Box::new(std::io::stdin()))
+    } else {
+        #[cfg(unix)]
+        {
+            input
+                .password_fd
+                .map(|fd| {
+                    std::fs::File::open(format!("/dev/fd/{fd}"))
+                        .map(|file| Box::new(file) as Box<dyn Read>)
+                })
+                .transpose()?
+        }
+        #[cfg(not(unix))]
+        {
+            None
+        }
+    };
+    let mut value = if let Some(reader) = reader {
+        let mut value = String::new();
+        // One extra byte beyond a maximum password plus optional CRLF detects
+        // oversize input without accepting a truncated prefix or waiting for EOF.
+        reader.take(1027).read_to_string(&mut value)?;
+        value
+    } else {
+        rpassword::prompt_password("Password: ")?
+    };
+    if value.ends_with('\n') {
+        value.pop();
+        if value.ends_with('\r') {
+            value.pop();
+        }
+    }
+    if value.len() > 1024 {
+        bail!(listmngr_core::Error::Validation(
+            "password exceeds 1024 bytes".into()
+        ));
+    }
+    Ok(value)
+}
+
 #[derive(Debug, Subcommand)]
 enum TokenCommand {
     Create {
@@ -147,25 +203,25 @@ async fn main() {
         .init();
     if let Err(error) = run().await {
         let error_id = uuid::Uuid::now_v7();
-        let rendered = format!("{error:#}");
-        let lower = rendered.to_ascii_lowercase();
-        let detail = if lower.contains("database error")
-            || lower.contains("postgres://")
-            || lower.contains("postgresql://")
-            || lower.contains("sqlite:")
-        {
-            "operation failed".to_owned()
-        } else {
-            rendered
-        };
-        tracing::error!(%error_id, "CLI command failed");
-        eprintln!("error[{error_id}]: {detail}");
-        std::process::exit(1);
+        let (code, category, message) = errors::classify(&error);
+        tracing::error!(%error_id, category, "CLI command failed");
+        eprintln!("error[{category}]: {message}; correlation={error_id}");
+        std::process::exit(code.into());
     }
 }
 
 async fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) if error.use_stderr() => {
+            eprintln!("error[CLI-USAGE]: invalid command line");
+            std::process::exit(2);
+        }
+        Err(error) => {
+            let _ = error.print();
+            std::process::exit(0);
+        }
+    };
     let config = Config::load(cli.config.as_deref())?;
     match cli.command {
         Command::Version => println!("listmngr {}", env!("CARGO_PKG_VERSION")),
@@ -177,6 +233,7 @@ async fn run() -> Result<()> {
             config.web.listen,
             config.api.listen
         ),
+        Command::Status => status::check(&config).await?,
         command => run_database(command, config).await?,
     }
     Ok(())
@@ -186,9 +243,9 @@ fn print_config(config: &Config, key: Option<&str>) -> Result<()> {
     if let Some(key) = key {
         let mut selected = &value;
         for part in key.split('.') {
-            selected = selected
-                .get(part)
-                .with_context(|| format!("unknown configuration key: {key}"))?;
+            selected = selected.get(part).ok_or_else(|| {
+                listmngr_core::Error::Validation("unknown configuration key".into())
+            })?;
         }
         match selected {
             serde_json::Value::String(v) => println!("{v}"),
@@ -208,17 +265,17 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
     .await?;
     match command {
         Command::Migrate => {
-            db.migrate().await?;
+            db.migrate().await.context(errors::MigrationFailure)?;
             println!("migrations applied");
         }
-        Command::Status => {
-            sqlx::query("SELECT 1").execute(db.pool()).await?;
-            println!("database: ready");
-        }
+
         Command::Serve => {
-            db.migrate().await?;
-            let address: std::net::SocketAddr =
-                config.web.listen.parse().context("invalid web.listen")?;
+            db.migrate().await.context(errors::MigrationFailure)?;
+            let address: std::net::SocketAddr = config
+                .web
+                .listen
+                .parse()
+                .map_err(|_| listmngr_core::Error::Validation("invalid web.listen".into()))?;
             let listener = tokio::net::TcpListener::bind(address).await?;
             tracing::info!(%address,"HTTP server listening");
             axum::serve(
@@ -233,7 +290,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Members { command } => members(&db, command).await?,
         Command::User { command } => users(&db, command).await?,
         Command::Token { command } => tokens(&db, command).await?,
-        Command::Version | Command::Conf { .. } | Command::Info => {
+        Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
             bail!("command does not use database")
         }
     }
@@ -305,13 +362,14 @@ async fn members(db: &Database, command: MemberCommand) -> Result<()> {
     match command {
         MemberCommand::Add(args) => add_member(db, args).await?,
         MemberCommand::Del { list_id, email } => {
+            let email = Address::new(&email, String::new())?.email;
             let member = db
                 .members()
                 .find(&email)
                 .await?
                 .into_iter()
                 .find(|m| m.list_id == list_id)
-                .context("membership not found")?;
+                .ok_or_else(|| listmngr_core::Error::NotFound("membership".into()))?;
             db.members().delete(member.id).await?;
             println!("removed {}", member.id);
         }
@@ -322,6 +380,7 @@ async fn members(db: &Database, command: MemberCommand) -> Result<()> {
             }
         }
         MemberCommand::Find { email } => {
+            let email = Address::new(&email, String::new())?.email;
             for m in db.members().find(&email).await? {
                 println!("{} {} {}", m.id, m.list_id, m.role);
             }
@@ -355,7 +414,10 @@ async fn sync_members(
         let address = Address::new(row, String::new())
             .with_context(|| format!("invalid member row {}", index + 1))?;
         if !unique.insert(address.email.clone()) {
-            bail!("duplicate sync member row {}: {}", index + 1, address.email);
+            bail!(listmngr_core::Error::Validation(format!(
+                "duplicate sync member row {}",
+                index + 1
+            )));
         }
         desired.push(address.email);
     }
@@ -401,13 +463,14 @@ async fn users(db: &Database, command: UserCommand) -> Result<()> {
                     .create(NewUser {
                         display_name,
                         email,
-                        password,
+                        password: read_password(&password)?,
                         server_owner
                     })
                     .await?
             )?
         ),
         UserCommand::Passwd { id, password } => {
+            let password = read_password(&password)?;
             db.users().set_password(id, &password).await?;
             println!("password changed");
         }

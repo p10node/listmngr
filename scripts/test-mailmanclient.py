@@ -34,10 +34,10 @@ def main():
             port = reservation.getsockname()[1]
         env["LISTMNGR__WEB__LISTEN"] = f"127.0.0.1:{port}"
 
-        def cli(*args):
+        def cli(*args, stdin=None):
             result = subprocess.run(
                 [str(binary), *args], env=env, cwd=directory,
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=30, input=stdin,
             )
             if result.returncode:
                 # Never dump captured token/config output or credential-bearing argv.
@@ -47,7 +47,7 @@ def main():
         cli("migrate")
         user = json.loads(cli(
             "user", "create", "compat-owner@example.invalid", "--display-name", "Compat gate",
-            "--password", "Orbit!Cobalt7-River$Quartz", "--server-owner",
+            "--password-stdin", "--server-owner", stdin="Orbit!Cobalt7-River$Quartz\n",
         ))
         token = cli("token", "create", user["id"], "compat-gate", "--scopes", "admin")
         prefix, token_id, secret = token.split("_", 2)

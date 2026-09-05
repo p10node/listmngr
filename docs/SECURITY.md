@@ -45,6 +45,9 @@ Base images, GitHub Actions, and CI tools are pinned. `Cargo.lock`, `cargo deny`
 - `.env` is ignored from Docker context and must remain untracked.
 - Prefer `database.url_file` or `/etc/listmngr/listmngr.env` with root ownership and mode `0600`.
 - Rotate any credential suspected of exposure; redact it before attaching diagnostics.
+- CLI user creation/password changes use a hidden prompt, `--password-stdin`, or Unix `--password-fd`; `--password VALUE` is rejected to prevent process-list/history disclosure. Password input is bounded to 1,024 bytes and malformed/oversized streams fail closed.
+- Runtime CLI errors use typed, stable categories and correlation UUIDs instead of raw error chains or string-based classification. Secret-file I/O errors never include the underlying OS/decoder error or file contents.
+- The unauthenticated `status` probe targets the configured local HTTP listener, bypasses environment proxies, does not follow redirects, and times out per request. Readiness is observed from the running service, not inferred from a separate successful database connection.
 
 ## Vulnerability reporting
 

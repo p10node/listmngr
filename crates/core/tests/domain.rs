@@ -98,6 +98,27 @@ fn config_rejects_invalid_api_rate_limits() {
 }
 
 #[test]
+fn secret_file_read_errors_are_generic_and_valid_utf8_still_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let secret = dir.path().join("PRIVATE-PATH-SENTINEL");
+    std::fs::write(&secret, b"PRIVATE-VALUE-SENTINEL\xff").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let config_path = dir.path().join("listmngr.toml");
+    std::fs::write(&config_path, format!("[database]\nurl_file = {secret:?}\n")).unwrap();
+    let error = Config::load(Some(&config_path)).unwrap_err().to_string();
+    assert_eq!(error, "validation failed: cannot read database.url_file");
+    std::fs::write(&secret, "sqlite://fixture-value\n").unwrap();
+    assert_eq!(
+        Config::load(Some(&config_path)).unwrap().database.url,
+        "sqlite://fixture-value"
+    );
+}
+
+#[test]
 fn built_in_styles_apply_expected_list_defaults() {
     let styles = builtin_styles();
     assert_eq!(styles.len(), 3);
