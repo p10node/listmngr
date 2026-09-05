@@ -34,26 +34,54 @@ fn config_defaults_are_secure_and_file_overrides_are_layered() {
 fn secret_file_overrides_inline_secret_and_redacted_view_hides_both() {
     let dir = tempfile::tempdir().unwrap();
     let secret = dir.path().join("database-url");
-    std::fs::write(&secret, "postgres://app:file-password@db/listmngr\n").unwrap();
+    const FILE_VALUE: &str = "sqlite://fixture-file-selection.db";
+    const INLINE_VALUE: &str = "sqlite://fixture-inline-selection.db";
+    std::fs::write(&secret, format!("{FILE_VALUE}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let config_path = dir.path().join("listmngr.toml");
     std::fs::write(
         &config_path,
-        format!(
-            "[database]\nurl = \"postgres://app:inline-password@db/listmngr\"\nurl_file = {secret:?}\n"
-        ),
+        format!("[database]\nurl = \"{INLINE_VALUE}\"\nurl_file = {secret:?}\n"),
     )
     .unwrap();
 
     let config = Config::load(Some(&config_path)).unwrap();
-    assert_eq!(
-        config.database.url,
-        "postgres://app:file-password@db/listmngr"
-    );
+    assert_eq!(config.database.url, FILE_VALUE);
     let rendered = config.redacted_json().to_string();
-    assert!(!rendered.contains("file-password"));
-    assert!(!rendered.contains("inline-password"));
+    assert!(!rendered.contains(FILE_VALUE));
+    assert!(!rendered.contains(INLINE_VALUE));
     assert!(!rendered.contains(secret.to_string_lossy().as_ref()));
     assert_eq!(rendered.matches("[REDACTED]").count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn secret_file_must_not_be_accessible_by_group_or_other_users() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let secret = dir.path().join("database-url");
+    std::fs::write(&secret, "sqlite://private.db\n").unwrap();
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let config_path = dir.path().join("listmngr.toml");
+    std::fs::write(&config_path, format!("[database]\nurl_file = {secret:?}\n")).unwrap();
+
+    let error = Config::load(Some(&config_path)).unwrap_err().to_string();
+    assert_eq!(
+        error,
+        "validation failed: database.url_file permissions must be 0600 or stricter"
+    );
+    assert!(!error.contains(secret.to_string_lossy().as_ref()));
+
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        Config::load(Some(&config_path)).unwrap().database.url,
+        "sqlite://private.db"
+    );
 }
 
 #[test]

@@ -27,4 +27,5 @@ utoipa.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+oas3 = "0.22.0"
 tower.workspace = true

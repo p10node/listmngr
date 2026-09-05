@@ -3,7 +3,105 @@ use listmngr_core::{
     Argon2Config, DeliveryMode, DeliveryStatus, MemberRole, ModerationAction, Preferences,
     SecurityConfig, SubscriptionMode,
 };
-use listmngr_db::{Database, NewList, NewMember, NewUser};
+use listmngr_db::{AuditContext, Database, NewList, NewMember, NewUser};
+
+const PHASE_ONE_SCHEMA: &str = include_str!("fixtures/phase1-schema.snapshot");
+
+fn canonical_schema(mut lines: Vec<String>) -> String {
+    lines.sort();
+    format!("{}\n", lines.join("\n"))
+}
+
+async fn sqlite_semantic_schema(db: &Database) -> String {
+    let columns: Vec<String> = sqlx::query_scalar(
+        r"SELECT 'C|' || m.name || '|' || p.name || '|' ||
+        CASE WHEN upper(p.type) LIKE '%INT%' THEN 'integer'
+             WHEN upper(p.type) IN ('REAL','DOUBLE','DOUBLE PRECISION','FLOAT') THEN 'real'
+             ELSE 'text' END || '|' ||
+        CASE WHEN p.[notnull]=1 OR p.pk>0 THEN 'required' ELSE 'optional' END || '|' ||
+        CASE replace(replace(COALESCE(p.dflt_value,''),'''',''),'::text','')
+             WHEN '' THEN '-' ELSE replace(replace(COALESCE(p.dflt_value,''),'''',''),'::text','') END
+        FROM sqlite_master m JOIN pragma_table_info(m.name) p
+        WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_sqlx_%'",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let foreign_keys: Vec<String> = sqlx::query_scalar(
+        r"SELECT 'F|' || m.name || '|' || f.[from] || '|' || f.[table] || '|' || f.[to] || '|' || lower(f.on_delete)
+        FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f
+        WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_sqlx_%'",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let unique_keys: Vec<String> = sqlx::query_scalar(
+        r"SELECT 'U|' || m.name || '|' || group_concat(ii.name,',')
+        FROM sqlite_master m JOIN pragma_index_list(m.name) il JOIN pragma_index_info(il.name) ii
+        WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_sqlx_%' AND il.[unique]=1
+        GROUP BY m.name,il.name",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    canonical_schema(
+        columns
+            .into_iter()
+            .chain(foreign_keys)
+            .chain(unique_keys)
+            .collect(),
+    )
+}
+
+async fn postgres_semantic_schema(db: &Database) -> String {
+    let columns: Vec<String> = sqlx::query_scalar(
+        r"SELECT 'C|' || c.table_name || '|' || c.column_name || '|' ||
+        CASE WHEN c.data_type IN ('smallint','integer','bigint') THEN 'integer'
+             WHEN c.data_type IN ('real','double precision','numeric','decimal') THEN 'real'
+             ELSE 'text' END || '|' ||
+        CASE c.is_nullable WHEN 'NO' THEN 'required' ELSE 'optional' END || '|' ||
+        COALESCE(regexp_replace(regexp_replace(c.column_default, '^''(.*)''::[a-z ]+$', '\\1'), '^\\((.*)\\)$', '\\1'), '-')
+        FROM information_schema.columns c
+        WHERE c.table_schema=current_schema() AND c.table_name NOT LIKE '\\_sqlx\\_%' ESCAPE '\\'",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let foreign_keys: Vec<String> = sqlx::query_scalar(
+        r"SELECT 'F|' || tc.table_name || '|' || kcu.column_name || '|' || ccu.table_name || '|' || ccu.column_name || '|' || lower(rc.delete_rule)
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu ON tc.constraint_name=kcu.constraint_name AND tc.constraint_schema=kcu.constraint_schema
+        JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name=ccu.constraint_name AND tc.constraint_schema=ccu.constraint_schema
+        JOIN information_schema.referential_constraints rc ON tc.constraint_name=rc.constraint_name AND tc.constraint_schema=rc.constraint_schema
+        WHERE tc.constraint_schema=current_schema() AND tc.constraint_type='FOREIGN KEY'",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let unique_keys: Vec<String> = sqlx::query_scalar(
+        r"SELECT 'U|' || tbl.relname || '|' || string_agg(att.attname,',' ORDER BY ord.n)
+        FROM pg_index idx JOIN pg_class tbl ON tbl.oid=idx.indrelid
+        JOIN pg_namespace ns ON ns.oid=tbl.relnamespace
+        JOIN LATERAL unnest(idx.indkey) WITH ORDINALITY ord(attnum,n) ON true
+        JOIN pg_attribute att ON att.attrelid=tbl.oid AND att.attnum=ord.attnum
+        WHERE ns.nspname=current_schema() AND idx.indisunique AND tbl.relname NOT LIKE '\\_sqlx\\_%' ESCAPE '\\'
+        GROUP BY tbl.relname,idx.indexrelid",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    canonical_schema(
+        columns
+            .into_iter()
+            .chain(foreign_keys)
+            .chain(unique_keys)
+            .collect(),
+    )
+}
+
+fn expected_phase_one_schema() -> String {
+    canonical_schema(PHASE_ONE_SCHEMA.lines().map(str::to_owned).collect())
+}
 
 #[tokio::test]
 #[ignore = "requires a live PostgreSQL server via TEST_POSTGRES_URL; CI runs this explicitly"]
@@ -16,11 +114,10 @@ async fn postgres_repeated_migrate_schema_and_crud_contract() {
         .expect("connect TEST_POSTGRES_URL");
     db.migrate().await.expect("first PostgreSQL migration");
     db.migrate().await.expect("repeated PostgreSQL migration");
-    let table_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('domains','mailing_lists','users','addresses','members','api_tokens','audit_log')",
-    )
-    .fetch_one(db.pool()).await.expect("inspect PostgreSQL schema");
-    assert_eq!(table_count, 7);
+    assert_eq!(
+        postgres_semantic_schema(&db).await,
+        expected_phase_one_schema()
+    );
 
     for sequence in 0..2 {
         let host = format!("phase1-pg-{sequence}.invalid");
@@ -42,6 +139,114 @@ async fn postgres_repeated_migrate_schema_and_crud_contract() {
         db.lists().delete(&list.id).await.unwrap();
         db.domains().delete(&host).await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn sqlite_phase_one_schema_matches_complete_semantic_snapshot() {
+    let db = migrated_sqlite().await;
+    assert_eq!(
+        sqlite_semantic_schema(&db).await,
+        expected_phase_one_schema()
+    );
+}
+
+#[tokio::test]
+async fn sqlite_phase_one_schema_constraints_are_semantic() {
+    let db = migrated_sqlite().await;
+    db.domains().create("example.com", "", None).await.unwrap();
+    let list = db
+        .lists()
+        .create(NewList {
+            list_id: "schema.example.com".parse().unwrap(),
+            display_name: "Schema".into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap();
+    let user = db
+        .users()
+        .create(NewUser {
+            display_name: "Schema".into(),
+            email: "schema@example.com".into(),
+            password: "Orbit!Cobalt7-River$Quartz".into(),
+            server_owner: false,
+        })
+        .await
+        .unwrap();
+
+    for statement in [
+        "INSERT INTO header_matches(id,list_id,position,header,pattern) VALUES('bad-header','missing.example.com',0,'subject','x')",
+        "INSERT INTO bans(id,list_id,email_or_regex) VALUES('bad-ban','missing.example.com','x')",
+        "UPDATE users SET preferred_address_id='00000000-0000-0000-0000-000000000000'",
+    ] {
+        assert!(
+            sqlx::query(statement).execute(db.pool()).await.is_err(),
+            "{statement}"
+        );
+    }
+    sqlx::query("INSERT INTO header_matches(id,list_id,position,header,pattern) VALUES('header-1',?,0,'subject','x')")
+        .bind(list.id.as_str()).execute(db.pool()).await.unwrap();
+    assert!(sqlx::query("INSERT INTO header_matches(id,list_id,position,header,pattern) VALUES('header-2',?,0,'from','x')").bind(list.id.as_str()).execute(db.pool()).await.is_err());
+    sqlx::query(
+        "INSERT INTO bans(id,list_id,email_or_regex) VALUES('ban-1',?,'blocked@example.com')",
+    )
+    .bind(list.id.as_str())
+    .execute(db.pool())
+    .await
+    .unwrap();
+    assert!(
+        sqlx::query(
+            "INSERT INTO bans(id,list_id,email_or_regex) VALUES('ban-2',?,'blocked@example.com')"
+        )
+        .bind(list.id.as_str())
+        .execute(db.pool())
+        .await
+        .is_err()
+    );
+
+    let address_id: String =
+        sqlx::query_scalar("SELECT preferred_address_id FROM users WHERE id=?")
+            .bind(user.id.to_string())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    sqlx::query("UPDATE addresses SET user_id=NULL WHERE id=?")
+        .bind(&address_id)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM addresses WHERE id=?")
+        .bind(address_id)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let preferred: Option<String> =
+        sqlx::query_scalar("SELECT preferred_address_id FROM users WHERE id=?")
+            .bind(user.id.to_string())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert!(
+        preferred.is_none(),
+        "preferred address delete must SET NULL"
+    );
+
+    sqlx::query("DELETE FROM mailing_lists WHERE list_id=?")
+        .bind(list.id.as_str())
+        .execute(db.pool())
+        .await
+        .unwrap();
+    for table in ["header_matches", "bans"] {
+        assert_eq!(row_count(&db, table, "list_id", list.id.as_str()).await, 0);
+    }
+    assert!(
+        sqlx::query(
+            "INSERT INTO bans(id,list_id,email_or_regex) VALUES('global',NULL,'global@example.com')"
+        )
+        .execute(db.pool())
+        .await
+        .is_ok()
+    );
 }
 
 #[tokio::test]
@@ -509,6 +714,146 @@ async fn member_create_is_audit_atomic() {
 }
 
 #[tokio::test]
+async fn member_sync_is_role_scoped_atomic_and_preserves_existing_members() {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    db.domains().create("example.com", "", None).await.unwrap();
+    let list = db
+        .lists()
+        .create(NewList {
+            list_id: "dev.example.com".parse().unwrap(),
+            display_name: "Dev".into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap();
+    let owner = db
+        .members()
+        .create(NewMember {
+            list_id: list.id.clone(),
+            email: "owner@example.com".into(),
+            role: MemberRole::Owner,
+            subscription_mode: SubscriptionMode::AsUser,
+            display_name: "Owner".into(),
+        })
+        .await
+        .unwrap();
+    let retained = db
+        .members()
+        .create(NewMember {
+            list_id: list.id.clone(),
+            email: "keep@example.com".into(),
+            role: MemberRole::Member,
+            subscription_mode: SubscriptionMode::AsUser,
+            display_name: "Keep Me".into(),
+        })
+        .await
+        .unwrap();
+    db.members()
+        .create(NewMember {
+            list_id: list.id.clone(),
+            email: "remove@example.com".into(),
+            role: MemberRole::Member,
+            subscription_mode: SubscriptionMode::AsAddress,
+            display_name: "Remove Me".into(),
+        })
+        .await
+        .unwrap();
+    let before_audit = db.audit().list().await.unwrap().len();
+
+    let result = db
+        .members()
+        .mass_for_role(
+            &list.id,
+            "sync",
+            &["keep@example.com".into(), "new@example.com".into()],
+            MemberRole::Member,
+            SubscriptionMode::AsAddress,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!((result.added, result.removed, result.retained), (1, 1, 1));
+    assert_eq!(db.audit().list().await.unwrap().len(), before_audit + 1);
+    assert_eq!(
+        db.members().get(owner.id).await.unwrap().role,
+        MemberRole::Owner
+    );
+    let after = db.members().get(retained.id).await.unwrap();
+    assert_eq!(after.subscription_mode, SubscriptionMode::AsUser);
+    assert_eq!(after.display_name, "Keep Me");
+    let roster = db
+        .members()
+        .roster(&list.id, MemberRole::Member)
+        .await
+        .unwrap();
+    assert_eq!(roster.len(), 2);
+    let new = db
+        .members()
+        .find("new@example.com")
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(new.subscription_mode, SubscriptionMode::AsAddress);
+}
+
+#[tokio::test]
+async fn member_mass_validates_all_rows_and_duplicates_before_any_write_or_audit() {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    db.domains().create("example.com", "", None).await.unwrap();
+    let list = db
+        .lists()
+        .create(NewList {
+            list_id: "dev.example.com".parse().unwrap(),
+            display_name: "Dev".into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap();
+    db.members()
+        .create(NewMember {
+            list_id: list.id.clone(),
+            email: "existing@example.com".into(),
+            role: MemberRole::Member,
+            subscription_mode: SubscriptionMode::AsAddress,
+            display_name: String::new(),
+        })
+        .await
+        .unwrap();
+    let audit = db.audit().list().await.unwrap().len();
+    for rows in [
+        vec!["replacement@example.com".into(), "late-invalid".into()],
+        vec![
+            "duplicate@example.com".into(),
+            "DUPLICATE@example.com".into(),
+        ],
+    ] {
+        assert!(
+            db.members()
+                .mass_for_role(
+                    &list.id,
+                    "sync",
+                    &rows,
+                    MemberRole::Member,
+                    SubscriptionMode::AsAddress,
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            db.members()
+                .roster(&list.id, MemberRole::Member)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(db.audit().list().await.unwrap().len(), audit);
+    }
+}
+
+#[tokio::test]
 async fn address_verification_and_password_writes_are_audit_atomic() {
     let db = Database::connect("sqlite::memory:", 1).await.unwrap();
     db.migrate().await.unwrap();
@@ -630,9 +975,44 @@ async fn foreign_key_unique_and_delete_conflicts_fail_closed() {
     assert_eq!(domain.mail_host, "example.com");
 }
 
-#[tokio::test]
-#[allow(clippy::too_many_lines)]
-async fn deleting_list_removes_owned_graph_but_preserves_shared_identity_and_other_lists() {
+struct ListDeleteFixture {
+    db: Database,
+    deleted: listmngr_core::MailingList,
+    kept: listmngr_core::MailingList,
+    user: listmngr_core::User,
+    deleted_member: listmngr_core::Member,
+    kept_member: listmngr_core::Member,
+    deleted_preferences: String,
+    kept_preferences: String,
+}
+
+async fn add_list_owned_rows(db: &Database, lists: &[&listmngr_core::ListId]) {
+    for list in lists {
+        db.lists()
+            .set_archiver(list, "prototype", true)
+            .await
+            .unwrap();
+        db.lists()
+            .set_template(list, "notice", "en", list.as_str())
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO header_matches(id,list_id,position,header,pattern) VALUES(?,?,0,'subject','x')")
+            .bind(format!("header-{list}"))
+            .bind(list.as_str())
+            .execute(db.pool())
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO bans(id,list_id,email_or_regex) VALUES(?,?,?)")
+            .bind(format!("ban-{list}"))
+            .bind(list.as_str())
+            .bind(format!("{list}@example.com"))
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+}
+
+async fn list_delete_fixture() -> ListDeleteFixture {
     let db = migrated_sqlite().await;
     db.domains().create("example.com", "", None).await.unwrap();
     let deleted = db
@@ -697,33 +1077,37 @@ async fn deleting_list_removes_owned_graph_but_preserves_shared_identity_and_oth
             .fetch_one(db.pool())
             .await
             .unwrap();
-    for list in [&deleted.id, &kept.id] {
-        db.lists()
-            .set_archiver(list, "prototype", true)
-            .await
-            .unwrap();
-        db.lists()
-            .set_template(list, "notice", "en", list.as_str())
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO header_matches(id,list_id,position,header,pattern) VALUES(?,?,0,'subject','x')")
-            .bind(format!("header-{list}"))
-            .bind(list.as_str())
-            .execute(db.pool())
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO bans(id,list_id,email_or_regex) VALUES(?,?,?)")
-            .bind(format!("ban-{list}"))
-            .bind(list.as_str())
-            .bind(format!("{list}@example.com"))
-            .execute(db.pool())
-            .await
-            .unwrap();
-    }
+    add_list_owned_rows(&db, &[&deleted.id, &kept.id]).await;
     sqlx::query("INSERT INTO bans(id,list_id,email_or_regex) VALUES('global-ban',NULL,'global@example.com')")
         .execute(db.pool())
         .await
         .unwrap();
+
+    ListDeleteFixture {
+        db,
+        deleted,
+        kept,
+        user,
+        deleted_member,
+        kept_member,
+        deleted_preferences,
+        kept_preferences,
+    }
+}
+
+#[tokio::test]
+async fn deleting_list_removes_owned_graph_but_preserves_shared_identity_and_other_lists() {
+    let fixture = list_delete_fixture().await;
+    let ListDeleteFixture {
+        db,
+        deleted,
+        kept,
+        user,
+        deleted_member,
+        kept_member,
+        deleted_preferences,
+        kept_preferences,
+    } = fixture;
 
     db.lists().delete(&deleted.id).await.unwrap();
 
@@ -1085,4 +1469,182 @@ async fn catalog_mass_and_update_mutations_roll_back_when_audit_is_sabotaged() {
             .is_err()
     );
     assert!(db.domains().owners("example.com").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn audit_context_records_actor_token_and_socket_ip_without_secrets() {
+    let db = migrated_sqlite().await;
+    let actor = db
+        .users()
+        .create(NewUser {
+            display_name: "Actor".into(),
+            email: "actor@example.com".into(),
+            password: "Orbit!Cobalt7-River$Quartz".into(),
+            server_owner: true,
+        })
+        .await
+        .unwrap();
+    let issued = db
+        .tokens()
+        .create(actor.id, "actor", &["admin"], None)
+        .await
+        .unwrap();
+    let context = AuditContext::new(
+        Some(actor.id),
+        Some(issued.id),
+        Some("203.0.113.17".parse().unwrap()),
+    );
+    let before = db.audit().list().await.unwrap().len();
+
+    db.domains()
+        .create_with_context("audited.example", "secret=do-not-log", None, &context)
+        .await
+        .unwrap();
+    let list = db
+        .lists()
+        .create_with_context(
+            NewList {
+                list_id: "events.audited.example".parse().unwrap(),
+                display_name: "Events".into(),
+                style: "legacy-default".into(),
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    db.lists()
+        .set_archiver_with_context(&list.id, "prototype", true, &context)
+        .await
+        .unwrap();
+    db.lists()
+        .set_template_with_context(&list.id, "notice", "en", "secret template", &context)
+        .await
+        .unwrap();
+    let contextual_token = db
+        .tokens()
+        .create_with_context(actor.id, "contextual", &["system:read"], None, &context)
+        .await
+        .unwrap();
+    db.tokens()
+        .revoke_with_context(contextual_token.id, &context)
+        .await
+        .unwrap();
+
+    let entries = db.audit().list().await.unwrap();
+    assert_eq!(entries.len(), before + 6, "one logical write has one event");
+    for entry in &entries[before..] {
+        assert_eq!(entry.actor_user_id, Some(actor.id));
+        assert_eq!(entry.actor_token_id, Some(issued.id));
+        assert_eq!(entry.ip, Some("203.0.113.17".parse().unwrap()));
+    }
+    let actions = entries[before..]
+        .iter()
+        .map(|entry| entry.action.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actions,
+        [
+            "domain.create",
+            "list.create",
+            "list.archiver.set",
+            "list.template.set",
+            "token.create",
+            "token.revoke",
+        ]
+    );
+    let rendered = serde_json::to_string(&entries[before..])
+        .unwrap()
+        .to_ascii_lowercase();
+    for secret in [
+        "do-not-log",
+        "secret template",
+        "password",
+        "token_hash",
+        "$argon2",
+        &contextual_token.token.to_ascii_lowercase(),
+    ] {
+        assert!(
+            !rendered.contains(secret),
+            "audit leaked {secret}: {rendered}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn subscription_verification_and_audit_are_one_atomic_write() {
+    let db = migrated_sqlite().await;
+    db.domains().create("example.com", "", None).await.unwrap();
+    let list = db
+        .lists()
+        .create(NewList {
+            list_id: "atomic.example.com".parse().unwrap(),
+            display_name: "Atomic".into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap();
+    let before = db.audit().list().await.unwrap().len();
+
+    let member = db
+        .members()
+        .subscribe_with_context(
+            NewMember {
+                list_id: list.id.clone(),
+                email: "subscriber@example.com".into(),
+                role: MemberRole::Member,
+                subscription_mode: SubscriptionMode::AsAddress,
+                display_name: "Subscriber".into(),
+            },
+            true,
+            &AuditContext::system(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        db.addresses()
+            .get("subscriber@example.com")
+            .await
+            .unwrap()
+            .verified_on
+            .is_some()
+    );
+    assert_eq!(db.audit().list().await.unwrap().len(), before + 1);
+    assert!(db.members().get(member.id).await.is_ok());
+
+    let db = migrated_sqlite().await;
+    db.domains().create("example.com", "", None).await.unwrap();
+    let list = db
+        .lists()
+        .create(NewList {
+            list_id: "rollback.example.com".parse().unwrap(),
+            display_name: "Rollback".into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap();
+    sabotage_audit(&db).await;
+    assert!(
+        db.members()
+            .subscribe_with_context(
+                NewMember {
+                    list_id: list.id,
+                    email: "rollback@example.com".into(),
+                    role: MemberRole::Member,
+                    subscription_mode: SubscriptionMode::AsAddress,
+                    display_name: "Rollback".into(),
+                },
+                true,
+                &AuditContext::system(),
+            )
+            .await
+            .is_err()
+    );
+    for table in ["members", "addresses", "preferences"] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "{table} must roll back");
+    }
 }

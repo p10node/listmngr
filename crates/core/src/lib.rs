@@ -120,9 +120,21 @@ pub fn normalize_domain(value: &str) -> Result<String> {
     Ok(ascii)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
+#[schema(value_type = String, example = "list.example.com")]
 pub struct ListId(String);
+
+impl<'de> Deserialize<'de> for ListId {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
 
 impl ListId {
     #[must_use]
@@ -291,7 +303,7 @@ impl Preferences {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Domain {
     pub id: DomainId,
     pub mail_host: String,
@@ -300,7 +312,7 @@ pub struct Domain {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct User {
     pub id: UserId,
     pub display_name: String,
@@ -311,7 +323,7 @@ pub struct User {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Address {
     pub id: AddressId,
     pub email: String,
@@ -365,7 +377,7 @@ impl Address {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MailingList {
     pub id: ListId,
     pub display_name: String,
@@ -379,6 +391,9 @@ pub struct MailingList {
     pub last_post_at: Option<DateTime<Utc>>,
     pub post_id: i64,
     pub volume: i32,
+    pub next_digest_number: i64,
+    pub digest_last_sent_at: Option<DateTime<Utc>>,
+    pub emergency: bool,
     pub archive_policy: ArchivePolicy,
     pub archive_rendering_mode: ArchiveRenderingMode,
     pub style_name: String,
@@ -400,6 +415,9 @@ impl MailingList {
             last_post_at: None,
             post_id: 1,
             volume: 1,
+            next_digest_number: 1,
+            digest_last_sent_at: None,
+            emergency: false,
             archive_policy: ArchivePolicy::Public,
             archive_rendering_mode: ArchiveRenderingMode::Text,
             style_name: "legacy-default".into(),
@@ -412,7 +430,7 @@ impl MailingList {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Member {
     pub id: MemberId,
     pub list_id: ListId,
@@ -500,9 +518,9 @@ impl Config {
             .merge(Env::prefixed("LISTMNGR__").split("__"))
             .extract()?;
         if let Some(secret_file) = &config.database.url_file {
-            let value = std::fs::read_to_string(secret_file).map_err(|error| {
-                Error::Validation(format!("cannot read database.url_file: {error}"))
-            })?;
+            validate_secret_file_permissions(secret_file)?;
+            let value = std::fs::read_to_string(secret_file)
+                .map_err(|_| Error::Validation("cannot read database.url_file".into()))?;
             let value = value.trim();
             if value.is_empty() {
                 return Err(Error::Validation("database.url_file is empty".into()));
@@ -541,6 +559,25 @@ impl Config {
             "unknown"
         }
     }
+}
+
+#[cfg(unix)]
+fn validate_secret_file_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = std::fs::metadata(path)
+        .map_err(|_| Error::Validation("cannot read database.url_file".into()))?;
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err(Error::Validation(
+            "database.url_file permissions must be 0600 or stricter".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn validate_secret_file_permissions(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 macro_rules! config_struct {

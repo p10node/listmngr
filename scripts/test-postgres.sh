@@ -20,7 +20,7 @@ run() {
 # This gate cannot silently fall back to SQLite: every command is explicitly
 # configured from TEST_POSTGRES_URL and fails if PostgreSQL is unavailable.
 domain=phase0-ci.invalid
-list=contract@phase0-ci.invalid
+list=contract.phase0-ci.invalid
 cleanup() {
   run lists remove "$list" >/dev/null 2>&1 || true
   run domains rm "$domain" >/dev/null 2>&1 || true
