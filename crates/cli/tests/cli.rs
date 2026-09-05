@@ -90,18 +90,21 @@ fn config_precedence_is_defaults_then_file_then_env_then_secret_file() {
 
 #[test]
 fn runtime_database_errors_have_an_id_and_redact_connection_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("SENSITIVE-CONNECTION-SENTINEL");
     Command::cargo_bin("listmngr")
         .unwrap()
-        .arg("status")
+        .args(["domains", "ls"])
         .env(
             "LISTMNGR__DATABASE__URL",
-            "postgres://SENSITIVE-CONNECTION-SENTINEL@127.0.0.1:1/unreachable",
+            format!("sqlite://{}?mode=ro", missing.display()),
         )
         .assert()
-        .failure()
+        .code(10)
         .stdout(predicate::str::contains("SENSITIVE-CONNECTION-SENTINEL").not())
         .stderr(predicate::str::contains("SENSITIVE-CONNECTION-SENTINEL").not())
-        .stderr(predicate::str::contains("error["))
+        .stderr(predicate::str::contains("error[CLI-DATABASE]"))
+        .stderr(predicate::str::contains("correlation="))
         .stderr(predicate::str::contains("operation failed"));
 }
 
@@ -140,23 +143,18 @@ fn phase_one_cli_crud_operates_on_sqlite() {
         "alice@example.com",
         "--display-name",
         "Alice",
-        "--password",
-        "long enough password",
+        "--password-stdin",
     ])
+    .write_stdin("long enough password\n")
     .output()
     .unwrap();
     assert!(user_output.status.success());
     let user: serde_json::Value = serde_json::from_slice(&user_output.stdout).unwrap();
     let user_id = user["id"].as_str().unwrap();
-    run(&[
-        "user",
-        "passwd",
-        user_id,
-        "--password",
-        "Orbit!Cobalt7-River$Quartz",
-    ])
-    .assert()
-    .success();
+    run(&["user", "passwd", user_id, "--password-stdin"])
+        .write_stdin("Orbit!Cobalt7-River$Quartz\n")
+        .assert()
+        .success();
     let token_output = run(&["token", "create", user_id, "cli-test", "--scopes", "admin"])
         .output()
         .unwrap();
@@ -283,8 +281,8 @@ async fn members_sync_is_atomic_role_scoped_and_dry_run_has_zero_writes() {
         malformed.to_str().unwrap(),
     ])
     .assert()
-    .failure()
-    .stderr(predicate::str::contains("invalid email address"));
+    .code(2)
+    .stderr(predicate::str::contains("error[CLI-VALIDATION]"));
     assert_eq!(db.audit().list().await.unwrap().len(), before);
     assert_eq!(
         db.members()

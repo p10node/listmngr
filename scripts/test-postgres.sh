@@ -28,7 +28,8 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 run migrate
-run status
+# status probes a running HTTP service; this backend gate intentionally has none.
+run domains ls >/dev/null
 cargo test --locked -p listmngr-db --test repositories \
   postgres_repeated_migrate_schema_and_crud_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test schema_contract \

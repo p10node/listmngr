@@ -558,9 +558,8 @@ impl Config {
                     ));
                 }
             }
-            let value = std::fs::read_to_string(secret_file).map_err(|error| {
-                Error::Validation(format!("cannot read database.url_file: {error}"))
-            })?;
+            let value = std::fs::read_to_string(secret_file)
+                .map_err(|_| Error::Validation("cannot read database.url_file".into()))?;
             let value = value.trim();
             if value.is_empty() {
                 return Err(Error::Validation("database.url_file is empty".into()));

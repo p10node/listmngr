@@ -68,6 +68,53 @@ For a direct image build, use `docker build -f deploy/Dockerfile -t listmngr:dev
 
 The builder installs exact-version musl C headers required by `ring` and SQLite; see `deploy/README.md`. Ordinary `down` preserves PostgreSQL data. Use `down -v` only for a deliberately disposable test project, never as a routine production shutdown.
 
+## CLI passwords, status, and exit codes
+
+`user create` and `user passwd` prompt for a hidden password by default. For
+automation use `--password-stdin` or, on Unix, `--password-fd FD`; the two options
+are mutually exclusive. The old `--password VALUE` option is rejected: passwords
+must not enter process arguments or shell history. For example:
+
+```sh
+# Interactive, hidden prompt:
+listmngr user create owner@example.com --display-name Owner --server-owner
+# Automation: the input file must be protected and contain only the password.
+USER_ID='replace-with-the-user-uuid'
+listmngr user passwd "$USER_ID" --password-stdin < /protected/path/password
+# Unix inherited descriptor, without putting the secret in argv:
+listmngr user passwd "$USER_ID" --password-fd 3 3< /protected/path/password
+```
+
+Input is UTF-8, limited to 1,024 password bytes by the shared password policy.
+One final LF or CRLF is removed from stdin/FD input; oversized input is rejected,
+not silently truncated. Password strength checks still apply. An issued API token
+is printed once to stdout; keep that output out of logs.
+
+`listmngr status` probes `/healthz` and then `/readyz` on `web.listen`, without
+opening its own database connection. Wildcard IPv4/IPv6 addresses are mapped to
+their loopback equivalents. Each HTTP request has a two-second timeout; environment
+proxies and redirects are disabled. Start `serve` first: a reachable database alone
+does not make a stopped HTTP service healthy. `members find` and `members del`
+validate and normalize complete email addresses, including IDNA domains.
+
+| Exit | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Unexpected internal failure |
+| 2 | Invalid command line, input, or configuration |
+| 3 | HTTP status endpoint unreachable or timed out |
+| 4 | `/healthz` returned a non-success status |
+| 5 | Healthy process, but `/readyz` returned a non-success status |
+| 6 | Resource conflict |
+| 7 | Resource not found |
+| 8 | Authentication, authorization, or rate-limit rejection |
+| 9 | Input/output failure |
+| 10 | Database connection, query, or migration failure |
+
+Runtime errors emit a stable `error[CLI-…]` category and a correlation UUID,
+without raw error chains, input values, or database credentials. Usage errors are
+also redacted; use `--help` for command syntax.
+
 ## Configuration and deployment
 
 Configuration is TOML plus `LISTMNGR__SECTION__KEY` environment overrides. Prefer `database.url_file` or a root-readable environment file in production; `conf` output redacts credentials. See:
