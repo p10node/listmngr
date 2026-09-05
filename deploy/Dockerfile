@@ -1,4 +1,6 @@
 FROM rust:1.88.0-alpine3.22@sha256:9dfaae478ecd298b6b5a039e1f2cc4fc040fc818a2de9aa78fa714dea036574d AS builder
+# ring and bundled SQLite compile C; the Rust Alpine base omits libc headers.
+RUN apk add --no-cache musl=1.2.5-r12 musl-dev=1.2.5-r12
 WORKDIR /src
 COPY . .
 RUN cargo build --locked --release -p listmngr \

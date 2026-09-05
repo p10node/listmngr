@@ -21,6 +21,12 @@ Primary boundaries are public HTTP to Axum, authenticated adapters to repositori
 | Denial of service | Repeated invalid auth or oversized input | Peer-keyed pre-auth limits and input bounds | Reverse-proxy limits and resource monitoring remain required |
 | Elevation of privilege | Scoped token crosses list/domain | Resource-bound authorization checks | Regression tests must cover every new write endpoint |
 
+## API rate limiting
+
+API requests pass through two in-memory stages. Before credential parsing, `security.rate_limit.api_pre_auth` limits the actual TCP socket peer IP; `X-Forwarded-For` is deliberately ignored. After successful credential validation, `security.rate_limit.api` limits the stable account/token identity. If `api_pre_auth` is omitted, it inherits `api`. Values use a positive `COUNT/WINDOW` form with `s`, `min`, `hour`, or `day` windows and are validated when configuration loads. Rejections return HTTP 429 with an integer `Retry-After` header and occur before token usage timestamps, handlers, business writes, or audit writes at that stage.
+
+These maps are node-local: replicas do not coordinate counters, and restarting a process clears its buckets. Deployments requiring a global limit must add a shared limiter or an edge/reverse-proxy policy; this process-local control must not be treated as multi-node abuse protection.
+
 ## Deployment controls
 
 The Compose application uses a static musl binary in `scratch`, numeric UID/GID 1000, a read-only root filesystem, all capabilities dropped, `no-new-privileges`, and a bounded tmpfs. The healthcheck executes `listmngr status`; no shell or `curl` is installed. PostgreSQL credentials are supplied at runtime and must match the application URL.

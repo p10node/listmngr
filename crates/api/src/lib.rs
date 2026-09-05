@@ -4,22 +4,24 @@
 
 use axum::{
     Json, Router,
-    body::Bytes,
+    body::{Body, Bytes, to_bytes},
     extract::{ConnectInfo, FromRequest, Path, Query, Request, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
 use base64::Engine;
 use dashmap::DashMap;
 use listmngr_core::{
-    Config, Error, ListId, MemberId, MemberRole, Preferences, SubscriptionMode, UserId,
-    builtin_styles,
+    Config, DeliveryMode, DeliveryStatus, Error, ListId, MemberId, MemberRole, Preferences,
+    SubscriptionMode, UserId, builtin_styles,
 };
-use listmngr_db::{Database, NewList, NewMember, NewUser, TokenAuth};
+use listmngr_db::{AuditContext, Database, NewList, NewMember, NewUser, TokenAuth};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     net::SocketAddr,
     sync::Arc,
@@ -65,10 +67,189 @@ struct ErrorResponse {
     detail: &'static str,
 }
 
+macro_rules! page_response {
+    ($name:ident, $item:ty) => {
+        #[derive(Debug, Serialize, utoipa::ToSchema)]
+        pub struct $name {
+            pub items: Vec<$item>,
+            pub next_cursor: Option<String>,
+            pub total: usize,
+            pub start: usize,
+            pub count: usize,
+        }
+    };
+}
+
+page_response!(StringPageResponse, String);
+page_response!(CatalogPageResponse, CatalogEntry);
+page_response!(DomainPageResponse, listmngr_core::Domain);
+page_response!(MailingListPageResponse, listmngr_core::MailingList);
+page_response!(UserPageResponse, listmngr_core::User);
+page_response!(ArchiverPageResponse, ArchiverResponse);
+page_response!(TemplatePageResponse, listmngr_db::Template);
+page_response!(MemberPageResponse, listmngr_core::Member);
+page_response!(AddressPageResponse, listmngr_core::Address);
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct CatalogEntry {
+    pub name: String,
+    pub phase: String,
+    pub executable: bool,
+    pub status: String,
+}
+
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[into_params(parameter_in = Query)]
+pub struct PageQuery {
+    /// Opaque offset cursor returned by the previous native page.
+    pub cursor: Option<String>,
+    /// One-based compatibility page number. Cannot be combined with cursor.
+    pub page: Option<usize>,
+    /// Maximum entries to return (1..=100, default 50).
+    pub count: Option<usize>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct SystemVersionsResponse {
+    pub listmngr_version: String,
+    pub api_version: String,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ConfigurationResponse {
+    pub sections: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct UriResponse {
+    pub self_link: Option<String>,
+    pub posting_address: Option<String>,
+    pub bounces_address: Option<String>,
+    pub join_address: Option<String>,
+    pub leave_address: Option<String>,
+    pub owner_address: Option<String>,
+    pub request_address: Option<String>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ListConfigResponse {
+    pub display_name: String,
+    pub description: String,
+    pub info: String,
+    pub subject_prefix: String,
+    pub advertised: bool,
+    pub preferred_language: String,
+    pub anonymous_list: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_post_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub post_id: i64,
+    pub volume: i32,
+    pub next_digest_number: i64,
+    pub digest_last_sent_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub emergency: bool,
+    pub archive_policy: listmngr_core::ArchivePolicy,
+    pub archive_rendering_mode: listmngr_core::ArchiveRenderingMode,
+    pub style_name: String,
+    pub mail_host: String,
+    pub list_name: String,
+    pub fqdn_listname: String,
+    pub list_id: ListId,
+    pub posting_address: String,
+    pub bounces_address: String,
+    pub join_address: String,
+    pub leave_address: String,
+    pub owner_address: String,
+    pub request_address: String,
+    pub no_reply_address: String,
+}
+
+#[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListConfigInput {
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub info: Option<String>,
+    pub subject_prefix: Option<String>,
+    pub advertised: Option<bool>,
+    pub preferred_language: Option<String>,
+    pub anonymous_list: Option<bool>,
+    pub next_digest_number: Option<i64>,
+    pub emergency: Option<bool>,
+    pub archive_policy: Option<listmngr_core::ArchivePolicy>,
+    pub archive_rendering_mode: Option<listmngr_core::ArchiveRenderingMode>,
+}
+
+#[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MemberPatchInput {
+    pub display_name: Option<String>,
+    pub delivery_mode: Option<DeliveryMode>,
+    pub delivery_status: Option<DeliveryStatus>,
+}
+
+#[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UserPatchInput {
+    pub display_name: Option<String>,
+    pub locale: Option<String>,
+    pub timezone: Option<String>,
+    pub is_server_owner: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyMutationInput {}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ProcessedResponse {
+    pub processed: usize,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct LoginResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct AddressUserResponse {
+    pub user_id: Option<UserId>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub enum ListConfigAttributeValue {
+    Text(String),
+    Boolean(bool),
+    Integer(i64),
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ArchiverResponse {
+    pub name: String,
+    pub enabled: bool,
+}
+
 struct SecurityAddon;
 impl utoipa::Modify for SecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::header::Header;
+        use utoipa::openapi::path::Operation;
         use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+        use utoipa::openapi::{Object, RefOr, Type};
+
+        fn add_retry_after(operation: &mut Option<Operation>) {
+            let Some(operation) = operation else {
+                return;
+            };
+            let Some(RefOr::T(response)) = operation.responses.responses.get_mut("429") else {
+                return;
+            };
+            let mut seconds = Object::with_type(Type::Integer);
+            seconds.minimum = Some(1.into());
+            response
+                .headers
+                .insert("Retry-After".into(), Header::new(seconds));
+        }
+
         if let Some(components) = openapi.components.as_mut() {
             components.add_security_scheme(
                 "bearerAuth",
@@ -79,6 +260,14 @@ impl utoipa::Modify for SecurityAddon {
                         .build(),
                 ),
             );
+        }
+
+        for item in openapi.paths.paths.values_mut() {
+            add_retry_after(&mut item.get);
+            add_retry_after(&mut item.post);
+            add_retry_after(&mut item.put);
+            add_retry_after(&mut item.patch);
+            add_retry_after(&mut item.delete);
         }
     }
 }
@@ -151,7 +340,21 @@ impl utoipa::Modify for SecurityAddon {
         address_all_preferences,
         owners
     ),
-    components(schemas(ErrorResponse)),
+    components(schemas(
+        ErrorResponse, StringPageResponse, CatalogPageResponse, CatalogEntry, PageQuery,
+        DomainPageResponse, MailingListPageResponse,
+        UserPageResponse, ArchiverPageResponse, TemplatePageResponse, MemberPageResponse,
+        AddressPageResponse, SystemVersionsResponse, ConfigurationResponse, UriResponse,
+        ListConfigResponse, ListConfigInput, ListConfigAttributeValue, MemberPatchInput,
+        UserPatchInput, EmptyMutationInput, ProcessedResponse, LoginResponse, AddressUserResponse,
+        ArchiverResponse,
+        DomainInput, ListQuery, ListInput, MemberInput, ConfirmationInput, WorkflowInput,
+        MassMemberRow, MassMemberInput, FindInput, LoginInput, LinkInput, UserLink,
+        Preferences, listmngr_core::Domain, listmngr_core::MailingList, listmngr_core::Member,
+        listmngr_core::User, listmngr_core::Address, listmngr_db::NewUser,
+        listmngr_db::NewList, listmngr_db::NewMember, listmngr_db::MemberMassResult,
+        listmngr_db::Template
+    )),
     modifiers(&SecurityAddon)
 )]
 struct ApiDoc;
@@ -160,7 +363,8 @@ struct ApiDoc;
 pub struct AppState {
     db: Database,
     config: Config,
-    rate: Arc<RateLimiter>,
+    pre_auth_rate: Arc<RateLimiter>,
+    post_auth_rate: Arc<RateLimiter>,
     flavor: ApiFlavor,
 }
 
@@ -173,17 +377,51 @@ enum ApiFlavor {
 #[derive(Debug)]
 struct RateLimiter {
     limit: u32,
+    window: Duration,
     hits: DashMap<String, (Instant, u32)>,
 }
 impl RateLimiter {
-    fn check(&self, key: &str) -> bool {
+    fn from_config(spec: &str) -> Self {
+        let (limit, unit) = spec.split_once('/').unwrap_or_else(|| {
+            panic!("invalid security.rate_limit.api `{spec}`: expected COUNT/WINDOW")
+        });
+        let limit = limit
+            .parse::<u32>()
+            .ok()
+            .filter(|limit| *limit > 0)
+            .unwrap_or_else(|| {
+                panic!("invalid security.rate_limit.api `{spec}`: count must be positive")
+            });
+        let window = match unit {
+            "s" | "sec" | "second" => Duration::from_secs(1),
+            "m" | "min" | "minute" => Duration::from_secs(60),
+            "h" | "hour" => Duration::from_secs(60 * 60),
+            "d" | "day" => Duration::from_secs(24 * 60 * 60),
+            _ => panic!("invalid security.rate_limit.api `{spec}`: unsupported window"),
+        };
+        Self {
+            limit,
+            window,
+            hits: DashMap::new(),
+        }
+    }
+
+    fn check(&self, key: &str) -> Result<(), u64> {
         let now = Instant::now();
         let mut hit = self.hits.entry(key.to_owned()).or_insert((now, 0));
-        if now.duration_since(hit.0) >= Duration::from_secs(60) {
+        if now.duration_since(hit.0) >= self.window {
             *hit = (now, 0);
         }
         hit.1 += 1;
-        hit.1 <= self.limit
+        if hit.1 <= self.limit {
+            Ok(())
+        } else {
+            Err(self
+                .window
+                .saturating_sub(now.duration_since(hit.0))
+                .as_secs()
+                .max(1))
+        }
     }
 }
 
@@ -191,21 +429,25 @@ impl RateLimiter {
 struct ApiError(Error);
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match self.0 {
+        let retry_after = match &self.0 {
+            Error::RateLimited { retry_after } => Some(*retry_after),
+            _ => None,
+        };
+        let status = match &self.0 {
             Error::Authentication => StatusCode::UNAUTHORIZED,
             Error::Forbidden(_) => StatusCode::FORBIDDEN,
             Error::NotFound(_) => StatusCode::NOT_FOUND,
             Error::Conflict(_) => StatusCode::CONFLICT,
-            Error::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+            Error::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
             Error::Validation(_) | Error::InvalidListId(_) => StatusCode::BAD_REQUEST,
             Error::Config(_) | Error::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        let code = match self.0 {
+        let code = match &self.0 {
             Error::Authentication => "authentication",
             Error::Forbidden(_) => "forbidden",
             Error::NotFound(_) => "not_found",
             Error::Conflict(_) => "conflict",
-            Error::RateLimited => "rate_limited",
+            Error::RateLimited { .. } => "rate_limited",
             Error::Validation(_) | Error::InvalidListId(_) => "validation",
             Error::Config(_) | Error::Database(_) => "internal",
         };
@@ -216,7 +458,7 @@ impl IntoResponse for ApiError {
         } else {
             title
         };
-        (
+        let mut response = (
             status,
             Json(ErrorResponse {
                 code,
@@ -225,7 +467,13 @@ impl IntoResponse for ApiError {
                 detail,
             }),
         )
-            .into_response()
+            .into_response();
+        if let Some(retry_after) = retry_after {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, retry_after.into());
+        }
+        response
     }
 }
 impl From<Error> for ApiError {
@@ -235,14 +483,21 @@ impl From<Error> for ApiError {
 }
 type ApiResult<T> = Result<T, ApiError>;
 
-pub fn router(db: Database, config: Config, rate_per_minute: u32) -> Router {
+pub fn router(db: Database, config: Config) -> Router {
+    let pre_auth_rate = RateLimiter::from_config(
+        config
+            .security
+            .rate_limit
+            .api_pre_auth
+            .as_deref()
+            .unwrap_or(&config.security.rate_limit.api),
+    );
+    let post_auth_rate = RateLimiter::from_config(&config.security.rate_limit.api);
     let state = AppState {
         db,
         config,
-        rate: Arc::new(RateLimiter {
-            limit: rate_per_minute,
-            hits: DashMap::new(),
-        }),
+        pre_auth_rate: Arc::new(pre_auth_rate),
+        post_auth_rate: Arc::new(post_auth_rate),
         flavor: ApiFlavor::V1,
     };
     let mut compat_state = state.clone();
@@ -254,8 +509,48 @@ pub fn router(db: Database, config: Config, rate_per_minute: u32) -> Router {
         .route("/openapi.json", get(openapi))
         .route("/api/docs", get(swagger))
         .nest("/3.1", phase_one_routes().with_state(compat_state))
-        .nest("/api/v1", phase_one_routes().with_state(state.clone()))
+        .nest(
+            "/api/v1",
+            phase_one_routes()
+                .layer(middleware::from_fn(typed_etag))
+                .with_state(state.clone()),
+        )
+        .layer(middleware::from_fn(trace_request))
         .with_state(state)
+}
+
+async fn typed_etag(request: Request, next: Next) -> Response {
+    let is_get = request.method() == Method::GET;
+    let response = next.run(request).await;
+    if !is_get || !response.status().is_success() || response.headers().contains_key(header::ETAG) {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let Ok(bytes) = to_bytes(body, usize::MAX).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let digest = base64::engine::general_purpose::STANDARD_NO_PAD.encode(Sha256::digest(&bytes));
+    let value = HeaderValue::from_str(&format!("\"sha256-{digest}\""))
+        .expect("base64 SHA-256 is a valid entity tag");
+    parts.headers.insert(header::ETAG, value);
+    Response::from_parts(parts, Body::from(bytes))
+}
+
+async fn trace_request(request: Request, next: Next) -> Response {
+    let request_id = uuid::Uuid::now_v7();
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    tracing::info!(%request_id, %method, %uri, "HTTP request started");
+    let mut response = next.run(request).await;
+    tracing::info!(%request_id, %method, %uri, status = %response.status(), "HTTP request completed");
+    response.headers_mut().insert(
+        header::HeaderName::from_static("x-request-id"),
+        request_id
+            .to_string()
+            .parse()
+            .expect("UUID is a header value"),
+    );
+    response
 }
 
 fn phase_one_routes() -> Router<AppState> {
@@ -373,16 +668,17 @@ async fn swagger() -> Html<&'static str> {
     )
 }
 
-async fn authorize(
+async fn authenticate_for_authorization(
     state: &AppState,
     headers: &HeaderMap,
     addr: SocketAddr,
     scope: &str,
 ) -> ApiResult<TokenAuth> {
-    let peer_key = addr.ip().to_string();
-    if !state.rate.check(&peer_key) {
-        return Err(ApiError(Error::RateLimited));
-    }
+    let peer_key = format!("socket-ip:{}", addr.ip());
+    state
+        .pre_auth_rate
+        .check(&peer_key)
+        .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     let value = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -390,7 +686,7 @@ async fn authorize(
     let token = if let Some(token) = value.strip_prefix("Bearer ") {
         token.to_owned()
     } else if let Some(encoded) = value.strip_prefix("Basic ") {
-        if !state.config.api.compat_basic_auth {
+        if !matches!(state.flavor, ApiFlavor::Compat31) || !state.config.api.compat_basic_auth {
             return Err(ApiError(Error::Authentication));
         }
         let ip = addr.ip();
@@ -414,12 +710,149 @@ async fn authorize(
     } else {
         return Err(ApiError(Error::Authentication));
     };
-    let auth = state.db.tokens().authenticate(&token).await?;
+    let auth = state.db.tokens().authenticate_without_usage(&token).await?;
+    let account_key = format!("account:{}:token:{}", auth.user_id, auth.id);
+    state
+        .post_auth_rate
+        .check(&account_key)
+        .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     if !auth.has_scope(scope) {
         return Err(ApiError(Error::Forbidden(scope.into())));
     }
     Ok(auth)
 }
+
+async fn finish_authorization(state: &AppState, auth: TokenAuth) -> ApiResult<TokenAuth> {
+    state.db.tokens().mark_used(auth.id).await?;
+    Ok(auth)
+}
+
+async fn authorize(
+    state: &AppState,
+    headers: &HeaderMap,
+    addr: SocketAddr,
+    scope: &str,
+) -> ApiResult<TokenAuth> {
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
+    finish_authorization(state, auth).await
+}
+
+const fn audit_context(auth: &TokenAuth, addr: SocketAddr) -> AuditContext {
+    AuditContext::new(Some(auth.user_id), Some(auth.id), Some(addr.ip()))
+}
+
+fn is_unbound(auth: &TokenAuth) -> bool {
+    auth.scopes.contains("admin") || (auth.list_id.is_none() && auth.domain_id.is_none())
+}
+
+async fn auth_allows_list(state: &AppState, auth: &TokenAuth, list: &ListId) -> ApiResult<bool> {
+    let domain = state.db.domains().get(list.mail_host()).await?;
+    Ok(auth.allows_list(list, domain.id))
+}
+
+async fn filter_members_for_auth(
+    state: &AppState,
+    auth: &TokenAuth,
+    members: Vec<listmngr_core::Member>,
+) -> ApiResult<Vec<listmngr_core::Member>> {
+    let mut allowed = Vec::new();
+    for member in members {
+        if auth_allows_list(state, auth, &member.list_id).await? {
+            allowed.push(member);
+        }
+    }
+    Ok(allowed)
+}
+
+async fn auth_allows_user(state: &AppState, auth: &TokenAuth, user: UserId) -> ApiResult<bool> {
+    if is_unbound(auth) {
+        return Ok(true);
+    }
+    let list_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT m.list_id FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.user_id=$1 OR a.user_id=$2",
+    )
+    .bind(user.to_string())
+    .bind(user.to_string())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|error| ApiError(Error::Database(error.to_string())))?;
+    for value in list_ids {
+        let list: ListId = value.parse()?;
+        if auth_allows_list(state, auth, &list).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+async fn auth_allows_address(state: &AppState, auth: &TokenAuth, email: &str) -> ApiResult<bool> {
+    if is_unbound(auth) {
+        return Ok(true);
+    }
+    let members = state.db.members().find(email).await?;
+    Ok(!filter_members_for_auth(state, auth, members)
+        .await?
+        .is_empty())
+}
+
+async fn authorize_user(
+    state: &AppState,
+    headers: &HeaderMap,
+    addr: SocketAddr,
+    scope: &str,
+    user: UserId,
+) -> ApiResult<TokenAuth> {
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
+    if !auth_allows_user(state, &auth, user).await? {
+        return Err(ApiError(Error::Forbidden(scope.into())));
+    }
+    finish_authorization(state, auth).await
+}
+
+async fn authorize_address(
+    state: &AppState,
+    headers: &HeaderMap,
+    addr: SocketAddr,
+    scope: &str,
+    email: &str,
+) -> ApiResult<TokenAuth> {
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
+    if !auth_allows_address(state, &auth, email).await? {
+        return Err(ApiError(Error::Forbidden(scope.into())));
+    }
+    finish_authorization(state, auth).await
+}
+
+async fn authorize_user_and_address(
+    state: &AppState,
+    headers: &HeaderMap,
+    addr: SocketAddr,
+    scope: &str,
+    user: UserId,
+    email: &str,
+) -> ApiResult<TokenAuth> {
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
+    if !auth_allows_user(state, &auth, user).await?
+        || !auth_allows_address(state, &auth, email).await?
+    {
+        return Err(ApiError(Error::Forbidden(scope.into())));
+    }
+    finish_authorization(state, auth).await
+}
+
+async fn authorize_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+    addr: SocketAddr,
+    scope: &str,
+) -> ApiResult<TokenAuth> {
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
+    if !auth.scopes.contains("admin") {
+        return Err(ApiError(Error::Forbidden("admin".into())));
+    }
+    finish_authorization(state, auth).await
+}
+
 async fn authorize_domain(
     state: &AppState,
     headers: &HeaderMap,
@@ -427,7 +860,7 @@ async fn authorize_domain(
     scope: &str,
     host: &str,
 ) -> ApiResult<TokenAuth> {
-    let auth = authorize(state, headers, addr, scope).await?;
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
     let domain = state.db.domains().get(host).await?;
     let list_matches = auth
         .list_id
@@ -436,7 +869,7 @@ async fn authorize_domain(
     if !auth.allows_domain(domain.id) || !list_matches {
         return Err(ApiError(Error::Forbidden(scope.into())));
     }
-    Ok(auth)
+    finish_authorization(state, auth).await
 }
 async fn authorize_list(
     state: &AppState,
@@ -445,12 +878,12 @@ async fn authorize_list(
     scope: &str,
     list: &ListId,
 ) -> ApiResult<TokenAuth> {
-    let auth = authorize(state, headers, addr, scope).await?;
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
     let domain = state.db.domains().get(list.mail_host()).await?;
     if !auth.allows_list(list, domain.id) {
         return Err(ApiError(Error::Forbidden(scope.into())));
     }
-    Ok(auth)
+    finish_authorization(state, auth).await
 }
 async fn authorize_member(
     state: &AppState,
@@ -459,26 +892,65 @@ async fn authorize_member(
     scope: &str,
     member_id: MemberId,
 ) -> ApiResult<(TokenAuth, listmngr_core::Member)> {
-    let auth = authorize(state, headers, addr, scope).await?;
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
     let member = state.db.members().get(member_id).await?;
     let domain = state.db.domains().get(member.list_id.mail_host()).await?;
     if !auth.allows_list(&member.list_id, domain.id) {
         return Err(ApiError(Error::Forbidden(scope.into())));
     }
-    Ok((auth, member))
+    Ok((finish_authorization(state, auth).await?, member))
 }
 const fn peer(connect: ConnectInfo<SocketAddr>) -> SocketAddr {
     connect.0
 }
-fn page<T: Serialize>(flavor: ApiFlavor, entries: T) -> Value {
+fn paged<T: Serialize>(flavor: ApiFlavor, entries: T, query: &PageQuery) -> Result<Value, Error> {
     let entries = serde_json::to_value(entries).expect("page entries serialize");
-    let total_size = entries.as_array().map_or(0, Vec::len);
-    match flavor {
-        ApiFlavor::Compat31 => {
-            json!({"entries":entries,"start":0,"total_size":total_size,"http_etag":"phase1"})
-        }
-        ApiFlavor::V1 => json!({"items":entries,"next_cursor":null}),
+    let entries = entries
+        .as_array()
+        .ok_or_else(|| Error::Validation("page entries must be an array".into()))?;
+    let total = entries.len();
+    let count = query.count.unwrap_or(50);
+    if !(1..=100).contains(&count) {
+        return Err(Error::Validation("count must be between 1 and 100".into()));
     }
+    if query.cursor.is_some() && query.page.is_some() {
+        return Err(Error::Validation(
+            "cursor and page cannot be combined".into(),
+        ));
+    }
+    let requested_start = if let Some(cursor) = &query.cursor {
+        cursor
+            .parse::<usize>()
+            .map_err(|_| Error::Validation("invalid cursor".into()))?
+    } else if let Some(page) = query.page {
+        if page == 0 {
+            return Err(Error::Validation("page is one-based".into()));
+        }
+        (page - 1).saturating_mul(count)
+    } else {
+        0
+    };
+    let start = requested_start.min(total);
+    let end = start.saturating_add(count).min(total);
+    let selected = entries[start..end].to_vec();
+    let returned = selected.len();
+    let next_cursor = (end < total).then(|| end.to_string());
+    Ok(match flavor {
+        ApiFlavor::Compat31 => json!({
+            "entries": selected,
+            "start": start,
+            "count": returned,
+            "total_size": total,
+            "http_etag": "phase1"
+        }),
+        ApiFlavor::V1 => json!({
+            "items": selected,
+            "next_cursor": next_cursor,
+            "total": total,
+            "start": start,
+            "count": returned
+        }),
+    })
 }
 
 fn domain_value(flavor: ApiFlavor, domain: &listmngr_core::Domain) -> Value {
@@ -493,8 +965,9 @@ fn domain_value(flavor: ApiFlavor, domain: &listmngr_core::Domain) -> Value {
 }
 
 #[utoipa::path(
-    get, path = "/api/v1/system/versions",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/system/versions",
+    responses((status = 200, description = "Successful operation", body = SystemVersionsResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn system_versions(
@@ -508,8 +981,9 @@ async fn system_versions(
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/system/configuration",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/system/configuration",
+    responses((status = 200, description = "Successful operation", body = ConfigurationResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn system_config(
@@ -521,8 +995,10 @@ async fn system_config(
     Ok(Json(s.config.redacted_json()))
 }
 #[utoipa::path(
-    get, path = "/api/v1/system/configuration/{section}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/system/configuration/{section}",
+    params(("section" = String, Path, description = "section path parameter")),
+    responses((status = 200, description = "Successful operation", body = ConfigurationResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn system_config_section(
@@ -541,8 +1017,9 @@ async fn system_config_section(
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/system/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/system/preferences",
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn system_preferences(
@@ -557,30 +1034,69 @@ async fn system_preferences(
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/system/pipelines",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/system/pipelines",
+    params(PageQuery),
+    responses((status = 200, description = "Successful operation", body = CatalogPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn system_pipelines(
     State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "system:read").await?;
-    Ok(Json(page(s.flavor, Vec::<Value>::new())))
+    Ok(Json(paged(
+        s.flavor,
+        [
+            "default-posting-pipeline",
+            "virgin",
+            "default-owner-pipeline",
+        ]
+        .map(catalog_entry),
+        &page_query,
+    )?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/system/chains",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/system/chains",
+    params(PageQuery),
+    responses((status = 200, description = "Successful operation", body = CatalogPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn system_chains(
     State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "system:read").await?;
-    Ok(Json(page(s.flavor, Vec::<Value>::new())))
+    Ok(Json(paged(
+        s.flavor,
+        [
+            "default-posting-chain",
+            "default-owner-chain",
+            "accept",
+            "hold",
+            "reject",
+            "discard",
+            "moderation",
+            "header-match",
+            "dmarc-mitigation",
+        ]
+        .map(catalog_entry),
+        &page_query,
+    )?))
+}
+
+fn catalog_entry(name: &str) -> Value {
+    json!({
+        "name": name,
+        "phase": "phase1",
+        "executable": false,
+        "status": "catalog_only"
+    })
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -591,8 +1107,10 @@ struct DomainInput {
     alias_domain: Option<String>,
 }
 #[utoipa::path(
-    post, path = "/api/v1/domains",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/domains",
+    request_body(content((DomainInput = "application/json"), (DomainInput = "application/x-www-form-urlencoded"))),
+    responses((status = 201, description = "Successful operation", body = listmngr_core::Domain), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn domains_create(
@@ -601,10 +1119,20 @@ async fn domains_create(
     c: ConnectInfo<SocketAddr>,
     JsonOrForm(v): JsonOrForm<DomainInput>,
 ) -> ApiResult<Response> {
-    authorize(&s, &h, peer(c), "lists:write").await?;
+    let addr = peer(c);
+    let auth = authenticate_for_authorization(&s, &h, addr, "lists:write").await?;
+    if !is_unbound(&auth) {
+        return Err(ApiError(Error::Forbidden("lists:write".into())));
+    }
+    let auth = finish_authorization(&s, auth).await?;
     let domain =
         s.db.domains()
-            .create(&v.mail_host, &v.description, v.alias_domain.as_deref())
+            .create_with_context(
+                &v.mail_host,
+                &v.description,
+                v.alias_domain.as_deref(),
+                &audit_context(&auth, addr),
+            )
             .await?;
     let value = domain_value(s.flavor, &domain);
     let response = match s.flavor {
@@ -622,21 +1150,41 @@ async fn domains_create(
     Ok(response)
 }
 #[utoipa::path(
-    get, path = "/api/v1/domains",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/domains",
+    params(PageQuery),
+    responses((status = 200, description = "Successful operation", body = DomainPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn domains_list(
     State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "lists:read").await?;
-    Ok(Json(page(s.flavor, s.db.domains().list().await?)))
+    let auth = authenticate_for_authorization(&s, &h, peer(c), "lists:read").await?;
+    let domains =
+        s.db.domains()
+            .list()
+            .await?
+            .into_iter()
+            .filter(|domain| {
+                auth.allows_domain(domain.id)
+                    && auth
+                        .list_id
+                        .as_ref()
+                        .is_none_or(|list| list.mail_host() == domain.mail_host)
+            })
+            .map(|domain| domain_value(s.flavor, &domain))
+            .collect::<Vec<_>>();
+    finish_authorization(&s, auth).await?;
+    Ok(Json(paged(s.flavor, domains, &page_query)?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/domains/{host}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/domains/{host}",
+    params(("host" = String, Path, description = "host path parameter")),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::Domain), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn domains_get(
@@ -652,8 +1200,10 @@ async fn domains_get(
     )))
 }
 #[utoipa::path(
-    delete, path = "/api/v1/domains/{host}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    delete,
+    path = "/api/v1/domains/{host}",
+    params(("host" = String, Path, description = "host path parameter")),
+    responses((status = 204, description = "Deleted"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn domains_delete(
@@ -662,41 +1212,67 @@ async fn domains_delete(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<StatusCode> {
-    authorize_domain(&s, &h, peer(c), "lists:write", &host).await?;
-    s.db.domains().delete(&host).await?;
+    let addr = peer(c);
+    let auth = authorize_domain(&s, &h, addr, "lists:write", &host).await?;
+    s.db.domains()
+        .delete_with_context(&host, &audit_context(&auth, addr))
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(
-    get, path = "/api/v1/domains/{host}/lists",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/domains/{host}/lists",
+    params(PageQuery, ("host" = String, Path, description = "host path parameter")),
+    responses((status = 200, description = "Successful operation", body = MailingListPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn domain_lists(
     State(s): State<AppState>,
     Path(host): Path<String>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize_domain(&s, &h, peer(c), "lists:read", &host).await?;
-    Ok(Json(page(s.flavor, s.db.lists().by_domain(&host).await?)))
+    let auth = authenticate_for_authorization(&s, &h, peer(c), "lists:read").await?;
+    let domain = s.db.domains().get(&host).await?;
+    if !auth.allows_domain(domain.id) {
+        return Err(ApiError(Error::Forbidden("lists:read".into())));
+    }
+    let mut lists = Vec::new();
+    for list in s.db.lists().by_domain(&host).await? {
+        if auth.allows_list(&list.id, domain.id) {
+            lists.push(list_value(s.flavor, &list));
+        }
+    }
+    finish_authorization(&s, auth).await?;
+    Ok(Json(paged(s.flavor, lists, &page_query)?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/domains/{host}/owners",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/domains/{host}/owners",
+    params(PageQuery, ("host" = String, Path, description = "host path parameter")),
+    responses((status = 200, description = "Successful operation", body = UserPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn domain_owners(
     State(s): State<AppState>,
     Path(host): Path<String>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize_domain(&s, &h, peer(c), "lists:read", &host).await?;
-    Ok(Json(page(s.flavor, s.db.domains().owners(&host).await?)))
+    Ok(Json(paged(
+        s.flavor,
+        s.db.domains().owners(&host).await?,
+        &page_query,
+    )?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/domains/{host}/uris",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/domains/{host}/uris",
+    params(("host" = String, Path, description = "host path parameter")),
+    responses((status = 200, description = "Successful operation", body = UriResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn domain_uris(
@@ -714,18 +1290,28 @@ struct ListQuery {
     advertised: Option<bool>,
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists",
+    params(PageQuery, ("advertised" = Option<bool>, Query, description = "Filter by advertised status")),
+    responses((status = 200, description = "Successful operation", body = MailingListPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn lists_list(
     State(s): State<AppState>,
     Query(q): Query<ListQuery>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "lists:read").await?;
-    Ok(Json(page(s.flavor, s.db.lists().list(q.advertised).await?)))
+    let auth = authenticate_for_authorization(&s, &h, peer(c), "lists:read").await?;
+    let mut lists = Vec::new();
+    for list in s.db.lists().list(q.advertised).await? {
+        if auth_allows_list(&s, &auth, &list.id).await? {
+            lists.push(list_value(s.flavor, &list));
+        }
+    }
+    finish_authorization(&s, auth).await?;
+    Ok(Json(paged(s.flavor, lists, &page_query)?))
 }
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 struct ListInput {
@@ -785,8 +1371,10 @@ fn parse_list_path(flavor: ApiFlavor, value: &str) -> Result<ListId, Error> {
 }
 
 #[utoipa::path(
-    post, path = "/api/v1/lists",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/lists",
+    request_body(content((ListInput = "application/json"), (ListInput = "application/x-www-form-urlencoded"))),
+    responses((status = 201, description = "Successful operation", body = listmngr_core::MailingList), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn lists_create(
@@ -795,8 +1383,17 @@ async fn lists_create(
     c: ConnectInfo<SocketAddr>,
     JsonOrForm(v): JsonOrForm<ListInput>,
 ) -> ApiResult<Response> {
-    authorize(&s, &h, peer(c), "lists:write").await?;
-    let list = s.db.lists().create(v.into_new_list()?).await?;
+    let new = v.into_new_list()?;
+    let addr = peer(c);
+    let auth = authenticate_for_authorization(&s, &h, addr, "lists:write").await?;
+    if !auth_allows_list(&s, &auth, &new.list_id).await? {
+        return Err(ApiError(Error::Forbidden("lists:write".into())));
+    }
+    let auth = finish_authorization(&s, auth).await?;
+    let list =
+        s.db.lists()
+            .create_with_context(new, &audit_context(&auth, addr))
+            .await?;
     let value = list_value(s.flavor, &list);
     let response = match s.flavor {
         ApiFlavor::Compat31 => (
@@ -810,8 +1407,10 @@ async fn lists_create(
     Ok(response)
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/{id}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/{id}",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::MailingList), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn lists_get(
@@ -825,8 +1424,10 @@ async fn lists_get(
     Ok(Json(list_value(s.flavor, &s.db.lists().get(&id).await?)))
 }
 #[utoipa::path(
-    delete, path = "/api/v1/lists/{id}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    delete,
+    path = "/api/v1/lists/{id}",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 204, description = "Deleted"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn lists_delete(
@@ -836,32 +1437,41 @@ async fn lists_delete(
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<StatusCode> {
     let id = id.parse()?;
-    authorize_list(&s, &h, peer(c), "lists:write", &id).await?;
-    s.db.lists().delete(&id).await?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "lists:write", &id).await?;
+    s.db.lists()
+        .delete_with_context(&id, &audit_context(&auth, addr))
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/styles",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/styles",
+    params(PageQuery),
+    responses((status = 200, description = "Successful operation", body = StringPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn styles(
     State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "lists:read").await?;
-    Ok(Json(page(
+    Ok(Json(paged(
         s.flavor,
         builtin_styles()
             .iter()
             .map(|v| v.name())
             .collect::<Vec<_>>(),
-    )))
+        &page_query,
+    )?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/{id}/config",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/{id}/config",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = ListConfigResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_config(
@@ -872,10 +1482,13 @@ async fn list_config(
 ) -> ApiResult<Json<Value>> {
     let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
-    Ok(Json(list_config_value(&s.db.lists().get(&id).await?)))
+    Ok(Json(list_config_value(
+        &s.db.lists().get(&id).await?,
+        &s.config.mailman.noreply_address,
+    )))
 }
 
-fn list_config_value(list: &listmngr_core::MailingList) -> Value {
+fn list_config_value(list: &listmngr_core::MailingList, noreply_local_part: &str) -> Value {
     let mut value = serde_json::to_value(list).expect("list config serializes");
     let object = value.as_object_mut().expect("list config is an object");
     object.insert("mail_host".into(), json!(list.id.mail_host()));
@@ -890,13 +1503,16 @@ fn list_config_value(list: &listmngr_core::MailingList) -> Value {
     object.insert("request_address".into(), json!(list.id.request_address()));
     object.insert(
         "no_reply_address".into(),
-        json!(list.id.address_with_suffix("noreply")),
+        json!(format!("{noreply_local_part}@{}", list.id.mail_host())),
     );
     value
 }
 #[utoipa::path(
-    put, path = "/api/v1/lists/{id}/config",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    put,
+    path = "/api/v1/lists/{id}/config",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content((ListConfigInput = "application/json"), (ListConfigInput = "application/x-www-form-urlencoded"))),
+    responses((status = 200, description = "Successful operation", body = ListConfigResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_config_put(
@@ -906,11 +1522,14 @@ async fn list_config_put(
     connect: ConnectInfo<SocketAddr>,
     body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
-    list_config_write(state, path, headers, connect, body).await
+    list_config_write(state, path, headers, connect, body, true).await
 }
 #[utoipa::path(
-    patch, path = "/api/v1/lists/{id}/config",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    patch,
+    path = "/api/v1/lists/{id}/config",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content((ListConfigInput = "application/json"), (ListConfigInput = "application/x-www-form-urlencoded"))),
+    responses((status = 200, description = "Successful operation", body = ListConfigResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_config_patch(
@@ -920,7 +1539,7 @@ async fn list_config_patch(
     connect: ConnectInfo<SocketAddr>,
     body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
-    list_config_write(state, path, headers, connect, body).await
+    list_config_write(state, path, headers, connect, body, false).await
 }
 async fn list_config_write(
     State(s): State<AppState>,
@@ -928,16 +1547,51 @@ async fn list_config_write(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
     JsonOrForm(v): JsonOrForm<Value>,
+    replace: bool,
 ) -> ApiResult<Json<Value>> {
     let id = parse_list_path(s.flavor, &id)?;
-    authorize_list(&s, &h, peer(c), "lists:write", &id).await?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "lists:write", &id).await?;
+    let update = if replace {
+        let defaults = listmngr_core::MailingList::new(id.clone(), id.list_name().to_owned());
+        let mut replacement = json!({
+            "display_name": defaults.display_name,
+            "description": defaults.description,
+            "info": defaults.info,
+            "subject_prefix": defaults.subject_prefix,
+            "advertised": defaults.advertised,
+            "preferred_language": defaults.preferred_language,
+            "anonymous_list": defaults.anonymous_list,
+            "next_digest_number": defaults.next_digest_number,
+            "emergency": defaults.emergency,
+            "archive_policy": defaults.archive_policy,
+            "archive_rendering_mode": defaults.archive_rendering_mode,
+        });
+        let supplied = v
+            .as_object()
+            .ok_or_else(|| ApiError(Error::Validation("list config must be an object".into())))?;
+        replacement
+            .as_object_mut()
+            .expect("replacement is an object")
+            .extend(supplied.clone());
+        replacement
+    } else {
+        v
+    };
     Ok(Json(
-        serde_json::to_value(s.db.lists().update(&id, &v).await?).expect("serialize"),
+        serde_json::to_value(
+            s.db.lists()
+                .update_with_context(&id, &update, &audit_context(&auth, addr))
+                .await?,
+        )
+        .expect("serialize"),
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/{id}/config/{attr}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/{id}/config/{attr}",
+    params(("id" = String, Path, description = "id path parameter"), ("attr" = String, Path, description = "attr path parameter")),
+    responses((status = 200, description = "Successful operation", body = ListConfigAttributeValue), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_config_attr(
@@ -948,7 +1602,10 @@ async fn list_config_attr(
 ) -> ApiResult<Json<Value>> {
     let id = id.parse()?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
-    let v = list_config_value(&s.db.lists().get(&id).await?);
+    let v = list_config_value(
+        &s.db.lists().get(&id).await?,
+        &s.config.mailman.noreply_address,
+    );
     Ok(Json(
         v.get(&attr)
             .cloned()
@@ -956,8 +1613,11 @@ async fn list_config_attr(
     ))
 }
 #[utoipa::path(
-    put, path = "/api/v1/lists/{id}/config/{attr}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    put,
+    path = "/api/v1/lists/{id}/config/{attr}",
+    params(("id" = String, Path, description = "id path parameter"), ("attr" = String, Path, description = "attr path parameter")),
+    request_body(content = ListConfigAttributeValue, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::MailingList), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_config_attr_put(
@@ -970,8 +1630,11 @@ async fn list_config_attr_put(
     list_config_attr_write(state, path, headers, connect, body).await
 }
 #[utoipa::path(
-    patch, path = "/api/v1/lists/{id}/config/{attr}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    patch,
+    path = "/api/v1/lists/{id}/config/{attr}",
+    params(("id" = String, Path, description = "id path parameter"), ("attr" = String, Path, description = "attr path parameter")),
+    request_body(content = ListConfigAttributeValue, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::MailingList), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_config_attr_patch(
@@ -991,7 +1654,8 @@ async fn list_config_attr_write(
     Json(v): Json<Value>,
 ) -> ApiResult<Json<Value>> {
     let id = id.parse()?;
-    authorize_list(&s, &h, peer(c), "lists:write", &id).await?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "lists:write", &id).await?;
     let value = if v.is_object() {
         v.get(&attr)
             .cloned()
@@ -1000,28 +1664,41 @@ async fn list_config_attr_write(
         v
     };
     Ok(Json(
-        serde_json::to_value(s.db.lists().update(&id, &json!({attr:value})).await?)
-            .expect("serialize"),
+        serde_json::to_value(
+            s.db.lists()
+                .update_with_context(&id, &json!({attr:value}), &audit_context(&auth, addr))
+                .await?,
+        )
+        .expect("serialize"),
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/{id}/archivers",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/{id}/archivers",
+    params(PageQuery, ("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = ArchiverPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_archivers(
     State(s): State<AppState>,
     Path(id): Path<String>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     let id = id.parse()?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
-    Ok(Json(page(s.flavor, s.db.lists().archivers(&id).await?)))
+    Ok(Json(paged(
+        s.flavor,
+        s.db.lists().archivers(&id).await?,
+        &page_query,
+    )?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/{id}/uris",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/{id}/uris",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = UriResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_uris(
@@ -1037,19 +1714,26 @@ async fn list_uris(
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/{id}/templates",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/{id}/templates",
+    params(PageQuery, ("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = TemplatePageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_templates(
     State(s): State<AppState>,
     Path(id): Path<String>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     let id = id.parse()?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
-    Ok(Json(page(s.flavor, s.db.lists().templates(&id).await?)))
+    Ok(Json(paged(
+        s.flavor,
+        s.db.lists().templates(&id).await?,
+        &page_query,
+    )?))
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -1143,8 +1827,10 @@ struct MassMemberInput {
     members: Vec<MassMemberRow>,
 }
 #[utoipa::path(
-    post, path = "/api/v1/members/mass",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/members/mass",
+    request_body(content = MassMemberInput, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = ProcessedResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn members_mass(
@@ -1153,7 +1839,8 @@ async fn members_mass(
     c: ConnectInfo<SocketAddr>,
     Json(v): Json<MassMemberInput>,
 ) -> ApiResult<impl IntoResponse> {
-    authorize_list(&s, &h, peer(c), "members:write", &v.list_id).await?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "members:write", &v.list_id).await?;
     if !matches!(v.operation.as_str(), "subscribe" | "unsubscribe" | "sync") {
         return Err(ApiError(Error::Validation(
             "operation must be subscribe, unsubscribe, or sync".into(),
@@ -1167,7 +1854,12 @@ async fn members_mass(
         .collect::<Vec<_>>();
     let count =
         s.db.members()
-            .mass(&v.list_id, &v.operation, &emails)
+            .mass_with_context(
+                &v.list_id,
+                &v.operation,
+                &emails,
+                &audit_context(&auth, addr),
+            )
             .await?;
     Ok((StatusCode::OK, Json(json!({"processed":count}))))
 }
@@ -1175,8 +1867,10 @@ const fn member_role() -> MemberRole {
     MemberRole::Member
 }
 #[utoipa::path(
-    post, path = "/api/v1/members",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/members",
+    request_body(content((MemberInput = "application/json"), (MemberInput = "application/x-www-form-urlencoded"))),
+    responses((status = 201, description = "Successful operation", body = listmngr_core::Member), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn members_create(
@@ -1185,7 +1879,8 @@ async fn members_create(
     c: ConnectInfo<SocketAddr>,
     JsonOrForm(v): JsonOrForm<MemberInput>,
 ) -> ApiResult<Response> {
-    authorize_list(&s, &h, peer(c), "members:write", &v.list_id).await?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "members:write", &v.list_id).await?;
     if v.workflow.invitation
         || !v.confirmation.pre_verified
         || !v.confirmation.pre_confirmed
@@ -1197,15 +1892,18 @@ async fn members_create(
     }
     let member =
         s.db.members()
-            .create(NewMember {
-                list_id: v.list_id,
-                email: v.subscriber.clone(),
-                role: v.role,
-                subscription_mode: SubscriptionMode::AsAddress,
-                display_name: v.display_name,
-            })
+            .subscribe_with_context(
+                NewMember {
+                    list_id: v.list_id,
+                    email: v.subscriber.clone(),
+                    role: v.role,
+                    subscription_mode: SubscriptionMode::AsAddress,
+                    display_name: v.display_name,
+                },
+                true,
+                &audit_context(&auth, addr),
+            )
             .await?;
-    s.db.addresses().verify(&v.subscriber, true).await?;
     let value = member_value(&s, &member).await?;
     let response = match s.flavor {
         ApiFlavor::Compat31 => (
@@ -1219,13 +1917,16 @@ async fn members_create(
     Ok(response)
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/{id}/roster/{role}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/{id}/roster/{role}",
+    params(PageQuery, ("id" = String, Path, description = "id path parameter"), ("role" = String, Path, description = "role path parameter")),
+    responses((status = 200, description = "Successful operation", body = MemberPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn roster(
     State(s): State<AppState>,
     Path((id, role)): Path<(String, String)>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
@@ -1236,11 +1937,13 @@ async fn roster(
     for member in members {
         entries.push(member_value(&s, &member).await?);
     }
-    Ok(Json(page(s.flavor, entries)))
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/lists/{id}/member/{email}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/lists/{id}/member/{email}",
+    params(("id" = String, Path, description = "id path parameter"), ("email" = String, Path, description = "email path parameter")),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::Member), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn list_member(
@@ -1252,19 +1955,17 @@ async fn list_member(
     let id = id.parse()?;
     authorize_list(&s, &h, peer(c), "members:read", &id).await?;
     let values = s.db.members().find(&email).await?;
-    Ok(Json(
-        serde_json::to_value(
-            values
-                .iter()
-                .find(|member| member.list_id == id)
-                .ok_or(ApiError(Error::NotFound(email)))?,
-        )
-        .expect("serialize"),
-    ))
+    let member = values
+        .iter()
+        .find(|member| member.list_id == id)
+        .ok_or(ApiError(Error::NotFound(email)))?;
+    Ok(Json(member_value(&s, member).await?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/members/{id}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/members/{id}",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::Member), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn members_get(
@@ -1280,8 +1981,10 @@ async fn members_get(
     Ok(Json(member_value(&s, &member).await?))
 }
 #[utoipa::path(
-    delete, path = "/api/v1/members/{id}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    delete,
+    path = "/api/v1/members/{id}",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 204, description = "Deleted"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn members_delete(
@@ -1293,13 +1996,19 @@ async fn members_delete(
     let id = id
         .parse()
         .map_err(|_| ApiError(Error::Validation("member id".into())))?;
-    authorize_member(&s, &h, peer(c), "members:write", id).await?;
-    s.db.members().delete(id).await?;
+    let addr = peer(c);
+    let (auth, _) = authorize_member(&s, &h, addr, "members:write", id).await?;
+    s.db.members()
+        .delete_with_context(id, &audit_context(&auth, addr))
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(
-    patch, path = "/api/v1/members/{id}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    patch,
+    path = "/api/v1/members/{id}",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content = MemberPatchInput, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::Member), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn member_patch(
@@ -1309,12 +2018,15 @@ async fn member_patch(
     c: ConnectInfo<SocketAddr>,
     Json(v): Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "members:write").await?;
     let id: MemberId = id
         .parse()
         .map_err(|_| ApiError(Error::Validation("member id".into())))?;
-    authorize_member(&s, &h, peer(c), "members:write", id).await?;
-    let member = s.db.members().update(id, &v).await?;
+    let addr = peer(c);
+    let (auth, _) = authorize_member(&s, &h, addr, "members:write", id).await?;
+    let member =
+        s.db.members()
+            .update_with_context(id, &v, &audit_context(&auth, addr))
+            .await?;
     let preferences = s.db.preferences().get(member.preferences_id).await?;
     let mut value = serde_json::to_value(member).expect("serialize");
     let preference_value = serde_json::to_value(preferences).expect("serialize");
@@ -1324,29 +2036,64 @@ async fn member_patch(
     Ok(Json(value))
 }
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 struct FindInput {
-    subscriber: String,
+    subscriber: Option<String>,
+    substring: Option<String>,
+    list_id: Option<ListId>,
+    role: Option<MemberRole>,
 }
 #[utoipa::path(
-    post, path = "/api/v1/members/find",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/members/find",
+    params(PageQuery),
+    request_body(content((FindInput = "application/json"), (FindInput = "application/x-www-form-urlencoded"))),
+    responses((status = 200, description = "Successful operation", body = MemberPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn members_find(
     State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<FindInput>,
+    JsonOrForm(v): JsonOrForm<FindInput>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "members:read").await?;
-    Ok(Json(page(
-        s.flavor,
-        s.db.members().find(&v.subscriber).await?,
-    )))
+    let auth = authenticate_for_authorization(&s, &h, peer(c), "members:read").await?;
+    let found = match (&v.subscriber, &v.substring) {
+        (Some(subscriber), None) if !subscriber.trim().is_empty() => {
+            s.db.members().find(subscriber).await?
+        }
+        (None, Some(substring)) if !substring.trim().is_empty() => {
+            s.db.members().find_substring(substring).await?
+        }
+        _ => {
+            return Err(ApiError(Error::Validation(
+                "provide exactly one of subscriber or substring".into(),
+            )));
+        }
+    };
+    let members = filter_members_for_auth(&s, &auth, found)
+        .await?
+        .into_iter()
+        .filter(|member| {
+            v.list_id
+                .as_ref()
+                .is_none_or(|list| &member.list_id == list)
+        })
+        .filter(|member| v.role.is_none_or(|role| member.role == role))
+        .collect::<Vec<_>>();
+    finish_authorization(&s, auth).await?;
+    let mut entries = Vec::with_capacity(members.len());
+    for member in members {
+        entries.push(member_value(&s, &member).await?);
+    }
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/members/{id}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/members/{id}/preferences",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn member_preferences(
@@ -1365,8 +2112,10 @@ async fn member_preferences(
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/members/{id}/all/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/members/{id}/all/preferences",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn member_all_preferences(
@@ -1388,9 +2137,118 @@ async fn member_all_preferences(
         .expect("serialize"),
     ))
 }
+fn preferences_update(
+    current: Preferences,
+    value: &Value,
+    replace: bool,
+) -> Result<Preferences, Error> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Validation("preferences must be an object".into()))?;
+    let mut result = if replace {
+        Preferences::default()
+    } else {
+        current
+    };
+    for (key, value) in object {
+        match key.as_str() {
+            "acknowledge_posts" => {
+                result.acknowledge_posts = if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .as_bool()
+                            .ok_or_else(|| Error::Validation(key.clone()))?,
+                    )
+                };
+            }
+            "hide_address" => {
+                result.hide_address = if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .as_bool()
+                            .ok_or_else(|| Error::Validation(key.clone()))?,
+                    )
+                };
+            }
+            "preferred_language" => {
+                result.preferred_language = if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .as_str()
+                            .filter(|language| !language.trim().is_empty())
+                            .ok_or_else(|| Error::Validation(key.clone()))?
+                            .to_owned(),
+                    )
+                };
+            }
+            "receive_list_copy" => {
+                result.receive_list_copy = if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .as_bool()
+                            .ok_or_else(|| Error::Validation(key.clone()))?,
+                    )
+                };
+            }
+            "receive_own_postings" => {
+                result.receive_own_postings = if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .as_bool()
+                            .ok_or_else(|| Error::Validation(key.clone()))?,
+                    )
+                };
+            }
+            "delivery_mode" => {
+                result.delivery_mode = if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .as_str()
+                            .ok_or_else(|| Error::Validation(key.clone()))?
+                            .parse::<DeliveryMode>()?,
+                    )
+                };
+            }
+            "delivery_status" => {
+                result.delivery_status = if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .as_str()
+                            .ok_or_else(|| Error::Validation(key.clone()))?
+                            .parse::<DeliveryStatus>()?,
+                    )
+                };
+            }
+            _ => {
+                return Err(Error::Validation(format!(
+                    "read-only or unknown preference: {key}"
+                )));
+            }
+        }
+    }
+    Ok(result)
+}
+
 #[utoipa::path(
-    put, path = "/api/v1/members/{id}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    put,
+    path = "/api/v1/members/{id}/preferences",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content = Preferences, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn member_preferences_put(
@@ -1398,13 +2256,16 @@ async fn member_preferences_put(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Preferences>,
+    body: Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    member_preferences_write(state, path, headers, connect, body).await
+    member_preferences_write(state, path, headers, connect, body, true).await
 }
 #[utoipa::path(
-    patch, path = "/api/v1/members/{id}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    patch,
+    path = "/api/v1/members/{id}/preferences",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content = Preferences, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn member_preferences_patch(
@@ -1412,22 +2273,28 @@ async fn member_preferences_patch(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Preferences>,
+    body: Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    member_preferences_write(state, path, headers, connect, body).await
+    member_preferences_write(state, path, headers, connect, body, false).await
 }
 async fn member_preferences_write(
     State(s): State<AppState>,
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Preferences>,
+    Json(v): Json<Value>,
+    replace: bool,
 ) -> ApiResult<Json<Value>> {
     let id: MemberId = id
         .parse()
         .map_err(|_| ApiError(Error::Validation("member id".into())))?;
-    let (_, member) = authorize_member(&s, &h, peer(c), "members:write", id).await?;
-    s.db.preferences().set_member(id, v).await?;
+    let addr = peer(c);
+    let (auth, member) = authorize_member(&s, &h, addr, "members:write", id).await?;
+    let current = s.db.preferences().get(member.preferences_id).await?;
+    let updated = preferences_update(current, &v, replace)?;
+    s.db.preferences()
+        .set_member_with_context(id, updated, &audit_context(&auth, addr))
+        .await?;
     Ok(Json(
         serde_json::to_value(s.db.preferences().get(member.preferences_id).await?)
             .expect("serialize"),
@@ -1435,21 +2302,33 @@ async fn member_preferences_write(
 }
 
 #[utoipa::path(
-    get, path = "/api/v1/users",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/users",
+    params(PageQuery),
+    responses((status = 200, description = "Successful operation", body = UserPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn users_list(
     State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
-    Ok(Json(page(s.flavor, s.db.users().list().await?)))
+    let auth = authenticate_for_authorization(&s, &h, peer(c), "system:read").await?;
+    let mut users = Vec::new();
+    for user in s.db.users().list().await? {
+        if auth_allows_user(&s, &auth, user.id).await? {
+            users.push(user);
+        }
+    }
+    finish_authorization(&s, auth).await?;
+    Ok(Json(paged(s.flavor, users, &page_query)?))
 }
 #[utoipa::path(
-    post, path = "/api/v1/users",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/users",
+    request_body(content = listmngr_db::NewUser, content_type = "application/json"),
+    responses((status = 201, description = "Successful operation", body = listmngr_core::User), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn users_create(
@@ -1458,12 +2337,22 @@ async fn users_create(
     c: ConnectInfo<SocketAddr>,
     Json(v): Json<NewUser>,
 ) -> ApiResult<impl IntoResponse> {
-    authorize(&s, &h, peer(c), "users:write").await?;
-    Ok((StatusCode::CREATED, Json(s.db.users().create(v).await?)))
+    let addr = peer(c);
+    let auth = authorize_admin(&s, &h, addr, "users:write").await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(
+            s.db.users()
+                .create_with_context(v, &audit_context(&auth, addr))
+                .await?,
+        ),
+    ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/users/{id}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/users/{id}",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::User), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn users_get(
@@ -1472,17 +2361,19 @@ async fn users_get(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
     let id: UserId = id
         .parse()
         .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    authorize_user(&s, &h, peer(c), "system:read", id).await?;
     Ok(Json(
         serde_json::to_value(s.db.users().get(id).await?).expect("serialize"),
     ))
 }
 #[utoipa::path(
-    delete, path = "/api/v1/users/{id}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    delete,
+    path = "/api/v1/users/{id}",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 204, description = "Deleted"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn users_delete(
@@ -1491,18 +2382,22 @@ async fn users_delete(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<StatusCode> {
-    authorize(&s, &h, peer(c), "users:write").await?;
+    let id = id
+        .parse()
+        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let addr = peer(c);
+    let auth = authorize_user(&s, &h, addr, "users:write", id).await?;
     s.db.users()
-        .delete(
-            id.parse()
-                .map_err(|_| ApiError(Error::Validation("user id".into())))?,
-        )
+        .delete_with_context(id, &audit_context(&auth, addr))
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(
-    patch, path = "/api/v1/users/{id}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    patch,
+    path = "/api/v1/users/{id}",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content = UserPatchInput, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::User), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn users_patch(
@@ -1512,17 +2407,25 @@ async fn users_patch(
     c: ConnectInfo<SocketAddr>,
     Json(v): Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "users:write").await?;
     let id: UserId = id
         .parse()
         .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let addr = peer(c);
+    let auth = authorize_user(&s, &h, addr, "users:write", id).await?;
     Ok(Json(
-        serde_json::to_value(s.db.users().update(id, &v).await?).expect("serialize"),
+        serde_json::to_value(
+            s.db.users()
+                .update_with_context(id, &v, &audit_context(&auth, addr))
+                .await?,
+        )
+        .expect("serialize"),
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/users/{id}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/users/{id}/preferences",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn user_preferences(
@@ -1531,17 +2434,19 @@ async fn user_preferences(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
-    let id = id
+    let id: UserId = id
         .parse()
         .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    authorize_user(&s, &h, peer(c), "system:read", id).await?;
     Ok(Json(
         serde_json::to_value(s.db.preferences().get_user(id).await?).expect("serialize"),
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/users/{id}/all/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/users/{id}/all/preferences",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn user_all_preferences(
@@ -1550,10 +2455,10 @@ async fn user_all_preferences(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
-    let id = id
+    let id: UserId = id
         .parse()
         .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    authorize_user(&s, &h, peer(c), "system:read", id).await?;
     Ok(Json(
         serde_json::to_value(
             s.db.preferences()
@@ -1564,8 +2469,11 @@ async fn user_all_preferences(
     ))
 }
 #[utoipa::path(
-    put, path = "/api/v1/users/{id}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    put,
+    path = "/api/v1/users/{id}/preferences",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content = Preferences, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn user_preferences_put(
@@ -1573,13 +2481,16 @@ async fn user_preferences_put(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Preferences>,
+    body: Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    user_preferences_write(state, path, headers, connect, body).await
+    user_preferences_write(state, path, headers, connect, body, true).await
 }
 #[utoipa::path(
-    patch, path = "/api/v1/users/{id}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    patch,
+    path = "/api/v1/users/{id}/preferences",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content = Preferences, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn user_preferences_patch(
@@ -1587,34 +2498,39 @@ async fn user_preferences_patch(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Preferences>,
+    body: Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    user_preferences_write(state, path, headers, connect, body).await
+    user_preferences_write(state, path, headers, connect, body, false).await
 }
 async fn user_preferences_write(
     State(s): State<AppState>,
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Preferences>,
+    Json(v): Json<Value>,
+    replace: bool,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "users:write").await?;
+    let id = id
+        .parse()
+        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let addr = peer(c);
+    let auth = authorize_user(&s, &h, addr, "users:write", id).await?;
+    let updated = preferences_update(s.db.preferences().get_user(id).await?, &v, replace)?;
     s.db.preferences()
-        .set_user(
-            id.parse()
-                .map_err(|_| ApiError(Error::Validation("user id".into())))?,
-            v.clone(),
-        )
+        .set_user_with_context(id, updated.clone(), &audit_context(&auth, addr))
         .await?;
-    Ok(Json(serde_json::to_value(v).expect("serialize")))
+    Ok(Json(serde_json::to_value(updated).expect("serialize")))
 }
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 struct LoginInput {
     password: String,
 }
 #[utoipa::path(
-    post, path = "/api/v1/users/{id}/login",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/users/{id}/login",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content = LoginInput, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = LoginResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn user_login(
@@ -1624,45 +2540,54 @@ async fn user_login(
     c: ConnectInfo<SocketAddr>,
     Json(v): Json<LoginInput>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "users:write").await?;
-    let valid =
-        s.db.users()
-            .verify_password(
-                id.parse()
-                    .map_err(|_| ApiError(Error::Validation("user id".into())))?,
-                &v.password,
-            )
-            .await?;
+    let id = id
+        .parse()
+        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    authorize_user(&s, &h, peer(c), "users:write", id).await?;
+    let valid = s.db.users().verify_password(id, &v.password).await?;
     Ok(Json(json!({"success":valid})))
 }
 #[utoipa::path(
-    get, path = "/api/v1/users/{id}/addresses",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/users/{id}/addresses",
+    params(PageQuery, ("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = AddressPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn user_addresses(
     State(s): State<AppState>,
     Path(id): Path<String>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
-    let user =
-        s.db.users()
-            .get(
-                id.parse()
-                    .map_err(|_| ApiError(Error::Validation("user id".into())))?,
-            )
-            .await?;
-    Ok(Json(json!({"entries":[user.preferred_address_id]})))
+    let id = id
+        .parse()
+        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let auth = authenticate_for_authorization(&s, &h, peer(c), "system:read").await?;
+    if !auth_allows_user(&s, &auth, id).await? {
+        return Err(ApiError(Error::Forbidden("system:read".into())));
+    }
+    s.db.users().get(id).await?;
+    let mut entries = Vec::new();
+    for address in s.db.addresses().by_user(id).await? {
+        if auth_allows_address(&s, &auth, &address.email).await? {
+            entries.push(address);
+        }
+    }
+    finish_authorization(&s, auth).await?;
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
 }
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 struct LinkInput {
     email: String,
 }
 #[utoipa::path(
-    post, path = "/api/v1/users/{id}/addresses",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/users/{id}/addresses",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content = LinkInput, content_type = "application/json"),
+    responses((status = 201, description = "Successful operation", body = listmngr_core::Address), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn user_address_link(
@@ -1672,17 +2597,15 @@ async fn user_address_link(
     c: ConnectInfo<SocketAddr>,
     Json(v): Json<LinkInput>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "users:write").await?;
+    let id = id
+        .parse()
+        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let addr = peer(c);
+    let auth = authorize_user_and_address(&s, &h, addr, "users:write", id, &v.email).await?;
     Ok(Json(
         serde_json::to_value(
             s.db.addresses()
-                .link(
-                    &v.email,
-                    Some(
-                        id.parse()
-                            .map_err(|_| ApiError(Error::Validation("user id".into())))?,
-                    ),
-                )
+                .link_with_context(&v.email, Some(id), &audit_context(&auth, addr))
                 .await?,
         )
         .expect("serialize"),
@@ -1690,8 +2613,10 @@ async fn user_address_link(
 }
 
 #[utoipa::path(
-    get, path = "/api/v1/addresses/{email}",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/addresses/{email}",
+    params(("email" = String, Path, description = "email path parameter")),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::Address), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_get(
@@ -1700,14 +2625,17 @@ async fn address_get(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
+    authorize_address(&s, &h, peer(c), "system:read", &email).await?;
     Ok(Json(
         serde_json::to_value(s.db.addresses().get(&email).await?).expect("serialize"),
     ))
 }
 #[utoipa::path(
-    post, path = "/api/v1/addresses/{email}/verify",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/addresses/{email}/verify",
+    params(("email" = String, Path, description = "email path parameter")),
+    request_body(content = EmptyMutationInput, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::Address), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_verify(
@@ -1715,15 +2643,25 @@ async fn address_verify(
     Path(email): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
+    _body: Option<Json<EmptyMutationInput>>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "users:write").await?;
+    let addr = peer(c);
+    let auth = authorize_address(&s, &h, addr, "users:write", &email).await?;
     Ok(Json(
-        serde_json::to_value(s.db.addresses().verify(&email, true).await?).expect("serialize"),
+        serde_json::to_value(
+            s.db.addresses()
+                .verify_with_context(&email, true, &audit_context(&auth, addr))
+                .await?,
+        )
+        .expect("serialize"),
     ))
 }
 #[utoipa::path(
-    post, path = "/api/v1/addresses/{email}/unverify",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/addresses/{email}/unverify",
+    params(("email" = String, Path, description = "email path parameter")),
+    request_body(content = EmptyMutationInput, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::Address), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_unverify(
@@ -1731,15 +2669,24 @@ async fn address_unverify(
     Path(email): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
+    _body: Option<Json<EmptyMutationInput>>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "users:write").await?;
+    let addr = peer(c);
+    let auth = authorize_address(&s, &h, addr, "users:write", &email).await?;
     Ok(Json(
-        serde_json::to_value(s.db.addresses().verify(&email, false).await?).expect("serialize"),
+        serde_json::to_value(
+            s.db.addresses()
+                .verify_with_context(&email, false, &audit_context(&auth, addr))
+                .await?,
+        )
+        .expect("serialize"),
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/addresses/{email}/user",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/addresses/{email}/user",
+    params(("email" = String, Path, description = "email path parameter")),
+    responses((status = 200, description = "Successful operation", body = AddressUserResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_user(
@@ -1748,7 +2695,7 @@ async fn address_user(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
+    authorize_address(&s, &h, peer(c), "system:read", &email).await?;
     let address = s.db.addresses().get(&email).await?;
     Ok(Json(json!({"user_id":address.user_id})))
 }
@@ -1757,8 +2704,11 @@ struct UserLink {
     user_id: UserId,
 }
 #[utoipa::path(
-    post, path = "/api/v1/addresses/{email}/user",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    post,
+    path = "/api/v1/addresses/{email}/user",
+    params(("email" = String, Path, description = "email path parameter")),
+    request_body(content = UserLink, content_type = "application/json"),
+    responses((status = 201, description = "Successful operation", body = listmngr_core::Address), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_link(
@@ -1768,15 +2718,22 @@ async fn address_link(
     c: ConnectInfo<SocketAddr>,
     Json(v): Json<UserLink>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "users:write").await?;
+    let addr = peer(c);
+    let auth = authorize_user_and_address(&s, &h, addr, "users:write", v.user_id, &email).await?;
     Ok(Json(
-        serde_json::to_value(s.db.addresses().link(&email, Some(v.user_id)).await?)
-            .expect("serialize"),
+        serde_json::to_value(
+            s.db.addresses()
+                .link_with_context(&email, Some(v.user_id), &audit_context(&auth, addr))
+                .await?,
+        )
+        .expect("serialize"),
     ))
 }
 #[utoipa::path(
-    delete, path = "/api/v1/addresses/{email}/user",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    delete,
+    path = "/api/v1/addresses/{email}/user",
+    params(("email" = String, Path, description = "email path parameter")),
+    responses((status = 204, description = "Deleted"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_unlink(
@@ -1785,27 +2742,40 @@ async fn address_unlink(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<StatusCode> {
-    authorize(&s, &h, peer(c), "users:write").await?;
-    s.db.addresses().link(&email, None).await?;
+    let addr = peer(c);
+    let auth = authorize_address(&s, &h, addr, "users:write", &email).await?;
+    s.db.addresses()
+        .link_with_context(&email, None, &audit_context(&auth, addr))
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(
-    get, path = "/api/v1/addresses/{email}/memberships",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/addresses/{email}/memberships",
+    params(PageQuery, ("email" = String, Path, description = "email path parameter")),
+    responses((status = 200, description = "Successful operation", body = MemberPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_memberships(
     State(s): State<AppState>,
     Path(email): Path<String>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "members:read").await?;
-    Ok(Json(page(s.flavor, s.db.members().find(&email).await?)))
+    let auth = authorize_address(&s, &h, peer(c), "members:read", &email).await?;
+    let members = filter_members_for_auth(&s, &auth, s.db.members().find(&email).await?).await?;
+    let mut entries = Vec::with_capacity(members.len());
+    for member in members {
+        entries.push(member_value(&s, &member).await?);
+    }
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
 }
 #[utoipa::path(
-    get, path = "/api/v1/addresses/{email}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/addresses/{email}/preferences",
+    params(("email" = String, Path, description = "email path parameter")),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_preferences(
@@ -1814,14 +2784,16 @@ async fn address_preferences(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
+    authorize_address(&s, &h, peer(c), "system:read", &email).await?;
     Ok(Json(
         serde_json::to_value(s.db.preferences().get_address(&email).await?).expect("serialize"),
     ))
 }
 #[utoipa::path(
-    get, path = "/api/v1/addresses/{email}/all/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/addresses/{email}/all/preferences",
+    params(("email" = String, Path, description = "email path parameter")),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_all_preferences(
@@ -1830,7 +2802,7 @@ async fn address_all_preferences(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
+    authorize_address(&s, &h, peer(c), "system:read", &email).await?;
     Ok(Json(
         serde_json::to_value(
             s.db.preferences()
@@ -1841,8 +2813,11 @@ async fn address_all_preferences(
     ))
 }
 #[utoipa::path(
-    put, path = "/api/v1/addresses/{email}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    put,
+    path = "/api/v1/addresses/{email}/preferences",
+    params(("email" = String, Path, description = "email path parameter")),
+    request_body(content = Preferences, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_preferences_put(
@@ -1850,13 +2825,16 @@ async fn address_preferences_put(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Preferences>,
+    body: Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    address_preferences_write(state, path, headers, connect, body).await
+    address_preferences_write(state, path, headers, connect, body, true).await
 }
 #[utoipa::path(
-    patch, path = "/api/v1/addresses/{email}/preferences",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    patch,
+    path = "/api/v1/addresses/{email}/preferences",
+    params(("email" = String, Path, description = "email path parameter")),
+    request_body(content = Preferences, content_type = "application/json"),
+    responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn address_preferences_patch(
@@ -1864,39 +2842,46 @@ async fn address_preferences_patch(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Preferences>,
+    body: Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    address_preferences_write(state, path, headers, connect, body).await
+    address_preferences_write(state, path, headers, connect, body, false).await
 }
 async fn address_preferences_write(
     State(s): State<AppState>,
     Path(email): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Preferences>,
+    Json(v): Json<Value>,
+    replace: bool,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "users:write").await?;
-    s.db.preferences().set_address(&email, v.clone()).await?;
-    Ok(Json(serde_json::to_value(v).expect("serialize")))
+    let addr = peer(c);
+    let auth = authorize_address(&s, &h, addr, "users:write", &email).await?;
+    let updated = preferences_update(s.db.preferences().get_address(&email).await?, &v, replace)?;
+    s.db.preferences()
+        .set_address_with_context(&email, updated.clone(), &audit_context(&auth, addr))
+        .await?;
+    Ok(Json(serde_json::to_value(updated).expect("serialize")))
 }
 #[utoipa::path(
-    get, path = "/api/v1/owners",
-    responses((status = 200, description = "Successful operation", body = Value), (status = 401, description = "Authentication required", body = ErrorResponse)),
+    get,
+    path = "/api/v1/owners",
+    params(PageQuery),
+    responses((status = 200, description = "Successful operation", body = UserPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
 async fn owners(
     State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize(&s, &h, peer(c), "system:read").await?;
-    Ok(Json(page(
-        s.flavor,
+    authorize_admin(&s, &h, peer(c), "system:read").await?;
+    let owners =
         s.db.users()
             .list()
             .await?
             .into_iter()
             .filter(|u| u.is_server_owner)
-            .collect::<Vec<_>>(),
-    )))
+            .collect::<Vec<_>>();
+    Ok(Json(paged(s.flavor, owners, &page_query)?))
 }

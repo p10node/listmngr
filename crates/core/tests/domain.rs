@@ -34,26 +34,67 @@ fn config_defaults_are_secure_and_file_overrides_are_layered() {
 fn secret_file_overrides_inline_secret_and_redacted_view_hides_both() {
     let dir = tempfile::tempdir().unwrap();
     let secret = dir.path().join("database-url");
-    std::fs::write(&secret, "postgres://app:file-password@db/listmngr\n").unwrap();
+    std::fs::write(&secret, "sqlite://file-sentinel\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let config_path = dir.path().join("listmngr.toml");
     std::fs::write(
         &config_path,
-        format!(
-            "[database]\nurl = \"postgres://app:inline-password@db/listmngr\"\nurl_file = {secret:?}\n"
-        ),
+        format!("[database]\nurl = \"sqlite://inline-sentinel\"\nurl_file = {secret:?}\n"),
     )
     .unwrap();
 
     let config = Config::load(Some(&config_path)).unwrap();
-    assert_eq!(
-        config.database.url,
-        "postgres://app:file-password@db/listmngr"
-    );
+    assert_eq!(config.database.url, "sqlite://file-sentinel");
     let rendered = config.redacted_json().to_string();
-    assert!(!rendered.contains("file-password"));
-    assert!(!rendered.contains("inline-password"));
+    assert!(!rendered.contains("file-sentinel"));
+    assert!(!rendered.contains("inline-sentinel"));
     assert!(!rendered.contains(secret.to_string_lossy().as_ref()));
     assert_eq!(rendered.matches("[REDACTED]").count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn secret_file_permissions_fail_closed_without_disclosing_path_or_value() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let secret = dir.path().join("SENSITIVE-PATH-SENTINEL");
+    std::fs::write(&secret, "sqlite://sensitive-value-sentinel\n").unwrap();
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let config_path = dir.path().join("listmngr.toml");
+    std::fs::write(&config_path, format!("[database]\nurl_file = {secret:?}\n")).unwrap();
+
+    let rendered = Config::load(Some(&config_path)).unwrap_err().to_string();
+    assert!(rendered.contains("must not be accessible by group or other users"));
+    assert!(!rendered.contains("sensitive-value-sentinel"));
+    assert!(!rendered.contains("SENSITIVE-PATH-SENTINEL"));
+}
+
+#[test]
+fn config_rejects_invalid_api_rate_limits() {
+    for (key, spec) in [
+        ("api", ""),
+        ("api", "0/min"),
+        ("api", "10"),
+        ("api", "10/fortnight"),
+        ("api", "many/min"),
+        ("api_pre_auth", "0/min"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("listmngr.toml");
+        std::fs::write(&path, format!("[security.rate_limit]\n{key} = {spec:?}\n")).unwrap();
+        let error = Config::load(Some(&path)).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("security.rate_limit.{key}")),
+            "unexpected error for {key}={spec:?}: {error}"
+        );
+    }
 }
 
 #[test]

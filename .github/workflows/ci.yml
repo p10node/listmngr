@@ -32,12 +32,24 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: scripts/check-phase0-artifacts.sh
+      - run: python3 -m unittest discover -s scripts/tests -v
+      - run: python3 scripts/check-production-crates.py
       - run: cargo fmt --all --check
       - run: cargo build --locked --workspace
+      - name: Validate hardened Linux unit against the built executable
+        run: |
+          sudo install -m 0755 target/debug/listmngr /usr/local/bin/listmngr
+          systemd-analyze verify deploy/systemd/listmngr.service
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --locked --workspace --all-targets
       - name: Mandatory PostgreSQL migration and connectivity test
         run: scripts/test-postgres.sh
+      - name: Pinned real mailmanclient against a disposable server
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mailmanclient"
+          . "$RUNNER_TEMP/mailmanclient/bin/activate"
+          python3 -m pip install -r tests/compat/requirements-mailmanclient.txt
+          python3 scripts/test-mailmanclient.py
       - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
         with:
           tool: cargo-deny@0.20.2,cargo-audit@0.22.2

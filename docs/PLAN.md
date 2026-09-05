@@ -325,7 +325,7 @@ argon2 = { memory_kib = 65536, iterations = 3, parallelism = 1 }
 password_min_score = 3
 require_2fa_for = ["server_owner"]
 pending_request_life = "3d"
-rate_limit = { login = "5/min", subscribe = "10/hour", api = "600/min" }
+rate_limit = { login = "5/min", subscribe = "10/hour", api = "600/min", api_pre_auth = "1200/min" }
 
 [mailman]                              # giữ tên nhóm cấu hình Mailman để dễ map
 default_member_action = "defer"
@@ -732,7 +732,7 @@ Mục tiêu: workspace compile, chạy `serve` trả healthz, CI xanh. Checkbox 
 - [x] Workspace 9 crates (lib + bin), `[workspace.dependencies]`, lints, exact Rust toolchain, rustfmt/clippy/deny config
 - [x] `listmngr-core`: `Config` (figment), `Error`, ids (`ListId`, `UserId`…), enums cơ bản
 - [x] `listmngr-db`: pool init (pg/sqlite), `migrate!()` infra, migration `0000_init`
-- [x] `listmngr` CLI: `version`, `conf`, `info`, `migrate`, `serve` (axum `/healthz`, `/readyz`, `/metrics` stub), tracing init
+- [x] `listmngr` CLI: `version`, `conf`, `info`, `migrate`, `serve` (axum `/healthz`, `/readyz`, Prometheus `/metrics`), tracing init
 - [x] **P0-08** CI GitHub Actions: blocking fmt, locked build, clippy `-D warnings`, tests, mandatory `TEST_POSTGRES_URL` migration/connectivity gate, deny, audit; cache
 - [x] **P0-09** Multi-stage static-musl/scratch non-root Dockerfile, PostgreSQL Compose with runtime credentials, `.env.example`, `.dockerignore`, tool-free healthcheck
 - [x] **P0-10** Hardened systemd unit with managed state/working directory, syscall filter, and kernel/device/filesystem protections
@@ -744,15 +744,15 @@ Mục tiêu: workspace compile, chạy `serve` trả healthz, CI xanh. Checkbox 
 
 Mục tiêu: tạo domain/list/user/member qua REST + CLI; `mailmanclient` subset chạy.
 
-- [ ] Migrations: domains, users, credentials, addresses, mailing_lists (+settings cột), members, preferences, api_tokens, audit_log, header_matches, bans, templates, list_styles
-- [ ] Repos (sqlx): Domain, User, Address, List, Member, Preferences (layered resolve), Token, Audit
-- [ ] Styles: 3 built-in + apply khi create
-- [ ] REST `/3.1/`: system, domains, lists (+config GET/PUT/PATCH toàn bộ attr), styles, users, addresses, members (roster, subscribe pre_* only, preferences), owners, find
-- [ ] Auth: Bearer token + scopes; Basic compat (allowlist); rate-limit
-- [ ] `/api/v1/` cùng handler, OpenAPI (utoipa), Swagger UI
-- [ ] CLI: `lists create/remove/ls`, `members add/del/ls/sync/find`, `user create/passwd`, `token create/revoke`, `domains add/rm/ls`
-- [ ] Audit ghi cho mọi write
-- Acceptance: integration test (testcontainers pg + sqlite): CRUD toàn bộ; Python `mailmanclient` script: create domain → list → subscribe → set config → roster → pass. Property test cho preferences layering.
+- [x] Migrations: domains, users, credentials, addresses, mailing_lists (+settings cột), members, preferences, api_tokens, audit_log, header_matches, bans, templates, list_styles
+- [x] Repos (sqlx): Domain, User, Address, List, Member, Preferences (layered resolve), Token, Audit
+- [x] Styles: 3 built-in + apply khi create
+- [x] REST `/3.1/`: system, domains, lists (+config GET/PUT/PATCH toàn bộ attr), styles, users, addresses, members (roster, subscribe pre_* only, preferences), owners, find
+- [x] Auth: Bearer token + scopes; Basic compat (allowlist); rate-limit
+- [x] `/api/v1/` cùng handler, OpenAPI (utoipa), Swagger UI
+- [x] CLI: `lists create/remove/ls`, `members add/del/ls/sync/find`, `user create/passwd`, `token create/revoke`, `domains add/rm/ls`
+- [x] Audit ghi cho mọi write
+- [x] Acceptance: integration tests on PostgreSQL + SQLite cover the Phase 1 CRUD contract; Python `mailmanclient==3.3.5` script passes create domain → list → subscribe → set config → roster; exhaustive differential test covers nullable preference layering. Exact evidence is recorded in `docs/FEATURE_PARITY.md`.
 
 ### Phase 2 — Mail path (L)
 

@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
-use listmngr_core::{Config, ListId, MemberRole, SubscriptionMode, TokenId, UserId};
+use listmngr_core::{Address, Config, ListId, MemberRole, SubscriptionMode, TokenId, UserId};
 use listmngr_db::{Database, NewList, NewMember, NewUser};
 use std::path::{Path, PathBuf};
 
@@ -92,6 +92,10 @@ enum MemberCommand {
         file: PathBuf,
         #[arg(long, default_value = "member")]
         role: MemberRole,
+        #[arg(long, default_value = "as_address")]
+        mode: SubscriptionMode,
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 #[derive(Debug, Args)]
@@ -136,11 +140,31 @@ enum TokenCommand {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
         .init();
+    if let Err(error) = run().await {
+        let error_id = uuid::Uuid::now_v7();
+        let rendered = format!("{error:#}");
+        let lower = rendered.to_ascii_lowercase();
+        let detail = if lower.contains("database error")
+            || lower.contains("postgres://")
+            || lower.contains("postgresql://")
+            || lower.contains("sqlite:")
+        {
+            "operation failed".to_owned()
+        } else {
+            rendered
+        };
+        tracing::error!(%error_id, "CLI command failed");
+        eprintln!("error[{error_id}]: {detail}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let config = Config::load(cli.config.as_deref())?;
     match cli.command {
@@ -199,7 +223,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
             tracing::info!(%address,"HTTP server listening");
             axum::serve(
                 listener,
-                listmngr_api::router(db, config, 600)
+                listmngr_api::router(db, config)
                     .into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
             .await?;
@@ -293,7 +317,8 @@ async fn members(db: &Database, command: MemberCommand) -> Result<()> {
         }
         MemberCommand::Ls { list_id, role } => {
             for m in db.members().roster(&list_id, role).await? {
-                println!("{} {}", m.id, m.display_name);
+                let address = db.addresses().get_by_id(m.address_id).await?;
+                println!("{} {} {}", m.id, address.email, m.display_name);
             }
         }
         MemberCommand::Find { email } => {
@@ -305,7 +330,9 @@ async fn members(db: &Database, command: MemberCommand) -> Result<()> {
             list_id,
             file,
             role,
-        } => sync_members(db, &list_id, &file, role).await?,
+            mode,
+            dry_run,
+        } => sync_members(db, &list_id, &file, role, mode, dry_run).await?,
     }
     Ok(())
 }
@@ -314,48 +341,50 @@ async fn sync_members(
     list_id: &ListId,
     file: &Path,
     role: MemberRole,
+    mode: SubscriptionMode,
+    dry_run: bool,
 ) -> Result<()> {
     let content = std::fs::read_to_string(file)?;
-    let desired = content
-        .lines()
-        .map(str::trim)
-        .filter(|v| !v.is_empty() && !v.starts_with('#'))
-        .map(str::to_ascii_lowercase)
-        .collect::<std::collections::HashSet<_>>();
-    let mut retained = std::collections::HashSet::new();
-    for email in &desired {
-        for member in db.members().find(email).await? {
-            if member.list_id == *list_id && member.role == role {
-                retained.insert(member.id);
-            }
+    let mut desired = Vec::new();
+    let mut unique = std::collections::HashSet::new();
+    for (index, row) in content.lines().enumerate() {
+        let row = row.trim();
+        if row.is_empty() || row.starts_with('#') {
+            continue;
         }
-    }
-    for member in db.members().roster(list_id, role).await? {
-        if !retained.contains(&member.id) {
-            db.members().delete(member.id).await?;
+        let address = Address::new(row, String::new())
+            .with_context(|| format!("invalid member row {}", index + 1))?;
+        if !unique.insert(address.email.clone()) {
+            bail!("duplicate sync member row {}: {}", index + 1, address.email);
         }
+        desired.push(address.email);
     }
-    for email in &desired {
-        if !db
-            .members()
-            .find(email)
-            .await?
+
+    if dry_run {
+        db.lists().get(list_id).await?;
+        let mut current = std::collections::HashSet::new();
+        for member in db.members().roster(list_id, role).await? {
+            current.insert(db.addresses().get_by_id(member.address_id).await?.email);
+        }
+        let desired_set = desired
             .iter()
-            .any(|m| m.list_id == *list_id && m.role == role)
-        {
-            add_member(
-                db,
-                MemberArgs {
-                    list_id: list_id.clone(),
-                    email: email.clone(),
-                    role,
-                    mode: SubscriptionMode::AsAddress,
-                    display_name: String::new(),
-                },
-            )
-            .await?;
-        }
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        let added = desired_set.difference(&current).count();
+        let removed = current.difference(&desired_set).count();
+        let retained = desired_set.intersection(&current).count();
+        println!("dry-run role={role} add={added} remove={removed} retain={retained}");
+        return Ok(());
     }
+
+    let result = db
+        .members()
+        .mass_for_role(list_id, "sync", &desired, role, mode)
+        .await?;
+    println!(
+        "synced role={role} added={} removed={} retained={}",
+        result.added, result.removed, result.retained
+    );
     Ok(())
 }
 async fn users(db: &Database, command: UserCommand) -> Result<()> {
