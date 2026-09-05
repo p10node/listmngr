@@ -20,6 +20,7 @@ sqlx = { workspace = true, features = ["any"] }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 assert_cmd = "2.1.1"

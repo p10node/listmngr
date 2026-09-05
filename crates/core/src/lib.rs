@@ -34,8 +34,8 @@ pub enum Error {
     Authentication,
     #[error("permission denied: scope {0} is required")]
     Forbidden(String),
-    #[error("rate limit exceeded")]
-    RateLimited,
+    #[error("rate limit exceeded; retry after {retry_after} seconds")]
+    RateLimited { retry_after: u64 },
     #[error("database error: {0}")]
     Database(String),
 }
@@ -120,9 +120,21 @@ pub fn normalize_domain(value: &str) -> Result<String> {
     Ok(ascii)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
+#[schema(value_type = String, example = "list.example.com")]
 pub struct ListId(String);
+
+impl<'de> Deserialize<'de> for ListId {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
 
 impl ListId {
     #[must_use]
@@ -291,7 +303,7 @@ impl Preferences {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Domain {
     pub id: DomainId,
     pub mail_host: String,
@@ -300,7 +312,7 @@ pub struct Domain {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct User {
     pub id: UserId,
     pub display_name: String,
@@ -311,7 +323,7 @@ pub struct User {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Address {
     pub id: AddressId,
     pub email: String,
@@ -365,7 +377,7 @@ impl Address {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MailingList {
     pub id: ListId,
     pub display_name: String,
@@ -379,6 +391,9 @@ pub struct MailingList {
     pub last_post_at: Option<DateTime<Utc>>,
     pub post_id: i64,
     pub volume: i32,
+    pub next_digest_number: i64,
+    pub digest_last_sent_at: Option<DateTime<Utc>>,
+    pub emergency: bool,
     pub archive_policy: ArchivePolicy,
     pub archive_rendering_mode: ArchiveRenderingMode,
     pub style_name: String,
@@ -400,6 +415,9 @@ impl MailingList {
             last_post_at: None,
             post_id: 1,
             volume: 1,
+            next_digest_number: 1,
+            digest_last_sent_at: None,
+            emergency: false,
             archive_policy: ArchivePolicy::Public,
             archive_rendering_mode: ArchiveRenderingMode::Text,
             style_name: "legacy-default".into(),
@@ -412,7 +430,7 @@ impl MailingList {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Member {
     pub id: MemberId,
     pub list_id: ListId,
@@ -485,6 +503,33 @@ pub struct Config {
     pub observability: ObservabilityConfig,
 }
 
+fn validate_rate_limit(key: &str, spec: &str) -> Result<()> {
+    let Some((count, window)) = spec.split_once('/') else {
+        return Err(Error::Validation(format!(
+            "security.rate_limit.{key} must use COUNT/WINDOW"
+        )));
+    };
+    if count
+        .parse::<u32>()
+        .ok()
+        .filter(|count| *count > 0)
+        .is_none()
+    {
+        return Err(Error::Validation(format!(
+            "security.rate_limit.{key} count must be a positive integer"
+        )));
+    }
+    if !matches!(
+        window,
+        "s" | "sec" | "second" | "m" | "min" | "minute" | "h" | "hour" | "d" | "day"
+    ) {
+        return Err(Error::Validation(format!(
+            "security.rate_limit.{key} has an unsupported window"
+        )));
+    }
+    Ok(())
+}
+
 impl Config {
     /// Loads defaults, TOML and environment overrides, in that order.
     /// Secret-file values are applied last and trimmed.
@@ -500,6 +545,19 @@ impl Config {
             .merge(Env::prefixed("LISTMNGR__").split("__"))
             .extract()?;
         if let Some(secret_file) = &config.database.url_file {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(secret_file)
+                    .map_err(|_| Error::Validation("cannot inspect database.url_file".into()))?
+                    .permissions()
+                    .mode();
+                if mode & 0o077 != 0 {
+                    return Err(Error::Validation(
+                        "database.url_file must not be accessible by group or other users".into(),
+                    ));
+                }
+            }
             let value = std::fs::read_to_string(secret_file).map_err(|error| {
                 Error::Validation(format!("cannot read database.url_file: {error}"))
             })?;
@@ -508,6 +566,12 @@ impl Config {
                 return Err(Error::Validation("database.url_file is empty".into()));
             }
             value.clone_into(&mut config.database.url);
+        }
+        validate_rate_limit("login", &config.security.rate_limit.login)?;
+        validate_rate_limit("subscribe", &config.security.rate_limit.subscribe)?;
+        validate_rate_limit("api", &config.security.rate_limit.api)?;
+        if let Some(spec) = &config.security.rate_limit.api_pre_auth {
+            validate_rate_limit("api_pre_auth", spec)?;
         }
         Ok(config)
     }
@@ -587,7 +651,8 @@ config_struct!(Argon2Config {
 config_struct!(RateLimitConfig {
     login: String = "5/min".into(),
     subscribe: String = "10/hour".into(),
-    api: String = "600/min".into()
+    api: String = "600/min".into(),
+    api_pre_auth: Option<String> = None
 });
 config_struct!(SecurityConfig { argon2: Argon2Config = Argon2Config::default(), password_min_score: u8 = 3, require_2fa_for: Vec<String> = vec!["server_owner".into()], pending_request_life: String = "3d".into(), rate_limit: RateLimitConfig = RateLimitConfig::default() });
 config_struct!(MailmanConfig {

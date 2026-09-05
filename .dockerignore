@@ -20,6 +20,9 @@ coverage
 reports
 *.profraw
 *.lcov
+__pycache__
+**/__pycache__
+*.pyc
 
 # Editor/OS files
 .idea

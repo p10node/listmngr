@@ -13,12 +13,16 @@ docker compose --env-file .env -f deploy/docker-compose.yml config
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --build --wait
 curl --fail --show-error http://127.0.0.1:8000/healthz
 curl --fail --show-error http://127.0.0.1:8000/readyz
-docker compose --env-file .env -f deploy/docker-compose.yml down -v
+docker compose --env-file .env -f deploy/docker-compose.yml down
 ```
 
 Compose interpolates one `POSTGRES_PASSWORD` into both PostgreSQL and the application URL. The committed example is not a production secret. Use URL-escaped password characters or provide a complete protected URL through another deployment mechanism.
 
+`down` preserves the database volume. The `-v` flag deletes it and is reserved for explicitly disposable acceptance projects.
+
 The image is built from the repository root, produces a musl-linked release binary, and runs it in `scratch` as UID/GID 1000. Compose provides a read-only root filesystem, drops all capabilities, enables `no-new-privileges`, and supplies only a bounded `/tmp`. `listmngr status` is the in-image readiness probe, avoiding a shell/HTTP client.
+
+The digest-pinned Rust Alpine builder omits C library headers. It installs exactly `musl=1.2.5-r12` and `musl-dev=1.2.5-r12` for `ring` and bundled SQLite; neither the package manager nor development headers enter the runtime image. These exact package versions fail closed if removed from the Alpine repository and must be upgraded together through review. Base-image pinning alone does not supply a usable C toolchain.
 
 ## systemd
 

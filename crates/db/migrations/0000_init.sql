@@ -22,7 +22,6 @@ CREATE TABLE users (
   preferences_id TEXT REFERENCES preferences(id) ON DELETE RESTRICT,
   locale TEXT NOT NULL DEFAULT 'en',
   timezone TEXT NOT NULL DEFAULT 'UTC',
-  preferred_address_id TEXT,
   created_at TEXT NOT NULL
 );
 CREATE TABLE domain_owners (
@@ -47,6 +46,10 @@ CREATE TABLE addresses (
   verified_on TEXT,
   registered_on TEXT NOT NULL
 );
+-- Adding this column after addresses exists keeps the cyclic user/address
+-- relationship valid on both PostgreSQL and SQLite.
+ALTER TABLE users ADD COLUMN preferred_address_id TEXT
+  REFERENCES addresses(id) ON DELETE SET NULL;
 CREATE TABLE mailing_lists (
   list_id TEXT PRIMARY KEY,
   list_name TEXT NOT NULL,
@@ -62,6 +65,9 @@ CREATE TABLE mailing_lists (
   last_post_at TEXT,
   post_id BIGINT NOT NULL DEFAULT 1,
   volume INTEGER NOT NULL DEFAULT 1,
+  next_digest_number BIGINT NOT NULL DEFAULT 1,
+  digest_last_sent_at TEXT,
+  emergency INTEGER NOT NULL DEFAULT 0,
   archive_policy TEXT NOT NULL DEFAULT 'public',
   archive_rendering_mode TEXT NOT NULL DEFAULT 'text',
   style_name TEXT NOT NULL DEFAULT 'legacy-default',
@@ -111,15 +117,21 @@ CREATE TABLE audit_log (
 );
 CREATE TABLE header_matches (
   id TEXT PRIMARY KEY,
-  list_id TEXT NOT NULL,
+  list_id TEXT NOT NULL REFERENCES mailing_lists(list_id) ON DELETE CASCADE,
   position INTEGER NOT NULL,
   header TEXT NOT NULL,
   pattern TEXT NOT NULL,
   action TEXT,
   tag TEXT,
-  chain TEXT
+  chain TEXT,
+  UNIQUE(list_id,position)
 );
-CREATE TABLE bans (id TEXT PRIMARY KEY, list_id TEXT, email_or_regex TEXT NOT NULL);
+CREATE TABLE bans (
+  id TEXT PRIMARY KEY,
+  list_id TEXT REFERENCES mailing_lists(list_id) ON DELETE CASCADE,
+  email_or_regex TEXT NOT NULL,
+  UNIQUE(list_id,email_or_regex)
+);
 CREATE TABLE templates (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -134,7 +146,7 @@ CREATE TABLE templates (
 );
 CREATE TABLE list_styles (name TEXT PRIMARY KEY, definition TEXT NOT NULL);
 CREATE TABLE list_archivers (
-  list_id TEXT NOT NULL REFERENCES mailing_lists(list_id) ON DELETE RESTRICT,
+  list_id TEXT NOT NULL REFERENCES mailing_lists(list_id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   enabled INTEGER NOT NULL,
   PRIMARY KEY(list_id,name)

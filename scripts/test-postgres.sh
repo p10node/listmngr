@@ -20,7 +20,7 @@ run() {
 # This gate cannot silently fall back to SQLite: every command is explicitly
 # configured from TEST_POSTGRES_URL and fails if PostgreSQL is unavailable.
 domain=phase0-ci.invalid
-list=contract@phase0-ci.invalid
+list=contract.phase0-ci.invalid
 cleanup() {
   run lists remove "$list" >/dev/null 2>&1 || true
   run domains rm "$domain" >/dev/null 2>&1 || true
@@ -31,6 +31,10 @@ run migrate
 run status
 cargo test --locked -p listmngr-db --test repositories \
   postgres_repeated_migrate_schema_and_crud_contract -- --ignored --exact
+cargo test --locked -p listmngr-db --test schema_contract \
+  live_postgres_matches_the_exact_sqlite_semantic_corpus -- --ignored --exact
+cargo test --locked -p listmngr-api --test postgres_auth \
+  postgres_scoped_user_routes_allow_inside_and_deny_outside_bounds -- --ignored --exact
 run domains add "$domain" --description 'Phase 0 PostgreSQL CI contract'
 run lists create "$list" --display-name 'Phase 0 CI contract'
 run domains ls | grep -F "$domain" >/dev/null

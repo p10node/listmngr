@@ -32,7 +32,9 @@ Dependencies must not point back up the graph. The nine workspace crates have th
 
 ## Data and transaction boundaries
 
-PostgreSQL is the production backend. SQLite is a single-node development/test backend. SQLx migrations are embedded in `listmngr-db` and applied by `listmngr migrate` or server startup. Business mutations and their audit records are required to share one transaction. IDs and timestamps use portable textual forms at repository boundaries.
+PostgreSQL is the production backend. SQLite is a single-node development/test backend. SQLx migrations are embedded in `listmngr-db` and applied by `listmngr migrate` or server startup. Repository statements use numbered parameters accepted by both backends, and the live PostgreSQL contract exercises repeated migration plus Domain/User/Address/List/Member/Preferences/Token/Audit behavior rather than connectivity alone. Business mutations, owned-row cleanup, and their audit records share one transaction. IDs and timestamps use portable textual forms at repository boundaries.
+
+The same numbered-parameter rule applies to SQL in API authorization helpers. A dedicated PostgreSQL router test exercises list/domain-scoped user reads, preferences, addresses, and collection filtering under both prefixes, including forbidden-user controls; repository-only tests cannot establish this boundary's portability.
 
 Persistent application state belongs in the configured database. For systemd, `/var/lib/listmngr` is created by `StateDirectory=listmngr` and is the working directory. The strict service filesystem permits no broad host writes. In Compose, the application root filesystem is read-only and only `/tmp` is an ephemeral, bounded tmpfs; PostgreSQL owns its named volume.
 
@@ -52,6 +54,8 @@ internet mail -> Postfix/Exim --[Phase 2 LMTP, currently disabled]--> listmngr
 
 The Docker builder uses a pinned Alpine Rust image and emits a musl-linked release binary. The final `scratch` image contains the binary and CA roots only, runs as numeric UID/GID 1000, drops capabilities in Compose, and does not need a shell or `curl`. The systemd alternative uses the same non-root trust boundary plus syscall, address-family, kernel, device, home, and filesystem restrictions.
 
+The builder also pins `musl` and `musl-dev` to `1.2.5-r12`: the Rust base includes a compiler but not the C headers required by `ring` and bundled SQLite. Package tools/headers remain outside the runtime image. The real-client acceptance harness (`scripts/test-mailmanclient.py`) uses a separate loopback process and disposable SQLite database, while `scripts/test-postgres.sh` independently proves PostgreSQL CRUD and schema semantics. CI runs these behavioral probes in addition to Rust and anti-stub gates.
+
 ## Security boundaries
 
-Bearer tokens carry scopes and optional list/domain bounds. Mailman Basic compatibility is disabled by default and, when configured, trusts the actual socket peer CIDR—not forwarded headers. Secrets are returned once and only digests persist. Reverse proxies must sanitize forwarding headers and terminate TLS according to the operator threat model. See `SECURITY.md` for threats and residual risks.
+Bearer tokens carry scopes and optional list/domain bounds. Mailman Basic compatibility is disabled by default, is accepted only below `/3.1`, and, when configured, trusts the actual socket peer CIDR—not forwarded headers. `/api/v1` accepts Bearer authentication and successful typed GET responses carry content-derived ETags; `/3.1` retains the Mailman-compatible JSON shape instead. Secrets are returned once and only digests persist. Reverse proxies must sanitize forwarding headers and terminate TLS according to the operator threat model. See `SECURITY.md` for threats and residual risks.

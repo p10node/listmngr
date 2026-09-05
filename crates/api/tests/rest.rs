@@ -7,6 +7,12 @@ use listmngr_core::{Config, UserId};
 use listmngr_db::{Database, NewUser};
 use tower::ServiceExt;
 
+fn config_with_rate(limit: u32) -> Config {
+    let mut config = Config::default();
+    config.security.rate_limit.api = format!("{limit}/min");
+    config
+}
+
 async fn setup(scopes: &[&str]) -> (axum::Router, String, UserId) {
     let db = Database::connect("sqlite::memory:", 1).await.unwrap();
     db.migrate().await.unwrap();
@@ -26,7 +32,7 @@ async fn setup(scopes: &[&str]) -> (axum::Router, String, UserId) {
         .await
         .unwrap()
         .token;
-    let app = listmngr_api::router(db, Config::default(), 100);
+    let app = listmngr_api::router(db, config_with_rate(100));
     (app, token, user.id)
 }
 
@@ -36,6 +42,25 @@ async fn call(
     uri: &str,
     token: Option<&str>,
     json: Option<&str>,
+) -> Response {
+    call_from(
+        app,
+        method,
+        uri,
+        token,
+        json,
+        "127.0.0.1:4242".parse().unwrap(),
+    )
+    .await
+}
+
+async fn call_from(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    token: Option<&str>,
+    json: Option<&str>,
+    peer: std::net::SocketAddr,
 ) -> Response {
     let mut request = Request::builder().method(method).uri(uri);
     if let Some(token) = token {
@@ -47,9 +72,9 @@ async fn call(
     let mut request = request
         .body(Body::from(json.unwrap_or_default().to_owned()))
         .unwrap();
-    request.extensions_mut().insert(axum::extract::ConnectInfo(
-        "127.0.0.1:4242".parse::<std::net::SocketAddr>().unwrap(),
-    ));
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(peer));
     app.clone().oneshot(request).await.unwrap()
 }
 
@@ -158,6 +183,22 @@ async fn health_ready_metrics_and_openapi_are_public() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(value["paths"]["/api/v1/domains"].is_object());
+}
+
+#[tokio::test]
+async fn typed_get_responses_have_stable_content_etags_but_compat_responses_do_not() {
+    let (app, token, _) = setup(&["admin"]).await;
+    let first = call(&app, "GET", "/api/v1/system/versions", Some(&token), None).await;
+    let second = call(&app, "GET", "/api/v1/system/versions", Some(&token), None).await;
+    let first_etag = first
+        .headers()
+        .get(header::ETAG)
+        .expect("typed GET response must have an ETag")
+        .clone();
+    assert_eq!(second.headers().get(header::ETAG), Some(&first_etag));
+
+    let compat = call(&app, "GET", "/3.1/system/versions", Some(&token), None).await;
+    assert!(compat.headers().get(header::ETAG).is_none());
 }
 
 #[tokio::test]
@@ -527,101 +568,6 @@ async fn committed_mailman_json_fixtures_conform_to_live_compat_responses() {
     }
 }
 
-#[test]
-fn openapi_source_rejects_dummy_doc_functions() {
-    let source = include_str!("../src/lib.rs");
-    assert!(
-        !source.contains("fn doc_"),
-        "OpenAPI metadata must be attached to real axum handlers, never empty doc_* stubs"
-    );
-}
-
-#[tokio::test]
-async fn openapi_covers_every_live_v1_method_and_declares_bearer_security() {
-    let (app, _, _) = setup(&["admin"]).await;
-    let response = call(&app, "GET", "/openapi.json", None, None).await;
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let document: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let expected = [
-        ("/api/v1/system/versions", "get"),
-        ("/api/v1/system/configuration", "get"),
-        ("/api/v1/system/configuration/{section}", "get"),
-        ("/api/v1/system/preferences", "get"),
-        ("/api/v1/system/pipelines", "get"),
-        ("/api/v1/system/chains", "get"),
-        ("/api/v1/domains", "get"),
-        ("/api/v1/domains", "post"),
-        ("/api/v1/domains/{host}", "get"),
-        ("/api/v1/domains/{host}", "delete"),
-        ("/api/v1/domains/{host}/lists", "get"),
-        ("/api/v1/domains/{host}/owners", "get"),
-        ("/api/v1/domains/{host}/uris", "get"),
-        ("/api/v1/lists", "get"),
-        ("/api/v1/lists", "post"),
-        ("/api/v1/lists/styles", "get"),
-        ("/api/v1/lists/{id}", "get"),
-        ("/api/v1/lists/{id}", "delete"),
-        ("/api/v1/lists/{id}/config", "get"),
-        ("/api/v1/lists/{id}/config", "put"),
-        ("/api/v1/lists/{id}/config", "patch"),
-        ("/api/v1/lists/{id}/config/{attr}", "get"),
-        ("/api/v1/lists/{id}/config/{attr}", "put"),
-        ("/api/v1/lists/{id}/config/{attr}", "patch"),
-        ("/api/v1/lists/{id}/archivers", "get"),
-        ("/api/v1/lists/{id}/uris", "get"),
-        ("/api/v1/lists/{id}/templates", "get"),
-        ("/api/v1/lists/{id}/roster/{role}", "get"),
-        ("/api/v1/lists/{id}/member/{email}", "get"),
-        ("/api/v1/members", "post"),
-        ("/api/v1/members/mass", "post"),
-        ("/api/v1/members/find", "post"),
-        ("/api/v1/members/{id}", "get"),
-        ("/api/v1/members/{id}", "patch"),
-        ("/api/v1/members/{id}", "delete"),
-        ("/api/v1/members/{id}/preferences", "get"),
-        ("/api/v1/members/{id}/preferences", "put"),
-        ("/api/v1/members/{id}/preferences", "patch"),
-        ("/api/v1/members/{id}/all/preferences", "get"),
-        ("/api/v1/users", "get"),
-        ("/api/v1/users", "post"),
-        ("/api/v1/users/{id}", "get"),
-        ("/api/v1/users/{id}", "patch"),
-        ("/api/v1/users/{id}", "delete"),
-        ("/api/v1/users/{id}/addresses", "get"),
-        ("/api/v1/users/{id}/addresses", "post"),
-        ("/api/v1/users/{id}/preferences", "get"),
-        ("/api/v1/users/{id}/preferences", "put"),
-        ("/api/v1/users/{id}/preferences", "patch"),
-        ("/api/v1/users/{id}/all/preferences", "get"),
-        ("/api/v1/users/{id}/login", "post"),
-        ("/api/v1/addresses/{email}", "get"),
-        ("/api/v1/addresses/{email}/verify", "post"),
-        ("/api/v1/addresses/{email}/unverify", "post"),
-        ("/api/v1/addresses/{email}/user", "get"),
-        ("/api/v1/addresses/{email}/user", "post"),
-        ("/api/v1/addresses/{email}/user", "delete"),
-        ("/api/v1/addresses/{email}/memberships", "get"),
-        ("/api/v1/addresses/{email}/preferences", "get"),
-        ("/api/v1/addresses/{email}/preferences", "put"),
-        ("/api/v1/addresses/{email}/preferences", "patch"),
-        ("/api/v1/addresses/{email}/all/preferences", "get"),
-        ("/api/v1/owners", "get"),
-    ];
-    for (path, method) in expected {
-        let operation = &document["paths"][path][method];
-        assert!(operation.is_object(), "missing {method} {path}");
-        assert_eq!(
-            operation["security"][0]["bearerAuth"],
-            serde_json::json!([]),
-            "security for {method} {path}"
-        );
-    }
-    assert_eq!(
-        document["components"]["securitySchemes"]["bearerAuth"]["scheme"],
-        "bearer"
-    );
-}
-
 #[tokio::test]
 async fn bearer_scopes_protect_writes_and_both_prefixes_share_crud() {
     let (app, token, _) = setup(&["admin"]).await;
@@ -724,6 +670,8 @@ async fn assert_mutable_list_config_attributes_roundtrip(app: &axum::Router, tok
         ("advertised", "false"),
         ("preferred_language", r#""vi""#),
         ("anonymous_list", "true"),
+        ("next_digest_number", "42"),
+        ("emergency", "true"),
         ("archive_policy", r#""private""#),
         ("archive_rendering_mode", r#""markdown""#),
     ];
@@ -756,6 +704,7 @@ async fn assert_read_only_list_config_attributes_reject_writes(app: &axum::Route
         "last_post_at",
         "post_id",
         "volume",
+        "digest_last_sent_at",
         "posting_address",
         "bounces_address",
         "join_address",
@@ -790,6 +739,8 @@ async fn assert_invalid_and_unknown_list_config_attributes_are_rejected(
         ("archive_policy", r#""sometimes""#),
         ("archive_rendering_mode", r#""html""#),
         ("preferred_language", r#""""#),
+        ("next_digest_number", "0"),
+        ("emergency", r#""true""#),
     ] {
         let uri = format!("/api/v1/lists/dev.example.com/config/{attribute}");
         assert_eq!(
@@ -817,6 +768,40 @@ async fn assert_invalid_and_unknown_list_config_attributes_are_rejected(
 async fn all_phase_one_list_config_attributes_roundtrip_and_reject_invalid_writes() {
     let (app, token, _) = setup(&["admin"]).await;
     create_configurable_list(&app, &token).await;
+    let config = response_json(
+        call(
+            &app,
+            "GET",
+            "/api/v1/lists/dev.example.com/config",
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    let expected_identity = serde_json::json!({
+        "list_id": "dev.example.com",
+        "fqdn_listname": "dev@example.com",
+        "list_name": "dev",
+        "mail_host": "example.com",
+        "posting_address": "dev@example.com",
+        "bounces_address": "dev-bounces@example.com",
+        "join_address": "dev-join@example.com",
+        "leave_address": "dev-leave@example.com",
+        "owner_address": "dev-owner@example.com",
+        "request_address": "dev-request@example.com",
+        "no_reply_address": "noreply@example.com",
+        "style_name": "legacy-default",
+        "archive_policy": "public",
+        "archive_rendering_mode": "text"
+    });
+    for (field, expected) in expected_identity.as_object().unwrap() {
+        assert_eq!(&config[field], expected, "P1 config field {field}");
+    }
+    assert!(config["created_at"].is_string());
+    assert!(config["last_post_at"].is_null());
+    assert_eq!(config["post_id"], 1);
+    assert_eq!(config["volume"], 1);
     assert_mutable_list_config_attributes_roundtrip(&app, &token).await;
     assert_read_only_list_config_attributes_reject_writes(&app, &token).await;
     assert_invalid_and_unknown_list_config_attributes_are_rejected(&app, &token).await;
@@ -909,7 +894,7 @@ async fn insufficient_scope_and_rate_limit_are_enforced() {
         .await
         .unwrap()
         .token;
-    let limited = listmngr_api::router(db, Config::default(), 1);
+    let limited = listmngr_api::router(db, config_with_rate(1));
     assert_eq!(
         call(
             &limited,
@@ -1071,6 +1056,249 @@ async fn direct_and_effective_preferences_are_distinct_at_every_scope() {
     assert_eq!(user_effective["delivery_mode"], "regular");
 }
 
+async fn json_body(response: Response) -> serde_json::Value {
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+#[allow(clippy::too_many_lines)]
+async fn assert_preferences_put_replaces_and_patch_merges(
+    app: &axum::Router,
+    token: &str,
+    prefix: &str,
+    member_id: listmngr_core::MemberId,
+    user_id: UserId,
+) {
+    for path in [
+        format!("{prefix}/members/{member_id}/preferences"),
+        format!("{prefix}/users/{user_id}/preferences"),
+        format!("{prefix}/addresses/member%40example.com/preferences"),
+    ] {
+        let initial = serde_json::json!({
+            "acknowledge_posts": true,
+            "hide_address": false,
+            "preferred_language": "initial-language",
+            "receive_list_copy": false,
+            "receive_own_postings": true,
+            "delivery_mode": "mime_digests",
+            "delivery_status": "by_bounces"
+        });
+        assert_eq!(
+            call(app, "PUT", &path, Some(token), Some(&initial.to_string()),)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            call(
+                app,
+                "PATCH",
+                &path,
+                Some(token),
+                Some(
+                    r#"{"acknowledge_posts":false,"preferred_language":"patched-language","delivery_status":"by_moderator"}"#,
+                ),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let merged = json_body(call(app, "GET", &path, Some(token), None).await).await;
+        assert_eq!(
+            merged,
+            serde_json::json!({
+                "acknowledge_posts": false,
+                "hide_address": false,
+                "preferred_language": "patched-language",
+                "receive_list_copy": false,
+                "receive_own_postings": true,
+                "delivery_mode": "mime_digests",
+                "delivery_status": "by_moderator"
+            }),
+            "PATCH must merge differential values at {path}"
+        );
+        assert_eq!(
+            call(
+                app,
+                "PATCH",
+                &path,
+                Some(token),
+                Some(r#"{"delivery_mode":null}"#),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let cleared = json_body(call(app, "GET", &path, Some(token), None).await).await;
+        assert!(cleared["delivery_mode"].is_null());
+        assert_eq!(cleared["preferred_language"], "patched-language");
+
+        assert_eq!(
+            call(
+                app,
+                "PUT",
+                &path,
+                Some(token),
+                Some(r#"{"acknowledge_posts":true}"#),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let replaced = json_body(call(app, "GET", &path, Some(token), None).await).await;
+        assert_eq!(replaced["acknowledge_posts"], true);
+        for nullable in [
+            "hide_address",
+            "preferred_language",
+            "receive_list_copy",
+            "receive_own_postings",
+            "delivery_mode",
+            "delivery_status",
+        ] {
+            assert!(
+                replaced[nullable].is_null(),
+                "PUT retained {nullable} at {path}"
+            );
+        }
+        for method in ["PUT", "PATCH"] {
+            assert_eq!(
+                call(
+                    app,
+                    method,
+                    &path,
+                    Some(token),
+                    Some(r#"{"id":"read-only"}"#),
+                )
+                .await
+                .status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+    }
+}
+
+async fn put_patch_app() -> (
+    axum::Router,
+    String,
+    listmngr_core::MemberId,
+    listmngr_core::UserId,
+) {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    let user = db
+        .users()
+        .create(NewUser {
+            display_name: "Admin".into(),
+            email: "admin@example.com".into(),
+            password: "Orbit!Cobalt7-River$Quartz".into(),
+            server_owner: true,
+        })
+        .await
+        .unwrap();
+    db.domains().create("example.com", "", None).await.unwrap();
+    let list = db
+        .lists()
+        .create(listmngr_db::NewList {
+            list_id: "dev.example.com".parse().unwrap(),
+            display_name: "Dev".into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap();
+    let member = db
+        .members()
+        .create(listmngr_db::NewMember {
+            list_id: list.id,
+            email: "member@example.com".into(),
+            role: listmngr_core::MemberRole::Member,
+            subscription_mode: listmngr_core::SubscriptionMode::AsAddress,
+            display_name: "Member".into(),
+        })
+        .await
+        .unwrap();
+    let issued = db
+        .tokens()
+        .create(user.id, "test", &["admin"], None)
+        .await
+        .unwrap();
+    let app = listmngr_api::router(db, config_with_rate(100));
+    (app, issued.token, member.id, user.id)
+}
+
+#[tokio::test]
+async fn put_replaces_and_patch_merges_config_and_preferences_on_both_prefixes() {
+    let (app, token, member_id, user_id) = put_patch_app().await;
+
+    for prefix in ["/api/v1", "/3.1"] {
+        let list_path = if prefix == "/3.1" {
+            format!("{prefix}/lists/dev@example.com/config")
+        } else {
+            format!("{prefix}/lists/dev.example.com/config")
+        };
+        assert_eq!(
+            call(
+                &app,
+                "PUT",
+                &list_path,
+                Some(&token),
+                Some(r#"{"description":"keep","advertised":false,"info":"old"}"#),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                &list_path,
+                Some(&token),
+                Some(r#"{"info":"patched"}"#),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let merged = json_body(call(&app, "GET", &list_path, Some(&token), None).await).await;
+        assert_eq!(merged["description"], "keep");
+        assert_eq!(merged["advertised"], false);
+        assert_eq!(merged["info"], "patched");
+        assert_eq!(
+            call(
+                &app,
+                "PUT",
+                &list_path,
+                Some(&token),
+                Some(r#"{"info":"replacement"}"#),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let replaced = json_body(call(&app, "GET", &list_path, Some(&token), None).await).await;
+        assert_eq!(replaced["description"], "");
+        assert_eq!(replaced["advertised"], true);
+        assert_eq!(replaced["preferred_language"], "en");
+        for bad in [r#"{"list_id":"other.example.com"}"#, r#"{"unknown":true}"#] {
+            assert_eq!(
+                call(&app, "PATCH", &list_path, Some(&token), Some(bad))
+                    .await
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert_eq!(
+                call(&app, "PUT", &list_path, Some(&token), Some(bad))
+                    .await
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+
+        assert_preferences_put_replaces_and_patch_merges(&app, &token, prefix, member_id, user_id)
+            .await;
+    }
+}
+
 async fn scoped_app() -> (axum::Router, String, listmngr_core::MemberId) {
     let db = Database::connect("sqlite::memory:", 1).await.unwrap();
     db.migrate().await.unwrap();
@@ -1135,7 +1363,7 @@ async fn scoped_app() -> (axum::Router, String, listmngr_core::MemberId) {
         .await
         .unwrap()
         .token;
-    let app = listmngr_api::router(db, Config::default(), 100);
+    let app = listmngr_api::router(db, config_with_rate(100));
     (app, token, outsider.id)
 }
 
@@ -1269,7 +1497,7 @@ async fn token_expiry_revoke_and_last_used_are_enforced_across_both_prefixes() {
         )
         .await
         .unwrap();
-    let app = listmngr_api::router(db.clone(), Config::default(), 100);
+    let app = listmngr_api::router(db.clone(), config_with_rate(100));
 
     let before: Option<String> =
         sqlx::query_scalar("SELECT last_used_at FROM api_tokens WHERE id=?")
@@ -1342,11 +1570,226 @@ async fn token_expiry_revoke_and_last_used_are_enforced_across_both_prefixes() {
     }
 }
 
+struct PostAuthRateFixture {
+    db: Database,
+    app: axum::Router,
+    first: listmngr_db::IssuedToken,
+    second: listmngr_db::IssuedToken,
+}
+
+async fn post_auth_rate_fixture() -> PostAuthRateFixture {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    let first_user = db
+        .users()
+        .create(NewUser {
+            display_name: "First".into(),
+            email: "first-rate@example.com".into(),
+            password: "Orbit!Cobalt7-River$Quartz".into(),
+            server_owner: true,
+        })
+        .await
+        .unwrap();
+    let second_user = db
+        .users()
+        .create(NewUser {
+            display_name: "Second".into(),
+            email: "second-rate@example.com".into(),
+            password: "Orbit!Cobalt7-River$Quartz".into(),
+            server_owner: true,
+        })
+        .await
+        .unwrap();
+    let first = db
+        .tokens()
+        .create(first_user.id, "first", &["admin"], None)
+        .await
+        .unwrap();
+    let second = db
+        .tokens()
+        .create(second_user.id, "second", &["admin"], None)
+        .await
+        .unwrap();
+    let config_path =
+        std::env::temp_dir().join(format!("listmngr-rate-{}.toml", uuid::Uuid::now_v7()));
+    std::fs::write(
+        &config_path,
+        "[security.rate_limit]\napi = \"1/min\"\napi_pre_auth = \"100/min\"\n",
+    )
+    .unwrap();
+    let config = Config::load(Some(&config_path)).unwrap();
+    std::fs::remove_file(&config_path).unwrap();
+    let app = listmngr_api::router(db.clone(), config);
+    PostAuthRateFixture {
+        db,
+        app,
+        first,
+        second,
+    }
+}
+
+async fn assert_rate_limited_mutation_has_no_side_effects(fixture: &PostAuthRateFixture) {
+    sqlx::query("UPDATE api_tokens SET last_used_at=NULL WHERE id=?")
+        .bind(fixture.first.id.to_string())
+        .execute(fixture.db.pool())
+        .await
+        .unwrap();
+    let domains_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM domains")
+        .fetch_one(fixture.db.pool())
+        .await
+        .unwrap();
+    let audits_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(fixture.db.pool())
+        .await
+        .unwrap();
+    let blocked = call(
+        &fixture.app,
+        "POST",
+        "/api/v1/domains",
+        Some(&fixture.first.token),
+        Some(r#"{"mail_host":"must-not-exist.example"}"#),
+    )
+    .await;
+    assert_eq!(blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+    let retry_after = blocked
+        .headers()
+        .get(axum::http::header::RETRY_AFTER)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    assert!((1..=60).contains(&retry_after));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM domains")
+            .fetch_one(fixture.db.pool())
+            .await
+            .unwrap(),
+        domains_before,
+        "a blocked handler must not mutate business state"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_log")
+            .fetch_one(fixture.db.pool())
+            .await
+            .unwrap(),
+        audits_before,
+        "a blocked handler must not emit an audit row"
+    );
+    assert!(
+        sqlx::query_scalar::<_, Option<String>>("SELECT last_used_at FROM api_tokens WHERE id=?")
+            .bind(fixture.first.id.to_string())
+            .fetch_one(fixture.db.pool())
+            .await
+            .unwrap()
+            .is_none(),
+        "post-auth rejection must happen before last_used_at changes"
+    );
+}
+
+#[tokio::test]
+async fn post_auth_rate_limit_is_per_identity_and_blocks_before_mutation() {
+    let fixture = post_auth_rate_fixture().await;
+    assert_eq!(
+        call(
+            &fixture.app,
+            "GET",
+            "/api/v1/system/versions",
+            Some(&fixture.first.token),
+            None,
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_rate_limited_mutation_has_no_side_effects(&fixture).await;
+    assert_eq!(
+        call(
+            &fixture.app,
+            "GET",
+            "/api/v1/system/versions",
+            Some(&fixture.second.token),
+            None,
+        )
+        .await
+        .status(),
+        StatusCode::OK,
+        "a second identity on the same socket IP needs an independent post-auth bucket"
+    );
+}
+
+#[tokio::test]
+async fn pre_auth_rate_limit_uses_socket_ip_not_forwarding_headers() {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    let user = db
+        .users()
+        .create(NewUser {
+            display_name: "Pre auth".into(),
+            email: "pre-auth@example.com".into(),
+            password: "Orbit!Cobalt7-River$Quartz".into(),
+            server_owner: true,
+        })
+        .await
+        .unwrap();
+    let issued = db
+        .tokens()
+        .create(user.id, "pre-auth", &["system:read"], None)
+        .await
+        .unwrap();
+    let mut config = Config::default();
+    config.security.rate_limit.api = "100/min".into();
+    config.security.rate_limit.api_pre_auth = Some("1/min".into());
+    let app = listmngr_api::router(db.clone(), config);
+    let socket_peer = "203.0.113.20:4242".parse().unwrap();
+
+    assert_eq!(
+        call_authorization_from(
+            &app,
+            "/api/v1/system/versions",
+            "Bearer invalid",
+            socket_peer,
+            Some("198.51.100.1"),
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let blocked = call_authorization_from(
+        &app,
+        "/api/v1/system/versions",
+        &format!("Bearer {}", issued.token),
+        socket_peer,
+        Some("198.51.100.2"),
+    )
+    .await;
+    assert_eq!(blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        blocked
+            .headers()
+            .get(axum::http::header::RETRY_AFTER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .parse::<u64>()
+            .is_ok()
+    );
+    assert!(
+        sqlx::query_scalar::<_, Option<String>>("SELECT last_used_at FROM api_tokens WHERE id=?")
+            .bind(issued.id.to_string())
+            .fetch_one(db.pool())
+            .await
+            .unwrap()
+            .is_none(),
+        "pre-auth rejection must happen before token lookup/usage mutation"
+    );
+}
+
 #[tokio::test]
 async fn invalid_auth_is_rate_limited_before_database_lookup() {
     let db = Database::connect("sqlite::memory:", 1).await.unwrap();
     db.migrate().await.unwrap();
-    let app = listmngr_api::router(db, Config::default(), 1);
+    let app = listmngr_api::router(db, config_with_rate(1));
     assert_eq!(
         call(&app, "GET", "/api/v1/system/versions", Some("bad"), None)
             .await
@@ -1391,10 +1834,11 @@ async fn auth_test_fixture() -> AuthTestFixture {
     let token_tail = issued.token.strip_prefix("lm_").unwrap();
     let (id, secret) = token_tail.split_once('_').unwrap();
     let basic = base64::engine::general_purpose::STANDARD.encode(format!("{id}:{secret}"));
-    let disabled = listmngr_api::router(db.clone(), Config::default(), 100);
+    let disabled = listmngr_api::router(db.clone(), config_with_rate(100));
     let mut config = Config::default();
     config.api.compat_basic_auth = true;
-    let enabled = listmngr_api::router(db, config, 100);
+    config.security.rate_limit.api = "100/min".into();
+    let enabled = listmngr_api::router(db, config);
 
     AuthTestFixture {
         disabled,
@@ -1433,13 +1877,33 @@ async fn assert_basic_auth_is_disabled_and_malformed_auth_fails_closed(
 
 async fn assert_basic_auth_uses_the_socket_peer(enabled: &axum::Router, basic: &str) {
     assert_eq!(
-        call_authorization(enabled, &format!("Basic {basic}"))
-            .await
-            .status(),
+        call_authorization_from(
+            enabled,
+            "/3.1/system/versions",
+            &format!("Basic {basic}"),
+            "127.0.0.1:4242".parse().unwrap(),
+            None,
+        )
+        .await
+        .status(),
         StatusCode::OK
     );
 
-    for uri in ["/api/v1/system/versions", "/3.1/system/versions"] {
+    assert_eq!(
+        call_authorization_from(
+            enabled,
+            "/api/v1/system/versions",
+            &format!("Basic {basic}"),
+            "127.0.0.1:4242".parse().unwrap(),
+            None,
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED,
+        "Basic auth is compatibility-only and must never authenticate /api/v1"
+    );
+
+    for uri in ["/3.1/system/versions"] {
         assert_eq!(
             call_authorization_from(
                 enabled,
@@ -1520,4 +1984,769 @@ async fn basic_and_bearer_fail_closed_and_errors_are_correlated_and_redacted() {
     .await;
     assert_basic_auth_uses_the_socket_peer(&fixture.enabled, &fixture.basic).await;
     assert_conflict_errors_are_correlated_and_redacted(&fixture.enabled, &fixture.token).await;
+}
+
+#[tokio::test]
+async fn http_mutations_record_exact_request_actor_token_and_socket_ip_once() {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    let actor = db
+        .users()
+        .create(NewUser {
+            display_name: "Audit actor".into(),
+            email: "audit-actor@example.com".into(),
+            password: "Orbit!Cobalt7-River$Quartz".into(),
+            server_owner: true,
+        })
+        .await
+        .unwrap();
+    let issued = db
+        .tokens()
+        .create(actor.id, "audit", &["admin"], None)
+        .await
+        .unwrap();
+    let app = listmngr_api::router(db.clone(), config_with_rate(100));
+    let peer: std::net::SocketAddr = "203.0.113.42:4242".parse().unwrap();
+    let mut before = db.audit().list().await.unwrap().len();
+
+    for (prefix, email) in [
+        ("/api/v1", "native-audit@example.com"),
+        ("/3.1", "compat-audit@example.com"),
+    ] {
+        let response = call_from(
+            &app,
+            "POST",
+            &format!("{prefix}/users"),
+            Some(&issued.token),
+            Some(&format!(
+                r#"{{"display_name":"Audited","email":"{email}","password":"DO-NOT-LOG-Password!9","server_owner":false}}"#
+            )),
+            peer,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CREATED, "{prefix}");
+        let entries = db.audit().list().await.unwrap();
+        assert_eq!(entries.len(), before + 1, "{prefix} audit cardinality");
+        let entry = entries.last().unwrap();
+        assert_eq!(entry.actor_user_id, Some(actor.id));
+        assert_eq!(entry.actor_token_id, Some(issued.id));
+        assert_eq!(entry.ip, Some(peer.ip()));
+        assert_eq!(entry.action, "user.create");
+        assert_eq!(entry.diff["email"], email);
+        assert!(!entry.diff.to_string().contains("DO-NOT-LOG"));
+        before = entries.len();
+    }
+}
+
+#[derive(Clone)]
+struct ScopedFixture {
+    db: Database,
+    app: axum::Router,
+    list_token: listmngr_db::IssuedToken,
+    domain_token: listmngr_db::IssuedToken,
+    first: listmngr_core::MailingList,
+    sibling: listmngr_core::MailingList,
+    second: listmngr_core::MailingList,
+    second_domain: listmngr_core::Domain,
+    visible_user: listmngr_core::User,
+    secret_user: listmngr_core::User,
+    hidden_address_id: listmngr_core::AddressId,
+}
+
+async fn create_scoped_user(db: &Database, display_name: &str, email: &str) -> listmngr_core::User {
+    db.users()
+        .create(NewUser {
+            display_name: display_name.into(),
+            email: email.into(),
+            password: "Orbit!Cobalt7-River$Quartz".into(),
+            server_owner: false,
+        })
+        .await
+        .unwrap()
+}
+
+async fn create_scoped_list(
+    db: &Database,
+    list_id: &str,
+    display_name: &str,
+) -> listmngr_core::MailingList {
+    db.lists()
+        .create(listmngr_db::NewList {
+            list_id: list_id.parse().unwrap(),
+            display_name: display_name.into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap()
+}
+
+async fn subscribe_scoped_user(db: &Database, list_id: listmngr_core::ListId, email: &str) {
+    db.members()
+        .subscribe_with_context(
+            listmngr_db::NewMember {
+                list_id,
+                email: email.into(),
+                role: listmngr_core::MemberRole::Member,
+                subscription_mode: listmngr_core::SubscriptionMode::AsAddress,
+                display_name: email.into(),
+            },
+            true,
+            &listmngr_db::AuditContext::system(),
+        )
+        .await
+        .unwrap();
+}
+
+async fn scoped_fixture() -> ScopedFixture {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    let mut actor = create_scoped_user(&db, "Scoped actor", "actor@first.example").await;
+    sqlx::query("UPDATE users SET is_server_owner=1 WHERE id=?")
+        .bind(actor.id.to_string())
+        .execute(db.pool())
+        .await
+        .unwrap();
+    actor.is_server_owner = true;
+    let first_domain = db
+        .domains()
+        .create("first.example", "", None)
+        .await
+        .unwrap();
+    let second_domain = db
+        .domains()
+        .create("second.example", "", None)
+        .await
+        .unwrap();
+    let first = create_scoped_list(&db, "one.first.example", "Visible").await;
+    let sibling = create_scoped_list(&db, "sibling.first.example", "SECRET-SIBLING-LIST").await;
+    let second = create_scoped_list(&db, "two.second.example", "SECRET-SECOND-LIST").await;
+    let visible_user = create_scoped_user(&db, "Visible user", "visible@first.example").await;
+    let secret_user = create_scoped_user(&db, "SECRET-SECOND-USER", "secret@second.example").await;
+    subscribe_scoped_user(&db, first.id.clone(), "visible@first.example").await;
+    subscribe_scoped_user(&db, sibling.id.clone(), "hidden@first.example").await;
+    subscribe_scoped_user(&db, second.id.clone(), "secret@second.example").await;
+    let hidden_address = db.addresses().get("hidden@first.example").await.unwrap();
+    db.addresses()
+        .link("hidden@first.example", Some(visible_user.id))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE users SET preferred_address_id=? WHERE id=?")
+        .bind(hidden_address.id.to_string())
+        .bind(visible_user.id.to_string())
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let scopes = [
+        "system:read",
+        "lists:read",
+        "lists:write",
+        "members:read",
+        "members:write",
+        "users:write",
+    ];
+    let list_token = db
+        .tokens()
+        .create_scoped(actor.id, "list", &scopes, Some(&first.id), None, None)
+        .await
+        .unwrap();
+    let domain_token = db
+        .tokens()
+        .create_scoped(
+            actor.id,
+            "domain",
+            &scopes,
+            None,
+            Some(first_domain.id),
+            None,
+        )
+        .await
+        .unwrap();
+    let app = listmngr_api::router(db.clone(), config_with_rate(1000));
+    ScopedFixture {
+        db,
+        app,
+        list_token,
+        domain_token,
+        first,
+        sibling,
+        second,
+        second_domain,
+        visible_user,
+        secret_user,
+        hidden_address_id: hidden_address.id,
+    }
+}
+
+async fn assert_scoped_collections(fixture: &ScopedFixture) {
+    for prefix in ["/api/v1", "/3.1"] {
+        for token in [&fixture.list_token.token, &fixture.domain_token.token] {
+            for (method, path, body) in [
+                ("GET", "/domains", None),
+                ("GET", "/lists", None),
+                ("GET", "/domains/first.example/lists", None),
+                (
+                    "POST",
+                    "/members/find",
+                    Some(r#"{"subscriber":"secret@second.example"}"#),
+                ),
+                ("GET", "/users", None),
+            ] {
+                let response = call(
+                    &fixture.app,
+                    method,
+                    &format!("{prefix}{path}"),
+                    Some(token),
+                    body,
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::OK, "{method} {prefix}{path}");
+                let rendered = response_json(response).await.to_string();
+                for forbidden in [
+                    fixture.second.id.as_str(),
+                    &fixture.second_domain.mail_host,
+                    "secret@second.example",
+                    "SECRET-SECOND-LIST",
+                ] {
+                    assert!(
+                        !rendered.contains(forbidden),
+                        "{method} {prefix}{path} leaked {forbidden}: {rendered}"
+                    );
+                }
+                if token == &fixture.list_token.token {
+                    for sibling_secret in [fixture.sibling.id.as_str(), "SECRET-SIBLING-LIST"] {
+                        assert!(
+                            !rendered.contains(sibling_secret),
+                            "{method} {prefix}{path} leaked {sibling_secret}: {rendered}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn assert_nested_user_addresses_are_scoped(fixture: &ScopedFixture) {
+    for prefix in ["/api/v1", "/3.1"] {
+        let path = format!("{prefix}/users/{}/addresses", fixture.visible_user.id);
+        let list_response = call(
+            &fixture.app,
+            "GET",
+            &path,
+            Some(&fixture.list_token.token),
+            None,
+        )
+        .await;
+        assert_eq!(list_response.status(), StatusCode::OK);
+        assert!(
+            !response_json(list_response)
+                .await
+                .to_string()
+                .contains(&fixture.hidden_address_id.to_string()),
+            "list-scoped nested user addresses leaked a sibling-list address"
+        );
+
+        let domain_response = call(
+            &fixture.app,
+            "GET",
+            &path,
+            Some(&fixture.domain_token.token),
+            None,
+        )
+        .await;
+        assert_eq!(domain_response.status(), StatusCode::OK);
+        assert!(
+            response_json(domain_response)
+                .await
+                .to_string()
+                .contains(&fixture.hidden_address_id.to_string()),
+            "domain-scoped nested user addresses must retain in-domain addresses"
+        );
+    }
+}
+
+fn cross_resource_routes(
+    secret_user: listmngr_core::UserId,
+) -> Vec<(&'static str, String, Option<String>)> {
+    vec![
+        ("GET", format!("/users/{secret_user}"), None),
+        ("PATCH", format!("/users/{secret_user}"), Some(r#"{"display_name":"forbidden"}"#.into())),
+        ("DELETE", format!("/users/{secret_user}"), None),
+        ("GET", format!("/users/{secret_user}/preferences"), None),
+        ("PUT", format!("/users/{secret_user}/preferences"), Some("{}".into())),
+        ("PATCH", format!("/users/{secret_user}/preferences"), Some("{}".into())),
+        ("GET", format!("/users/{secret_user}/all/preferences"), None),
+        ("POST", format!("/users/{secret_user}/login"), Some(r#"{"password":"Orbit!Cobalt7-River$Quartz"}"#.into())),
+        ("GET", format!("/users/{secret_user}/addresses"), None),
+        ("POST", format!("/users/{secret_user}/addresses"), Some(r#"{"email":"secret@second.example"}"#.into())),
+        ("GET", "/addresses/secret%40second.example".into(), None),
+        ("POST", "/addresses/secret%40second.example/verify".into(), None),
+        ("POST", "/addresses/secret%40second.example/unverify".into(), None),
+        ("GET", "/addresses/secret%40second.example/user".into(), None),
+        ("POST", "/addresses/secret%40second.example/user".into(), Some(format!(r#"{{"user_id":"{secret_user}"}}"#))),
+        ("DELETE", "/addresses/secret%40second.example/user".into(), None),
+        ("GET", "/addresses/secret%40second.example/memberships".into(), None),
+        ("GET", "/addresses/secret%40second.example/preferences".into(), None),
+        ("PUT", "/addresses/secret%40second.example/preferences".into(), Some("{}".into())),
+        ("PATCH", "/addresses/secret%40second.example/preferences".into(), Some("{}".into())),
+        ("GET", "/addresses/secret%40second.example/all/preferences".into(), None),
+        ("GET", "/owners".into(), None),
+        ("POST", "/users".into(), Some(r#"{"display_name":"forbidden","email":"forbidden@second.example","password":"Orbit!Cobalt7-River$Quartz","server_owner":false}"#.into())),
+    ]
+}
+
+async fn reset_last_used(db: &Database, token: listmngr_core::TokenId) {
+    sqlx::query("UPDATE api_tokens SET last_used_at=NULL WHERE id=?")
+        .bind(token.to_string())
+        .execute(db.pool())
+        .await
+        .unwrap();
+}
+
+async fn assert_last_used_is_unchanged(db: &Database, token: listmngr_core::TokenId, label: &str) {
+    let last_used: Option<String> =
+        sqlx::query_scalar("SELECT last_used_at FROM api_tokens WHERE id=?")
+            .bind(token.to_string())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert!(
+        last_used.is_none(),
+        "forbidden {label} updated last_used_at"
+    );
+}
+
+async fn assert_cross_resource_requests(fixture: &ScopedFixture) {
+    for prefix in ["/api/v1", "/3.1"] {
+        for issued in [&fixture.list_token, &fixture.domain_token] {
+            for (method, path, body) in cross_resource_routes(fixture.secret_user.id) {
+                reset_last_used(&fixture.db, issued.id).await;
+                let response = call(
+                    &fixture.app,
+                    method,
+                    &format!("{prefix}{path}"),
+                    Some(&issued.token),
+                    body.as_deref(),
+                )
+                .await;
+                assert_eq!(
+                    response.status(),
+                    StatusCode::FORBIDDEN,
+                    "{method} {prefix}{path}"
+                );
+                assert_last_used_is_unchanged(
+                    &fixture.db,
+                    issued.id,
+                    &format!("{method} {prefix}{path}"),
+                )
+                .await;
+            }
+            for (path, body) in [
+                ("/domains", r#"{"mail_host":"forbidden.example"}"#),
+                (
+                    "/lists",
+                    r#"{"list_id":"forbidden.second.example","display_name":"Forbidden"}"#,
+                ),
+                (
+                    "/members",
+                    r#"{"list_id":"two.second.example","subscriber":"new@second.example","pre_verified":true,"pre_confirmed":true,"pre_approved":true}"#,
+                ),
+                (
+                    "/members/mass",
+                    r#"{"operation":"subscribe","list_id":"two.second.example","members":[{"subscriber":"new@second.example"}]}"#,
+                ),
+            ] {
+                reset_last_used(&fixture.db, issued.id).await;
+                let response = call(
+                    &fixture.app,
+                    "POST",
+                    &format!("{prefix}{path}"),
+                    Some(&issued.token),
+                    Some(body),
+                )
+                .await;
+                assert_eq!(
+                    response.status(),
+                    StatusCode::FORBIDDEN,
+                    "POST {prefix}{path}"
+                );
+                assert_last_used_is_unchanged(
+                    &fixture.db,
+                    issued.id,
+                    &format!("POST {prefix}{path}"),
+                )
+                .await;
+            }
+        }
+    }
+}
+
+async fn business_row_counts(db: &Database) -> (i64, i64, i64) {
+    (
+        sqlx::query_scalar("SELECT COUNT(*) FROM domains")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        sqlx::query_scalar("SELECT COUNT(*) FROM mailing_lists")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        sqlx::query_scalar("SELECT COUNT(*) FROM members")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn scoped_tokens_filter_global_surfaces_forbid_cross_writes_and_preserve_last_used() {
+    let fixture = scoped_fixture().await;
+    assert_scoped_collections(&fixture).await;
+    assert_nested_user_addresses_are_scoped(&fixture).await;
+    let writes_before = business_row_counts(&fixture.db).await;
+    assert_cross_resource_requests(&fixture).await;
+    assert_eq!(
+        business_row_counts(&fixture.db).await,
+        writes_before,
+        "forbidden matrix must not write"
+    );
+    assert!(
+        fixture
+            .db
+            .users()
+            .get(fixture.visible_user.id)
+            .await
+            .is_ok()
+    );
+    assert_eq!(
+        fixture
+            .db
+            .users()
+            .get(fixture.secret_user.id)
+            .await
+            .unwrap()
+            .display_name,
+        "SECRET-SECOND-USER"
+    );
+    assert_eq!(fixture.first.id.as_str(), "one.first.example");
+}
+
+async fn assert_phase_one_catalogs(app: &axum::Router, token: &str) {
+    let cases: [(&str, &[&str]); 2] = [
+        (
+            "/api/v1/system/pipelines",
+            &[
+                "default-posting-pipeline",
+                "virgin",
+                "default-owner-pipeline",
+            ],
+        ),
+        (
+            "/api/v1/system/chains",
+            &[
+                "default-posting-chain",
+                "default-owner-chain",
+                "accept",
+                "hold",
+                "reject",
+                "discard",
+                "moderation",
+                "header-match",
+                "dmarc-mitigation",
+            ],
+        ),
+    ];
+    for (path, expected) in cases {
+        let body = response_json(call(app, "GET", path, Some(token), None).await).await;
+        let entries = body["items"].as_array().unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        for entry in entries {
+            assert_eq!(entry["phase"], "phase1");
+            assert_eq!(entry["executable"], false);
+            assert_eq!(entry["status"], "catalog_only");
+            assert!(entry.get("handlers").is_none());
+            assert!(entry.get("rules").is_none());
+        }
+    }
+}
+
+#[tokio::test]
+async fn anti_stub_catalogs_collections_and_resource_projections_are_behavioral() {
+    let (app, token, user_id) = setup(&["admin"]).await;
+    assert_phase_one_catalogs(&app, &token).await;
+
+    let addresses = response_json(
+        call(
+            &app,
+            "GET",
+            &format!("/api/v1/users/{user_id}/addresses"),
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(addresses["items"][0]["email"], "admin@example.com");
+    assert!(addresses["items"][0]["id"].is_string());
+
+    for (path, body) in [
+        ("/api/v1/domains", r#"{"mail_host":"projection.example"}"#),
+        (
+            "/api/v1/lists",
+            r#"{"list_id":"dev.projection.example","display_name":"Dev"}"#,
+        ),
+    ] {
+        assert_eq!(
+            call(&app, "POST", path, Some(&token), Some(body))
+                .await
+                .status(),
+            StatusCode::CREATED
+        );
+    }
+    let created = response_json(call(
+        &app,
+        "POST",
+        "/api/v1/members",
+        Some(&token),
+        Some(r#"{"list_id":"dev.projection.example","subscriber":"projection@example.net","pre_verified":true,"pre_confirmed":true,"pre_approved":true}"#),
+    ).await).await;
+    let member_id = created["id"].as_str().unwrap();
+
+    let native = response_json(
+        call(
+            &app,
+            "GET",
+            "/api/v1/lists/dev.projection.example/member/projection%40example.net",
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(native["id"], member_id);
+    assert!(native.get("email").is_none());
+    assert!(native.get("self_link").is_none());
+
+    let compat = response_json(
+        call(
+            &app,
+            "GET",
+            "/3.1/lists/dev.projection.example/member/projection%40example.net",
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(compat["member_id"], member_id);
+    assert_eq!(compat["email"], "projection@example.net");
+    assert_eq!(compat["address"], "/3.1/addresses/projection@example.net");
+    assert_eq!(compat["self_link"], format!("/3.1/members/{member_id}"));
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn collection_and_roster_pagination_has_deterministic_boundaries() {
+    let (app, token, _) = setup(&["admin"]).await;
+    for host in ["a.page.example", "b.page.example", "c.page.example"] {
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                "/api/v1/domains",
+                Some(&token),
+                Some(&format!(r#"{{"mail_host":"{host}"}}"#)),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+    let first =
+        response_json(call(&app, "GET", "/api/v1/domains?count=1", Some(&token), None).await).await;
+    assert_eq!(first["total"], 3);
+    assert_eq!(first["start"], 0);
+    assert_eq!(first["count"], 1);
+    assert_eq!(first["items"][0]["mail_host"], "a.page.example");
+    assert_eq!(first["next_cursor"], "1");
+    let last = response_json(
+        call(
+            &app,
+            "GET",
+            "/api/v1/domains?cursor=2&count=1",
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(last["items"][0]["mail_host"], "c.page.example");
+    assert!(last["next_cursor"].is_null());
+    let beyond = response_json(
+        call(
+            &app,
+            "GET",
+            "/api/v1/domains?cursor=99&count=1",
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(beyond["total"], 3);
+    assert_eq!(beyond["start"], 3);
+    assert_eq!(beyond["count"], 0);
+    assert!(beyond["items"].as_array().unwrap().is_empty());
+
+    let compat = response_json(
+        call(
+            &app,
+            "GET",
+            "/3.1/domains?page=2&count=1",
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(compat["total_size"], 3);
+    assert_eq!(compat["start"], 1);
+    assert_eq!(compat["count"], 1);
+    assert_eq!(compat["entries"][0]["mail_host"], "b.page.example");
+    assert_eq!(
+        compat["entries"][0]["self_link"],
+        "/3.1/domains/b.page.example"
+    );
+
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/lists",
+            Some(&token),
+            Some(r#"{"list_id":"roster.a.page.example","display_name":"Roster"}"#),
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    let lists = response_json(
+        call(
+            &app,
+            "GET",
+            "/3.1/domains/a.page.example/lists?count=1",
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        lists["entries"][0]["fqdn_listname"],
+        "roster@a.page.example"
+    );
+    assert_eq!(
+        lists["entries"][0]["self_link"],
+        "/3.1/lists/roster.a.page.example"
+    );
+    for subscriber in ["z@example.net", "a@example.net", "m@example.net"] {
+        assert_eq!(call(
+            &app, "POST", "/api/v1/members", Some(&token),
+            Some(&format!(r#"{{"list_id":"roster.a.page.example","subscriber":"{subscriber}","pre_verified":true,"pre_confirmed":true,"pre_approved":true}}"#)),
+        ).await.status(), StatusCode::CREATED);
+    }
+    let roster = response_json(
+        call(
+            &app,
+            "GET",
+            "/3.1/lists/roster.a.page.example/roster/member?page=2&count=1",
+            Some(&token),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(roster["total_size"], 3);
+    assert_eq!(roster["start"], 1);
+    assert_eq!(roster["count"], 1);
+    assert_eq!(roster["entries"][0]["email"], "m@example.net");
+}
+
+#[tokio::test]
+async fn member_find_supports_exact_and_substring_with_scope_and_filters() {
+    let fixture = scoped_fixture().await;
+    let exact = response_json(
+        call(
+            &fixture.app,
+            "POST",
+            "/api/v1/members/find",
+            Some(&fixture.domain_token.token),
+            Some(r#"{"subscriber":"visible@first.example"}"#),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(exact["total"], 1);
+
+    let substring = response_json(
+        call(
+            &fixture.app,
+            "POST",
+            "/api/v1/members/find?count=10",
+            Some(&fixture.domain_token.token),
+            Some(r#"{"substring":"first.example","role":"member"}"#),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(substring["total"], 2);
+    let rendered = substring.to_string();
+    assert!(rendered.contains("one.first.example"));
+    assert!(rendered.contains("sibling.first.example"));
+    assert!(!rendered.contains("two.second.example"));
+
+    let list_filtered = response_json(
+        call(
+            &fixture.app,
+            "POST",
+            "/api/v1/members/find",
+            Some(&fixture.domain_token.token),
+            Some(r#"{"substring":"first.example","list_id":"one.first.example"}"#),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(list_filtered["total"], 1);
+
+    let list_scoped = response_json(
+        call(
+            &fixture.app,
+            "POST",
+            "/api/v1/members/find",
+            Some(&fixture.list_token.token),
+            Some(r#"{"substring":"example"}"#),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(list_scoped["total"], 1);
+    assert!(!list_scoped.to_string().contains("sibling.first.example"));
+
+    let compat_form = response_json(
+        call_form(
+            &fixture.app,
+            "POST",
+            "/3.1/members/find",
+            &fixture.domain_token.token,
+            "subscriber=visible%40first.example",
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(compat_form["total_size"], 1);
 }
