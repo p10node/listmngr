@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod aliases;
+mod bounce;
+mod digests;
 mod errors;
 mod queue;
 mod status;
@@ -20,6 +23,16 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Explicit bounce warning/removal maintenance; does not start a scheduler.
+    Bounce {
+        #[command(subcommand)]
+        command: bounce::Command,
+    },
+    /// Generate a new immutable Postfix map generation; never reloads the MTA.
+    Aliases {
+        #[command(subcommand)]
+        command: aliases::Command,
+    },
     Version,
     Conf {
         #[arg(long)]
@@ -48,6 +61,11 @@ enum Command {
     Token {
         #[command(subcommand)]
         command: TokenCommand,
+    },
+    /// Publish collected digests or advance the volume.
+    Digests {
+        #[command(subcommand)]
+        command: digests::Command,
     },
     /// Durable queue operations; does not start delivery workers.
     Queue {
@@ -293,7 +311,8 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         config.database.max_connections,
         &config.security,
     )
-    .await?;
+    .await?
+    .with_default_language(&config.site.default_language);
     match command {
         Command::Migrate => {
             db.migrate().await.context(errors::MigrationFailure)?;
@@ -306,7 +325,10 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Members { command } => members(&db, command).await?,
         Command::User { command } => users(&db, command).await?,
         Command::Token { command } => tokens(&db, command).await?,
+        Command::Bounce { command } => bounce::run(&db, command).await?,
         Command::Queue { command } => queue::run(&db, command).await?,
+        Command::Digests { command } => digests::run(&db, command).await?,
+        Command::Aliases { command } => aliases::run(&db, &config, command).await?,
         Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
             bail!("command does not use database")
         }
