@@ -747,9 +747,12 @@ async fn recipient_limit_openapi_exposes_bounded_integer() {
     let (app, _) = setup().await;
     let doc = document(&app).await;
     for schema in ["ListConfigResponse", "ListConfigInput"] {
-        let schema = &doc["components"]["schemas"][schema];
-        let object = schema.get("allOf").map_or(schema, |parts| &parts[1]);
-        let field = &object["properties"]["max_num_recipients"];
+        let field = schema_property(
+            &doc,
+            &doc["components"]["schemas"][schema],
+            "max_num_recipients",
+        )
+        .unwrap_or_else(|| panic!("{schema} exposes max_num_recipients"));
         assert_eq!(field["maximum"], 2_147_483_647);
         assert_eq!(field["minimum"], 0);
     }

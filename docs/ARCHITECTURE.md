@@ -153,6 +153,30 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-LIST-SETTINGS — bounded acceptance verified
+
+`MailingList` carries Mailman's Alter Messages and Member Policy groups as
+two flattened value types (`AlterMessages`, `MemberPolicy`) next to the
+existing flattened `DmarcSettings`, which gained `dmarc_addresses`,
+`dmarc_moderation_notice` and `dmarc_wrapped_message_text`; the bounce
+group gained `forward_unrecognized_bounces_to`. Enumerations are
+`string_enum!` types with Mailman's wire names, so the REST resource, the
+audit trail and the database column all carry the same string. Migration
+`0031` adds the columns with `CHECK` constraints on every enumeration and
+Mailman's defaults, and the schema snapshot corpus pins them on both engines.
+
+Writes go through the same `apply_patch_key` path as every other list
+setting: each key is validated into the in-memory list, the whole row is
+then rewritten and the `list.config` audit event recorded in one
+transaction, so a rejected key means nothing persisted. MIME types and
+extensions are validated as printable ASCII tokens and stored lowercase
+because that is how the content filter compares them; free text is bounded
+at 64 KiB. The list configuration resource accepts mailmanclient's form
+encoding through `FormAwareObject`, a deserializer that folds repeated form
+keys into arrays so `filter_types=a&filter_types=b` and Python's
+`True`/`False` round-trip, and `PUT` seeds every omitted setting from
+`MailingList::new` before applying the supplied keys.
+
 ## P3-I18N — bounded acceptance verified
 
 `crates/i18n` is the message catalog layer: Fluent (`fluent-bundle`) resources

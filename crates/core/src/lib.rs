@@ -288,6 +288,12 @@ string_enum!(DeliveryStatus { Enabled => "enabled", ByUser => "by_user", ByBounc
 string_enum!(ModerationAction { Defer => "defer", Accept => "accept", Hold => "hold", Reject => "reject", Discard => "discard" });
 string_enum!(ArchivePolicy { Public => "public", Private => "private", Never => "never" });
 string_enum!(ArchiveRenderingMode { Text => "text", Markdown => "markdown" });
+string_enum!(FilterAction { Discard => "discard", Reject => "reject", Forward => "forward", Preserve => "preserve" });
+string_enum!(ReplyToMunging { NoMunging => "no_munging", PointToList => "point_to_list", ExplicitHeader => "explicit_header", ExplicitHeaderOnly => "explicit_header_only" });
+string_enum!(Personalization { None => "none", Individual => "individual", Full => "full" });
+string_enum!(SubscriptionPolicy { Open => "open", Confirm => "confirm", Moderate => "moderate", ConfirmThenModerate => "confirm_then_moderate" });
+string_enum!(RosterVisibility { Public => "public", Members => "members", Moderators => "moderators" });
+string_enum!(UnrecognizedBounceDisposition { Discard => "discard", SiteOwner => "site_owner", Administrators => "administrators" });
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Preferences {
@@ -437,6 +443,93 @@ pub struct DmarcSettings {
     pub action: DmarcMitigateAction,
     #[serde(rename = "dmarc_mitigate_unconditionally")]
     pub unconditional: bool,
+    /// Exact addresses or `^`-anchored regexes always treated as if their
+    /// domain published a restrictive DMARC policy.
+    pub dmarc_addresses: Vec<String>,
+    /// Text inserted into the hold notice when a post is held for DMARC.
+    pub dmarc_moderation_notice: String,
+    /// Text of the outer message when `wrap_message` mitigation applies.
+    pub dmarc_wrapped_message_text: String,
+}
+
+/// Mailman's *Alter Messages* settings: content filtering, header munging
+/// and personalization. Serialized as flat compatibility keys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(default)]
+// Independent persisted configuration switches, not mutually exclusive states.
+#[allow(clippy::struct_excessive_bools)]
+pub struct AlterMessages {
+    pub filter_content: bool,
+    /// MIME types (`type` or `type/subtype`) removed by content filtering.
+    pub filter_types: Vec<String>,
+    /// MIME types kept by content filtering; empty keeps everything not filtered.
+    pub pass_types: Vec<String>,
+    /// File-name extensions removed by content filtering.
+    pub filter_extensions: Vec<String>,
+    /// File-name extensions kept by content filtering.
+    pub pass_extensions: Vec<String>,
+    #[schema(default = true)]
+    pub collapse_alternatives: bool,
+    pub convert_html_to_plaintext: bool,
+    #[schema(default = "discard")]
+    pub filter_action: FilterAction,
+    #[schema(default = true)]
+    pub include_rfc2369_headers: bool,
+    #[schema(default = true)]
+    pub allow_list_posts: bool,
+    #[schema(default = "no_munging")]
+    pub reply_goes_to_list: ReplyToMunging,
+    /// Mailbox used by the explicit `Reply-To` policies; empty when unset.
+    pub reply_to_address: String,
+    pub first_strip_reply_to: bool,
+    #[schema(default = "none")]
+    pub personalize: Personalization,
+    #[schema(default = true)]
+    pub include_sender_header: bool,
+}
+
+impl Default for AlterMessages {
+    fn default() -> Self {
+        Self {
+            filter_content: false,
+            filter_types: Vec::new(),
+            pass_types: Vec::new(),
+            filter_extensions: Vec::new(),
+            pass_extensions: Vec::new(),
+            collapse_alternatives: true,
+            convert_html_to_plaintext: false,
+            filter_action: FilterAction::Discard,
+            include_rfc2369_headers: true,
+            allow_list_posts: true,
+            reply_goes_to_list: ReplyToMunging::NoMunging,
+            reply_to_address: String::new(),
+            first_strip_reply_to: false,
+            personalize: Personalization::None,
+            include_sender_header: true,
+        }
+    }
+}
+
+/// Mailman's *Member Policy* settings. Serialized as flat compatibility keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(default)]
+pub struct MemberPolicy {
+    #[schema(default = "confirm")]
+    pub subscription_policy: SubscriptionPolicy,
+    #[schema(default = "confirm")]
+    pub unsubscription_policy: SubscriptionPolicy,
+    #[schema(default = "moderators")]
+    pub member_roster_visibility: RosterVisibility,
+}
+
+impl Default for MemberPolicy {
+    fn default() -> Self {
+        Self {
+            subscription_policy: SubscriptionPolicy::Confirm,
+            unsubscription_policy: SubscriptionPolicy::Confirm,
+            member_roster_visibility: RosterVisibility::Moderators,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -535,6 +628,18 @@ pub struct MailingList {
     #[serde(default = "default_true")]
     #[schema(default = true)]
     pub admin_immed_notify: bool,
+    #[serde(flatten)]
+    pub alter_messages: AlterMessages,
+    #[serde(flatten)]
+    pub member_policy: MemberPolicy,
+    /// Where bounces the detectors cannot attribute to a member are forwarded.
+    #[serde(default = "default_unrecognized_bounces")]
+    #[schema(default = "administrators")]
+    pub forward_unrecognized_bounces_to: UnrecognizedBounceDisposition,
+}
+
+const fn default_unrecognized_bounces() -> UnrecognizedBounceDisposition {
+    UnrecognizedBounceDisposition::Administrators
 }
 
 fn default_posting_pipeline() -> String {
@@ -608,6 +713,9 @@ impl MailingList {
             posting_pipeline: default_posting_pipeline(),
             respond_to_post_requests: true,
             admin_immed_notify: true,
+            alter_messages: AlterMessages::default(),
+            member_policy: MemberPolicy::default(),
+            forward_unrecognized_bounces_to: default_unrecognized_bounces(),
         }
     }
 

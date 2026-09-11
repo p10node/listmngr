@@ -48,6 +48,8 @@ cargo test --locked -p listmngr-db --test moderation_rules \
   postgres_moderation_rules_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test notice_language \
   postgres_notice_language_contract -- --ignored --exact
+cargo test --locked -p listmngr-db --test alter_messages_settings \
+  postgres_alter_messages_settings_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test subject_prefix \
   postgres_subject_prefix_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test mail_queue_runtime \
