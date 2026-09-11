@@ -123,7 +123,9 @@ fn route_handlers(route_call: &str, path: &str) -> Vec<LiveRoute> {
                 continue;
             }
             let handler = route_call[cursor..]
-                .split(|character: char| !character.is_alphanumeric() && character != '_')
+                .split(|character: char| {
+                    !character.is_alphanumeric() && character != '_' && character != ':'
+                })
                 .next()
                 .unwrap();
             routes.push(LiveRoute {
@@ -136,10 +138,64 @@ fn route_handlers(route_call: &str, path: &str) -> Vec<LiveRoute> {
     routes
 }
 
-fn live_v1_routes() -> Vec<LiveRoute> {
-    let start = API_SOURCE.find("fn phase_one_routes() ").unwrap();
-    let end = API_SOURCE[start..].find("\n}\n\nasync fn health").unwrap() + start;
-    let router_source = &API_SOURCE[start..end];
+#[tokio::test]
+async fn smtp_bounce_openapi_has_typed_private_metadata_page() {
+    let (app, _) = setup().await;
+    let doc = document(&app).await;
+    let op = &doc["paths"]["/api/v1/lists/{id}/bounces"]["get"];
+    assert_eq!(
+        op["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/BouncePageResponse"
+    );
+    assert_eq!(op["security"][0]["bearerAuth"], json!([]));
+    let properties = doc["components"]["schemas"]["BounceEvent"]["properties"]
+        .as_object()
+        .unwrap();
+    for name in [
+        "id",
+        "list_id",
+        "recipient",
+        "job_id",
+        "message_id",
+        "created_at",
+        "source",
+        "context",
+        "processed",
+    ] {
+        assert!(properties.contains_key(name));
+    }
+    assert_eq!(properties.len(), 11);
+    assert!(properties.contains_key("smtp_stage"));
+    assert!(properties.contains_key("smtp_code"));
+    assert_eq!(
+        doc["components"]["schemas"]["SmtpFailureStage"]["enum"],
+        json!(["ehlo", "mail_from", "rcpt", "data_start", "data_final"])
+    );
+    for field in ["smtp_stage", "smtp_code"] {
+        assert!(
+            !doc["components"]["schemas"]["BounceEvent"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(field))
+        );
+    }
+    validate_openapi(&doc, &live_v1_routes()).unwrap();
+}
+
+#[test]
+fn qualified_handlers_retain_their_definition_and_request_media() {
+    let routes = route_handlers("get(bans::list).post(bans::create)", "/lists/{id}/bans");
+    assert_eq!(routes[0].handler, "bans::list");
+    assert_eq!(routes[1].handler, "bans::create");
+    assert_eq!(
+        expected_request_media(&routes[1].handler),
+        BTreeSet::from(["application/json", "application/x-www-form-urlencoded"])
+    );
+    assert!(expected_request_media(&routes[0].handler).is_empty());
+}
+
+/// Every `.route(...)` call in a router-building function body.
+fn routes_in(router_source: &str) -> Vec<LiveRoute> {
     let mut routes = Vec::new();
     let mut cursor = 0;
     while let Some(relative) = router_source[cursor..].find(".route(") {
@@ -149,6 +205,25 @@ fn live_v1_routes() -> Vec<LiveRoute> {
         routes.extend(route_handlers(route_call, quoted_value(route_call)));
         cursor = close + 1;
     }
+    routes
+}
+
+fn live_v1_routes() -> Vec<LiveRoute> {
+    let start = API_SOURCE.find("fn phase_one_routes() ").unwrap();
+    let end = API_SOURCE[start..].find("\n}\n\nasync fn health").unwrap() + start;
+    let mut routes = routes_in(&API_SOURCE[start..end]);
+    // `phase_one_routes` merges the template router; its routes are live too.
+    let templates = include_str!("../src/templates.rs");
+    let start = templates.find("pub fn routes() ").unwrap();
+    let end = templates[start..].find("\n}\n").unwrap() + start;
+    routes.extend(
+        routes_in(&templates[start..end])
+            .into_iter()
+            .map(|route| LiveRoute {
+                handler: format!("templates::{}", route.handler),
+                ..route
+            }),
+    );
     routes.sort();
     routes
 }
@@ -219,10 +294,17 @@ fn path_placeholders(path: &str) -> BTreeSet<&str> {
 }
 
 fn expected_request_media(handler: &str) -> BTreeSet<&'static str> {
+    let (source, handler) = match handler.rsplit_once("::") {
+        Some(("bans", name)) => (include_str!("../src/bans.rs"), name),
+        Some(("bounces", name)) => (include_str!("../src/bounces.rs"), name),
+        Some(("templates", name)) => (include_str!("../src/templates.rs"), name),
+        Some(_) => panic!("unregistered handler module: {handler}"),
+        None => (API_SOURCE, handler),
+    };
     let marker = format!("async fn {handler}(");
-    let start = API_SOURCE.find(&marker).unwrap() + marker.len() - 1;
-    let end = matching_delimiter(API_SOURCE, start, b'(', b')');
-    let parameters = &API_SOURCE[start + 1..end];
+    let start = source.find(&marker).expect("handler definition exists") + marker.len() - 1;
+    let end = matching_delimiter(source, start, b'(', b')');
+    let parameters = &source[start + 1..end];
     if parameters.contains("JsonOrForm<") {
         BTreeSet::from(["application/json", "application/x-www-form-urlencoded"])
     } else if parameters.contains("Json<") {
@@ -338,6 +420,42 @@ fn validate_openapi(document: &Value, routes: &[LiveRoute]) -> Result<(), String
 }
 
 #[tokio::test]
+async fn dmarc_openapi_exposes_bounded_settings_on_config_contracts() {
+    let (app, _) = setup().await;
+    let doc = document(&app).await;
+    for schema in ["MailingList", "ListConfigResponse", "ListConfigInput"] {
+        let definition = &doc["components"]["schemas"][schema];
+        assert!(
+            schema_property(&doc, definition, "dmarc_mitigate_action").is_some(),
+            "{schema}"
+        );
+        assert!(
+            schema_property(&doc, definition, "dmarc_mitigate_unconditionally").is_some(),
+            "{schema}"
+        );
+    }
+    assert_eq!(
+        doc["components"]["schemas"]["DmarcMitigateAction"]["enum"],
+        json!(["no_mitigation", "munge_from"])
+    );
+    for key in ["dmarc_mitigate_action", "dmarc_mitigate_unconditionally"] {
+        let mut broken = doc.clone();
+        assert!(
+            broken["components"]["schemas"]["DmarcSettings"]["properties"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key)
+                .is_some()
+        );
+        for schema in ["MailingList", "ListConfigResponse"] {
+            assert!(
+                schema_property(&broken, &broken["components"]["schemas"][schema], key).is_none()
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn openapi_is_parseable_resolved_and_matches_every_live_v1_operation() {
     let (app, _) = setup().await;
     let document = document(&app).await;
@@ -412,6 +530,21 @@ async fn structural_validator_rejects_contract_regressions() {
         validate_openapi(&original, &incomplete_live_routes).is_err(),
         "validator accepted route/document divergence"
     );
+}
+
+fn schema_property<'a>(document: &'a Value, schema: &'a Value, key: &str) -> Option<&'a Value> {
+    let schema = dereference_schema(document, schema);
+    schema
+        .get("properties")
+        .and_then(|p| p.get(key))
+        .filter(|value| !value.is_null())
+        .or_else(|| {
+            schema
+                .get("allOf")?
+                .as_array()?
+                .iter()
+                .find_map(|part| schema_property(document, part, key))
+        })
 }
 
 fn dereference_schema<'a>(document: &'a Value, schema: &'a Value) -> &'a Value {
@@ -606,5 +739,18 @@ async fn paginated_operations_and_rate_limit_headers_are_typed() {
         let retry_after = &operation["responses"]["429"]["headers"]["Retry-After"];
         assert_eq!(retry_after["schema"]["type"], "integer", "{method} {path}");
         assert_eq!(retry_after["schema"]["minimum"], 1, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn recipient_limit_openapi_exposes_bounded_integer() {
+    let (app, _) = setup().await;
+    let doc = document(&app).await;
+    for schema in ["ListConfigResponse", "ListConfigInput"] {
+        let schema = &doc["components"]["schemas"][schema];
+        let object = schema.get("allOf").map_or(schema, |parts| &parts[1]);
+        let field = &object["properties"]["max_num_recipients"];
+        assert_eq!(field["maximum"], 2_147_483_647);
+        assert_eq!(field["minimum"], 0);
     }
 }
