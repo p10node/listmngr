@@ -1,7 +1,7 @@
 """Bounded real-client held acceptance; only disposable fixture state is used."""
 from contextlib import closing, contextmanager
 from datetime import datetime
-from email import message_from_string
+from email import message_from_bytes, message_from_string
 from importlib.metadata import version
 import smtplib
 import socket
@@ -172,6 +172,11 @@ def run_held(url, token, cli, user_id, directory, lmtp_port, sink):
         wait_for(lambda: rows("SELECT status FROM delivery_recipients") == [("sent",)], "durable sent outcome")
         assert deliveries()[0][0] == [subscriber]
         assert b"Unique held body accept" in deliveries()[0][1]
+        # SMTP completion does not mean the digest/archive consumers are done.
+        # Observe quiescence before comparing all queue states across replay;
+        # otherwise unrelated, legitimate child-job progress races this assertion.
+        wait_for(lambda: rows("SELECT count(*) FROM queue_jobs WHERE state!='done'") == [(0,)],
+                 "accepted child-job quiescence before replay")
         before = rows("SELECT id,queue,state FROM queue_jobs ORDER BY id")
         expect_http(409, held.accept)
         assert rows("SELECT id,queue,state FROM queue_jobs ORDER BY id") == before
@@ -186,8 +191,19 @@ def run_held(url, token, cli, user_id, directory, lmtp_port, sink):
         assert mailing_list.held == []
         assert rows("SELECT disposition FROM held_messages ORDER BY subject") == [("accepted",), ("discarded",), ("rejected",)]
         assert rows("SELECT reason FROM moderation_log WHERE held_id=? AND action='rejected'", (rejected.request_id,)) == [("not allowed + nguyên",)]
-        assert rows("SELECT count(*) FROM queue_jobs WHERE queue='out'") == [(1,)]
-        # Queue completion plus no extra out jobs is stronger than a sleep alone.
+        assert rows("SELECT count(*) FROM queue_jobs WHERE queue='out'") == [(2,)]
+        assert rows("SELECT count(*) FROM queue_jobs q JOIN held_messages h ON h.message_id=q.message_id WHERE h.disposition IN ('rejected','discarded') AND q.queue!='in'") == [(0,)]
+        # One subscriber post plus one rejection notice, never a discarded post.
         wait_for(lambda: rows("SELECT count(*) FROM queue_jobs WHERE state!='done'") == [(0,)], "queue quiescence")
-        assert len(deliveries()) == 1
-    print("mailmanclient 3.3.5 held PASS: LMTP hold/count/list/get/msg, scoped denial, fail-closed options, defer comment, accept/replay exactly one SMTP delivery, reject/discard; read-only DB corroboration")
+        assert len(deliveries()) == 2
+        recipients, raw_notice = deliveries()[1]
+        assert recipients == ["outsider@example.invalid"]
+        notice = message_from_bytes(raw_notice)
+        assert notice["Auto-Submitted"] == "auto-generated"
+        assert notice["List-Post"] is None
+        payload = notice.get_payload(decode=True)
+        assert isinstance(payload, bytes)
+        decoded = payload.decode("utf-8")
+        assert "not allowed + nguyên" in decoded
+        assert "Unique held body" not in decoded
+    print("mailmanclient 3.3.5 held PASS: LMTP hold/count/list/get/msg, scoped denial, fail-closed options, defer comment, accept/replay one subscriber delivery, one rejection notice, silent discard; read-only DB corroboration")
