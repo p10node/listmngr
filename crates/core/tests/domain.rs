@@ -76,7 +76,7 @@ fn secret_file_permissions_fail_closed_without_disclosing_path_or_value() {
 
 #[test]
 fn enabling_mail_role_without_the_explicit_trusted_relay_mode_fails_closed() {
-    for smtp_tls in ["opportunistic", "required", "none", ""] {
+    for smtp_tls in ["opportunistic", "none", ""] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("listmngr.toml");
         std::fs::write(
@@ -106,6 +106,19 @@ fn enabling_mail_role_without_the_explicit_trusted_relay_mode_fails_closed() {
     let path = dir.path().join("listmngr.toml");
     std::fs::write(&path, "[site]\nname = \"web only\"\n").unwrap();
     assert!(!Config::load(Some(&path)).unwrap().mta.enabled);
+}
+
+#[test]
+fn required_starttls_configuration_is_admitted() {
+    let dir = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
+    let path = dir.path().join("starttls.toml");
+    std::fs::write(&path, "[mta]\nenabled = true\nsmtp_tls = 'required'\nsmtp_tls_server_name = 'relay.example.invalid'\n").unwrap();
+    let config = Config::load(Some(&path)).expect("required STARTTLS must be admitted");
+    assert_eq!(config.mta.smtp_tls, "required");
+    assert_eq!(
+        config.mta.smtp_tls_server_name.as_deref(),
+        Some("relay.example.invalid")
+    );
 }
 
 #[test]
