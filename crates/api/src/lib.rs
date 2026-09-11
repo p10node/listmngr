@@ -67,6 +67,44 @@ where
     }
 }
 
+/// A JSON object whose form encoding may repeat a key. Repeated form keys
+/// collect into an array (mailmanclient posts lists as `key=a&key=b`); JSON
+/// input is taken as written.
+#[derive(Debug)]
+struct FormAwareObject(Value);
+
+impl<'de> Deserialize<'de> for FormAwareObject {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = FormAwareObject;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut object = serde_json::Map::new();
+                while let Some((key, value)) = map.next_entry::<String, Value>()? {
+                    match object.get_mut(&key) {
+                        Some(Value::Array(items)) => items.push(value),
+                        Some(existing) => {
+                            let first = std::mem::take(existing);
+                            *existing = Value::Array(vec![first, value]);
+                        }
+                        None => {
+                            object.insert(key, value);
+                        }
+                    }
+                }
+                Ok(FormAwareObject(Value::Object(object)))
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 struct ErrorResponse {
     code: &'static str,
@@ -210,6 +248,13 @@ pub struct ListConfigResponse {
     /// Tell owners and moderators immediately when a post is held.
     #[schema(default = true)]
     pub admin_immed_notify: bool,
+    #[serde(flatten)]
+    pub alter_messages: listmngr_core::AlterMessages,
+    #[serde(flatten)]
+    pub member_policy: listmngr_core::MemberPolicy,
+    /// Where bounces that match no member are forwarded.
+    #[schema(default = "administrators")]
+    pub forward_unrecognized_bounces_to: listmngr_core::UnrecognizedBounceDisposition,
     pub mail_host: String,
     pub list_name: String,
     pub fqdn_listname: String,
@@ -286,6 +331,47 @@ pub struct ListConfigInput {
     pub respond_to_post_requests: Option<bool>,
     /// Tell owners and moderators immediately when a post is held; default true.
     pub admin_immed_notify: Option<bool>,
+    pub filter_content: Option<bool>,
+    /// MIME types (`type` or `type/subtype`) removed by content filtering.
+    pub filter_types: Option<Vec<String>>,
+    /// MIME types kept by content filtering; empty keeps everything not filtered.
+    pub pass_types: Option<Vec<String>>,
+    /// File-name extensions removed by content filtering.
+    pub filter_extensions: Option<Vec<String>>,
+    /// File-name extensions kept by content filtering.
+    pub pass_extensions: Option<Vec<String>>,
+    #[schema(default = true)]
+    pub collapse_alternatives: Option<bool>,
+    pub convert_html_to_plaintext: Option<bool>,
+    #[schema(default = "discard")]
+    pub filter_action: Option<listmngr_core::FilterAction>,
+    #[schema(default = true)]
+    pub include_rfc2369_headers: Option<bool>,
+    #[schema(default = true)]
+    pub allow_list_posts: Option<bool>,
+    #[schema(default = "no_munging")]
+    pub reply_goes_to_list: Option<listmngr_core::ReplyToMunging>,
+    /// Mailbox for the explicit `Reply-To` policies; empty clears it.
+    pub reply_to_address: Option<String>,
+    pub first_strip_reply_to: Option<bool>,
+    #[schema(default = "none")]
+    pub personalize: Option<listmngr_core::Personalization>,
+    #[schema(default = true)]
+    pub include_sender_header: Option<bool>,
+    #[schema(default = "confirm")]
+    pub subscription_policy: Option<listmngr_core::SubscriptionPolicy>,
+    #[schema(default = "confirm")]
+    pub unsubscription_policy: Option<listmngr_core::SubscriptionPolicy>,
+    #[schema(default = "moderators")]
+    pub member_roster_visibility: Option<listmngr_core::RosterVisibility>,
+    /// Exact addresses or `^`-anchored regexes treated as DMARC-protected.
+    pub dmarc_addresses: Option<Vec<String>>,
+    /// Text added to the hold notice for DMARC holds; at most 64 KiB.
+    pub dmarc_moderation_notice: Option<String>,
+    /// Outer text of a DMARC-wrapped post; at most 64 KiB.
+    pub dmarc_wrapped_message_text: Option<String>,
+    #[schema(default = "administrators")]
+    pub forward_unrecognized_bounces_to: Option<listmngr_core::UnrecognizedBounceDisposition>,
 }
 
 #[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
@@ -1687,7 +1773,7 @@ async fn list_config_put(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: JsonOrForm<Value>,
+    body: JsonOrForm<FormAwareObject>,
 ) -> ApiResult<Json<Value>> {
     list_config_write(state, path, headers, connect, body, true).await
 }
@@ -1704,7 +1790,7 @@ async fn list_config_patch(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: JsonOrForm<Value>,
+    body: JsonOrForm<FormAwareObject>,
 ) -> ApiResult<Json<Value>> {
     list_config_write(state, path, headers, connect, body, false).await
 }
@@ -1713,7 +1799,7 @@ async fn list_config_write(
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    JsonOrForm(mut v): JsonOrForm<Value>,
+    JsonOrForm(FormAwareObject(mut v)): JsonOrForm<FormAwareObject>,
     replace: bool,
 ) -> ApiResult<Json<Value>> {
     let id = parse_list_path(s.flavor, &id)?;
@@ -1761,7 +1847,20 @@ async fn list_config_write(
             "posting_pipeline": defaults.posting_pipeline,
             "respond_to_post_requests": defaults.respond_to_post_requests,
             "admin_immed_notify": defaults.admin_immed_notify,
+            "forward_unrecognized_bounces_to": defaults.forward_unrecognized_bounces_to,
+            "dmarc_addresses": defaults.dmarc.dmarc_addresses,
+            "dmarc_moderation_notice": defaults.dmarc.dmarc_moderation_notice,
+            "dmarc_wrapped_message_text": defaults.dmarc.dmarc_wrapped_message_text,
         });
+        let object = replacement
+            .as_object_mut()
+            .expect("replacement is an object");
+        for settings in [
+            serde_json::to_value(&defaults.alter_messages).expect("serialize"),
+            serde_json::to_value(defaults.member_policy).expect("serialize"),
+        ] {
+            object.extend(settings.as_object().expect("flat settings").clone());
+        }
         let supplied = v
             .as_object()
             .ok_or_else(|| ApiError(Error::Validation("list config must be an object".into())))?;
@@ -1804,6 +1903,16 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
         "require_explicit_destination",
         "respond_to_post_requests",
         "admin_immed_notify",
+        "advertised",
+        "anonymous_list",
+        "emergency",
+        "filter_content",
+        "collapse_alternatives",
+        "convert_html_to_plaintext",
+        "include_rfc2369_headers",
+        "allow_list_posts",
+        "first_strip_reply_to",
+        "include_sender_header",
     ] {
         if let Some(Value::String(text)) = value.get(field) {
             let enabled = text
@@ -1811,6 +1920,28 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
                 .parse::<bool>()
                 .map_err(|_| ApiError(Error::Validation(field.into())))?;
             value[field] = json!(enabled);
+        }
+    }
+    // List settings: one form value is a one-element list, an empty value
+    // clears the list, repeated keys already arrived as an array.
+    for field in [
+        "acceptable_aliases",
+        "accept_these_nonmembers",
+        "hold_these_nonmembers",
+        "reject_these_nonmembers",
+        "discard_these_nonmembers",
+        "filter_types",
+        "pass_types",
+        "filter_extensions",
+        "pass_extensions",
+        "dmarc_addresses",
+    ] {
+        if let Some(Value::String(text)) = value.get(field) {
+            value[field] = if text.is_empty() {
+                json!([])
+            } else {
+                json!([text])
+            };
         }
     }
     if let Some(Value::String(text)) = value.get("bounce_score_threshold") {

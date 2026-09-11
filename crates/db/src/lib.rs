@@ -1212,11 +1212,73 @@ impl ListRepo<'_> {
             "require_explicit_destination" => &mut list.require_explicit_destination,
             "respond_to_post_requests" => &mut list.respond_to_post_requests,
             "admin_immed_notify" => &mut list.admin_immed_notify,
+            "filter_content" => &mut list.alter_messages.filter_content,
+            "collapse_alternatives" => &mut list.alter_messages.collapse_alternatives,
+            "convert_html_to_plaintext" => &mut list.alter_messages.convert_html_to_plaintext,
+            "include_rfc2369_headers" => &mut list.alter_messages.include_rfc2369_headers,
+            "allow_list_posts" => &mut list.alter_messages.allow_list_posts,
+            "first_strip_reply_to" => &mut list.alter_messages.first_strip_reply_to,
+            "include_sender_header" => &mut list.alter_messages.include_sender_header,
             _ => return Err(Error::Validation(key.into())),
         };
         *target = value
             .as_bool()
             .ok_or_else(|| Error::Validation(key.into()))?;
+        Ok(())
+    }
+
+    /// The Alter Messages, Member Policy, DMARC text and bounce-forwarding
+    /// settings: enums by wire name, bounded text, validated token lists.
+    fn patch_alter_messages(
+        list: &mut MailingList,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
+        let invalid = || Error::Validation(key.to_owned());
+        let messages = &mut list.alter_messages;
+        match key {
+            "filter_types" => messages.filter_types = parse_token_list(key, value, true)?,
+            "pass_types" => messages.pass_types = parse_token_list(key, value, true)?,
+            "filter_extensions" => {
+                messages.filter_extensions = parse_token_list(key, value, false)?;
+            }
+            "pass_extensions" => messages.pass_extensions = parse_token_list(key, value, false)?,
+            "filter_action" => messages.filter_action = parse_enum(key, value)?,
+            "reply_goes_to_list" => messages.reply_goes_to_list = parse_enum(key, value)?,
+            "personalize" => messages.personalize = parse_enum(key, value)?,
+            "reply_to_address" => {
+                let text = value.as_str().ok_or_else(invalid)?;
+                if !text.is_empty() {
+                    listmngr_core::Address::new(text, String::new()).map_err(|_| invalid())?;
+                }
+                messages.reply_to_address = text.into();
+            }
+            "subscription_policy" => {
+                list.member_policy.subscription_policy = parse_enum(key, value)?;
+            }
+            "unsubscription_policy" => {
+                list.member_policy.unsubscription_policy = parse_enum(key, value)?;
+            }
+            "member_roster_visibility" => {
+                list.member_policy.member_roster_visibility = parse_enum(key, value)?;
+            }
+            "forward_unrecognized_bounces_to" => {
+                list.forward_unrecognized_bounces_to = parse_enum(key, value)?;
+            }
+            "dmarc_addresses" => list.dmarc.dmarc_addresses = parse_address_list(key, value)?,
+            "dmarc_moderation_notice" | "dmarc_wrapped_message_text" => {
+                let text = value
+                    .as_str()
+                    .filter(|text| text.len() <= SETTING_TEXT_BYTES)
+                    .ok_or_else(invalid)?;
+                if key == "dmarc_moderation_notice" {
+                    list.dmarc.dmarc_moderation_notice = text.into();
+                } else {
+                    list.dmarc.dmarc_wrapped_message_text = text.into();
+                }
+            }
+            _ => return Err(invalid()),
+        }
         Ok(())
     }
 
@@ -1258,6 +1320,38 @@ impl ListRepo<'_> {
         ))
     }
 
+    fn patch_posting_pipeline(list: &mut MailingList, value: &serde_json::Value) -> Result<()> {
+        let name = value
+            .as_str()
+            .ok_or_else(|| Error::Validation("posting_pipeline".into()))?;
+        let registry = listmngr_mail::handlers::builtin_registry();
+        let pipeline = registry
+            .pipeline(name)
+            .ok_or_else(|| Error::Validation(format!("unknown posting pipeline: {name}")))?;
+        if !registry.is_executable(pipeline) || !pipeline.delivers_posts() {
+            return Err(Error::Validation(format!(
+                "{name} cannot deliver list posts"
+            )));
+        }
+        list.posting_pipeline = name.into();
+        Ok(())
+    }
+
+    fn patch_text(list: &mut MailingList, key: &str, value: &serde_json::Value) -> Result<()> {
+        let target = match key {
+            "display_name" => &mut list.display_name,
+            "description" => &mut list.description,
+            "info" => &mut list.info,
+            _ => &mut list.subject_prefix,
+        };
+        *target = value
+            .as_str()
+            .filter(|text| key != "subject_prefix" || !text.contains(['\r', '\n']))
+            .ok_or_else(|| Error::Validation(key.into()))?
+            .into();
+        Ok(())
+    }
+
     /// Apply one patch key to the in-memory list. `moderator_password` is
     /// only checked for presence here: the caller hashed it before the
     /// transaction began.
@@ -1278,33 +1372,9 @@ impl ListRepo<'_> {
             | "hold_these_nonmembers"
             | "reject_these_nonmembers"
             | "discard_these_nonmembers" => Self::patch_address_list(list, key, value)?,
-            "posting_pipeline" => {
-                let name = value
-                    .as_str()
-                    .ok_or_else(|| Error::Validation(key.into()))?;
-                let registry = listmngr_mail::handlers::builtin_registry();
-                let pipeline = registry.pipeline(name).ok_or_else(|| {
-                    Error::Validation(format!("unknown posting pipeline: {name}"))
-                })?;
-                if !registry.is_executable(pipeline) || !pipeline.delivers_posts() {
-                    return Err(Error::Validation(format!(
-                        "{name} cannot deliver list posts"
-                    )));
-                }
-                list.posting_pipeline = name.into();
-            }
+            "posting_pipeline" => Self::patch_posting_pipeline(list, value)?,
             "display_name" | "description" | "info" | "subject_prefix" => {
-                let target = match key {
-                    "display_name" => &mut list.display_name,
-                    "description" => &mut list.description,
-                    "info" => &mut list.info,
-                    _ => &mut list.subject_prefix,
-                };
-                *target = value
-                    .as_str()
-                    .filter(|text| key != "subject_prefix" || !text.contains(['\r', '\n']))
-                    .ok_or_else(|| Error::Validation(key.into()))?
-                    .into();
+                Self::patch_text(list, key, value)?;
             }
             "default_member_action" | "default_nonmember_action" => {
                 let action = serde_json::from_value(value.clone())
@@ -1327,7 +1397,29 @@ impl ListRepo<'_> {
             | "administrivia"
             | "require_explicit_destination"
             | "respond_to_post_requests"
-            | "admin_immed_notify" => Self::patch_boolean(list, key, value)?,
+            | "admin_immed_notify"
+            | "filter_content"
+            | "collapse_alternatives"
+            | "convert_html_to_plaintext"
+            | "include_rfc2369_headers"
+            | "allow_list_posts"
+            | "first_strip_reply_to"
+            | "include_sender_header" => Self::patch_boolean(list, key, value)?,
+            "filter_types"
+            | "pass_types"
+            | "filter_extensions"
+            | "pass_extensions"
+            | "filter_action"
+            | "reply_goes_to_list"
+            | "reply_to_address"
+            | "personalize"
+            | "subscription_policy"
+            | "unsubscription_policy"
+            | "member_roster_visibility"
+            | "forward_unrecognized_bounces_to"
+            | "dmarc_addresses"
+            | "dmarc_moderation_notice"
+            | "dmarc_wrapped_message_text" => Self::patch_alter_messages(list, key, value)?,
             "preferred_language" => {
                 let language = value
                     .as_str()
@@ -1366,6 +1458,44 @@ impl ListRepo<'_> {
                 )));
             }
         }
+        Ok(())
+    }
+
+    async fn persist_alter_messages(
+        tx: &mut Transaction<'_, Any>,
+        list: &MailingList,
+    ) -> Result<()> {
+        let encode = |entries: &Vec<String>| {
+            serde_json::to_string(entries).expect("string vector serializes")
+        };
+        let messages = &list.alter_messages;
+        sqlx::query("UPDATE mailing_lists SET filter_content=$1,filter_types=$2,pass_types=$3,filter_extensions=$4,pass_extensions=$5,collapse_alternatives=$6,convert_html_to_plaintext=$7,filter_action=$8,include_rfc2369_headers=$9,allow_list_posts=$10,reply_goes_to_list=$11,reply_to_address=$12,first_strip_reply_to=$13,personalize=$14,include_sender_header=$15,subscription_policy=$16,unsubscription_policy=$17,member_roster_visibility=$18,dmarc_addresses=$19,dmarc_moderation_notice=$20,dmarc_wrapped_message_text=$21,forward_unrecognized_bounces_to=$22 WHERE list_id=$23")
+            .bind(i64::from(messages.filter_content))
+            .bind(encode(&messages.filter_types))
+            .bind(encode(&messages.pass_types))
+            .bind(encode(&messages.filter_extensions))
+            .bind(encode(&messages.pass_extensions))
+            .bind(i64::from(messages.collapse_alternatives))
+            .bind(i64::from(messages.convert_html_to_plaintext))
+            .bind(messages.filter_action.as_str())
+            .bind(i64::from(messages.include_rfc2369_headers))
+            .bind(i64::from(messages.allow_list_posts))
+            .bind(messages.reply_goes_to_list.as_str())
+            .bind(&messages.reply_to_address)
+            .bind(i64::from(messages.first_strip_reply_to))
+            .bind(messages.personalize.as_str())
+            .bind(i64::from(messages.include_sender_header))
+            .bind(list.member_policy.subscription_policy.as_str())
+            .bind(list.member_policy.unsubscription_policy.as_str())
+            .bind(list.member_policy.member_roster_visibility.as_str())
+            .bind(encode(&list.dmarc.dmarc_addresses))
+            .bind(&list.dmarc.dmarc_moderation_notice)
+            .bind(&list.dmarc.dmarc_wrapped_message_text)
+            .bind(list.forward_unrecognized_bounces_to.as_str())
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
         Ok(())
     }
 
@@ -1497,6 +1627,7 @@ impl ListRepo<'_> {
         Self::patch_dmarc(&mut list.dmarc, object)?;
         Self::persist_maintenance(tx, &list).await?;
         Self::persist_acceptance(tx, &list).await?;
+        Self::persist_alter_messages(tx, &list).await?;
         if !matches!(password, PasswordChange::Unchanged) {
             let column = match password {
                 PasswordChange::Set(hash) => Some(hash),
@@ -1846,7 +1977,45 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
         posting_pipeline: row.try_get("posting_pipeline").map_err(db_error)?,
         respond_to_post_requests: flag_column(row, "respond_to_post_requests")?,
         admin_immed_notify: flag_column(row, "admin_immed_notify")?,
+        alter_messages: alter_messages_from_row(row)?,
+        member_policy: listmngr_core::MemberPolicy {
+            subscription_policy: enum_column(row, "subscription_policy")?,
+            unsubscription_policy: enum_column(row, "unsubscription_policy")?,
+            member_roster_visibility: enum_column(row, "member_roster_visibility")?,
+        },
+        forward_unrecognized_bounces_to: enum_column(row, "forward_unrecognized_bounces_to")?,
     })
+}
+
+fn alter_messages_from_row(row: &sqlx::any::AnyRow) -> Result<listmngr_core::AlterMessages> {
+    Ok(listmngr_core::AlterMessages {
+        filter_content: flag_column(row, "filter_content")?,
+        filter_types: address_list_column(row, "filter_types")?,
+        pass_types: address_list_column(row, "pass_types")?,
+        filter_extensions: address_list_column(row, "filter_extensions")?,
+        pass_extensions: address_list_column(row, "pass_extensions")?,
+        collapse_alternatives: flag_column(row, "collapse_alternatives")?,
+        convert_html_to_plaintext: flag_column(row, "convert_html_to_plaintext")?,
+        filter_action: enum_column(row, "filter_action")?,
+        include_rfc2369_headers: flag_column(row, "include_rfc2369_headers")?,
+        allow_list_posts: flag_column(row, "allow_list_posts")?,
+        reply_goes_to_list: enum_column(row, "reply_goes_to_list")?,
+        reply_to_address: row.try_get("reply_to_address").map_err(db_error)?,
+        first_strip_reply_to: flag_column(row, "first_strip_reply_to")?,
+        personalize: enum_column(row, "personalize")?,
+        include_sender_header: flag_column(row, "include_sender_header")?,
+    })
+}
+
+/// A TEXT column holding one of a `string_enum`'s wire values.
+fn enum_column<T: std::str::FromStr<Err = Error>>(
+    row: &sqlx::any::AnyRow,
+    column: &str,
+) -> Result<T> {
+    row.try_get::<String, _>(column)
+        .map_err(db_error)?
+        .parse()
+        .map_err(|_| Error::Validation(format!("corrupt {column}")))
 }
 
 fn flag_column(row: &sqlx::any::AnyRow, column: &str) -> Result<bool> {
@@ -1875,6 +2044,11 @@ fn dmarc_from_row(row: &sqlx::any::AnyRow) -> Result<listmngr_core::DmarcSetting
             .try_get::<i64, _>("dmarc_mitigate_unconditionally")
             .map_err(db_error)?
             != 0,
+        dmarc_addresses: address_list_column(row, "dmarc_addresses")?,
+        dmarc_moderation_notice: row.try_get("dmarc_moderation_notice").map_err(db_error)?,
+        dmarc_wrapped_message_text: row
+            .try_get("dmarc_wrapped_message_text")
+            .map_err(db_error)?,
     })
 }
 
@@ -1887,6 +2061,50 @@ fn address_list_column(row: &sqlx::any::AnyRow, column: &str) -> Result<Vec<Stri
 /// Longest single entry and longest list accepted for an address list.
 const ADDRESS_LIST_ENTRY_BYTES: usize = 1024;
 const ADDRESS_LIST_MAX_ENTRIES: usize = 10_000;
+/// Longest free-text setting (DMARC notice and wrapper text).
+const SETTING_TEXT_BYTES: usize = 65_536;
+/// Longest MIME type or extension token and longest token list.
+const TOKEN_BYTES: usize = 255;
+const TOKEN_LIST_MAX_ENTRIES: usize = 1000;
+
+/// One of a `string_enum`'s wire values, as a JSON string.
+fn parse_enum<T: std::str::FromStr<Err = Error>>(
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<T> {
+    value
+        .as_str()
+        .and_then(|text| text.parse().ok())
+        .ok_or_else(|| Error::Validation(key.to_owned()))
+}
+
+/// A JSON array of MIME types (`type` or `type/subtype`) or of file-name
+/// extensions: printable ASCII tokens without whitespace, stored lowercase
+/// as Mailman compares them.
+fn parse_token_list(key: &str, value: &serde_json::Value, mime: bool) -> Result<Vec<String>> {
+    let invalid = || Error::Validation(key.to_owned());
+    let entries = value.as_array().ok_or_else(invalid)?;
+    if entries.len() > TOKEN_LIST_MAX_ENTRIES {
+        return Err(invalid());
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            let text = entry.as_str().ok_or_else(invalid)?;
+            let ok = !text.is_empty()
+                && text.len() <= TOKEN_BYTES
+                && text
+                    .bytes()
+                    .all(|byte| byte.is_ascii_graphic() && byte != b'"' && byte != b'\\')
+                && if mime {
+                    text.matches('/').count() <= 1 && !text.starts_with('/') && !text.ends_with('/')
+                } else {
+                    !text.contains(['/', '.'])
+                };
+            ok.then(|| text.to_ascii_lowercase()).ok_or_else(invalid)
+        })
+        .collect()
+}
 
 /// Validate one address-list setting: a JSON array of non-empty single-line
 /// strings, each either an address or a `^`-anchored regex that compiles.

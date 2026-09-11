@@ -624,6 +624,35 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Mailman list settings — bounded acceptance verified
+
+The list configuration resource now carries Mailman's Alter Messages group
+(`filter_content`, `filter_types`, `pass_types`, `filter_extensions`,
+`pass_extensions`, `collapse_alternatives`, `convert_html_to_plaintext`,
+`filter_action`, `include_rfc2369_headers`, `allow_list_posts`,
+`reply_goes_to_list`, `reply_to_address`, `first_strip_reply_to`,
+`personalize`, `include_sender_header`), the Member Policy group
+(`subscription_policy`, `unsubscription_policy`, `member_roster_visibility`),
+the DMARC text settings (`dmarc_addresses`, `dmarc_moderation_notice`,
+`dmarc_wrapped_message_text`) and `forward_unrecognized_bounces_to`, with
+Mailman's defaults and wire values. `mailmanclient` works unchanged:
+
+```python
+settings = client.get_list('dev@lists.example.com').settings
+settings['filter_content'] = True
+settings['filter_types'] = ['image/jpeg', 'application/octet-stream']
+settings['filter_action'] = 'preserve'
+settings['reply_goes_to_list'] = 'point_to_list'
+settings['subscription_policy'] = 'confirm_then_moderate'
+settings.save()
+```
+
+Values are validated before anything is written and the change is audited
+as `list.config`; `PUT` resets omitted settings to their defaults. These are
+settings only for now — the handlers that act on them land in later work
+packages (content filtering, header munging, personalization, subscription
+policies). See `P2-LIST-SETTINGS` in `docs/FEATURE_PARITY.md`.
+
 ## Notice languages — bounded acceptance verified
 
 Generated notices are sent in the recipient's language. Each notice picks the
