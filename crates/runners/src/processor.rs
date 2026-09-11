@@ -5,10 +5,11 @@
 //! Transitions are atomic, with audit, exactly like the tested
 //! `listmngr_db::mail_queue`/`moderation` primitives.
 use crate::MailRoleConfig;
-use crate::policy_facts::{gather_context, resolve_recipients};
+use crate::policy_facts::gather_context;
 use listmngr_core::{Config, ListId};
 use listmngr_db::Database;
 use listmngr_db::mail_queue::{ChildJob, Lease, Queue};
+use listmngr_pipeline::handlers::{Effect, FanOut};
 use listmngr_pipeline::{Disposition, decide_posting};
 use serde_json::Value;
 use std::time::Duration;
@@ -21,14 +22,103 @@ fn parsed_context(context: &str) -> Value {
     serde_json::from_str(context).unwrap_or(Value::Null)
 }
 
+/// Fan an accepted post out as the list's posting pipeline directs: the
+/// `member-recipients` effect resolves the delivery roster and each `to-*`
+/// effect becomes a child job, all bound in the transaction that acknowledges
+/// the inbound job. A pipeline refusal shunts rather than delivers.
+async fn accept_post(
+    db: &Database,
+    role: &MailRoleConfig,
+    lease: &Lease,
+    list_id: &ListId,
+    envelope_sender: Option<&str>,
+    raw: &[u8],
+) -> Result<(), listmngr_core::Error> {
+    let list = db.lists().get(list_id).await?;
+    let data = listmngr_mail::handlers::plan(raw, &list, &lease.job.message_id.0.to_string())
+        .map_err(|error| listmngr_core::Error::Validation(error.to_string()))?;
+    let mut plan = None;
+    let mut children = Vec::new();
+    for effect in &data.effects {
+        match effect {
+            Effect::PlanRecipients => {
+                plan = Some(
+                    db.mail_queue()
+                        .plan_recipients(list_id, envelope_sender.unwrap_or(""), raw)
+                        .await?,
+                );
+            }
+            Effect::Enqueue(FanOut::Out) => children.push(ChildJob {
+                queue: Queue::Out,
+                max_attempts: role.out_max_attempts,
+                recipients: plan
+                    .as_ref()
+                    .ok_or_else(|| {
+                        listmngr_core::Error::Validation(
+                            "pipeline enqueued outgoing mail before resolving recipients".into(),
+                        )
+                    })?
+                    .emails(),
+            }),
+            Effect::Enqueue(FanOut::Digest) => children.push(ChildJob {
+                queue: Queue::Digest,
+                max_attempts: role.out_max_attempts,
+                recipients: Vec::new(),
+            }),
+            Effect::Enqueue(FanOut::Archive) => children.push(ChildJob {
+                queue: Queue::Archive,
+                max_attempts: 5,
+                recipients: Vec::new(),
+            }),
+        }
+    }
+    db.mail_queue()
+        .live()
+        .complete_with_plan(
+            lease,
+            chrono::Utc::now().timestamp_millis(),
+            &children,
+            plan.as_ref(),
+        )
+        .await?;
+    Ok(())
+}
+
 async fn process_one(
     db: &Database,
     config: &Config,
     role: &MailRoleConfig,
     lease: &Lease,
 ) -> Result<(), listmngr_core::Error> {
-    let message = db.mail_queue().message(lease.job.message_id).await?;
+    let message = db.mail_queue().live().message(lease.job.message_id).await?;
     let context = parsed_context(&message.context);
+    if context["owner_route"] == true {
+        let result = db
+            .owner_mail()
+            .live()
+            .forward(
+                lease,
+                role.out_max_attempts,
+                chrono::Utc::now().timestamp_millis(),
+            )
+            .await;
+        if let Err(listmngr_core::Error::Validation(reason)) = &result {
+            return db
+                .mail_queue()
+                .live()
+                .shunt(lease, chrono::Utc::now().timestamp_millis(), reason)
+                .await
+                .map(|_| ());
+        }
+        return result;
+    }
+    if context.get("subscription_command").is_some() {
+        return db
+            .workflows()
+            .live()
+            .request_from_lease(lease, chrono::Utc::now().timestamp_millis())
+            .await;
+    }
     let list_id: ListId = context["list_id"]
         .as_str()
         .ok_or_else(|| listmngr_core::Error::Validation("submission missing list_id".into()))?
@@ -46,22 +136,19 @@ async fn process_one(
     .await?;
     match decide_posting(&ctx) {
         Disposition::Accept => {
-            let recipients =
-                resolve_recipients(db, &list_id, envelope_sender.as_deref().unwrap_or("")).await?;
-            db.mail_queue()
-                .complete_with_children(
-                    lease,
-                    chrono::Utc::now().timestamp_millis(),
-                    &[ChildJob {
-                        queue: Queue::Out,
-                        max_attempts: role.out_max_attempts,
-                        recipients,
-                    }],
-                )
-                .await?;
+            accept_post(
+                db,
+                role,
+                lease,
+                &list_id,
+                envelope_sender.as_deref(),
+                &message.raw,
+            )
+            .await?;
         }
         Disposition::Hold(reason) => {
             db.moderation()
+                .live()
                 .hold(
                     lease,
                     &list_id,
@@ -74,6 +161,7 @@ async fn process_one(
         }
         Disposition::Reject(_) | Disposition::Discard(_) => {
             db.mail_queue()
+                .live()
                 .ack(lease, chrono::Utc::now().timestamp_millis())
                 .await?;
         }
@@ -100,6 +188,7 @@ pub async fn run(
         let now_ms = chrono::Utc::now().timestamp_millis();
         match db
             .mail_queue()
+            .live()
             .claim(Queue::In, &worker, now_ms, role.in_lease_ms)
             .await
         {
@@ -116,6 +205,7 @@ pub async fn run(
                     tracing::warn!(worker, %error, "in-processor: submission processing failed; retrying");
                     let _ = db
                         .mail_queue()
+                        .live()
                         .retry(
                             &lease,
                             chrono::Utc::now().timestamp_millis(),

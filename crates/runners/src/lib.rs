@@ -3,8 +3,8 @@
 //! The opt-in mail role: an LMTP acceptor plus `in`/`out` queue processors.
 //!
 //! Disabled unless `mta.enabled = true` (validated fail-closed by
-//! `listmngr_core::Config::load`: enabling it requires the sole implemented
-//! transport mode, `mta.smtp_tls = "plaintext_trusted_relay"`). Uses the
+//! `listmngr_core::Config::load`: enabling it requires explicit
+//! `plaintext_trusted_relay` or verified `required` STARTTLS). Uses the
 //! hardened `listmngr_mail` LMTP/SMTP protocol and `listmngr_db`
 //! queue/moderation primitives; see `docs/FEATURE_PARITY.md` for their
 //! individual acceptance evidence. This crate only wires them into a running
@@ -13,13 +13,17 @@
 #[cfg(test)]
 mod lifecycle_tests;
 
+mod archive;
+pub mod bounce_maintenance;
+pub mod digests;
 mod heartbeat;
 mod inbound;
 mod outbound;
 mod policy_facts;
 mod processor;
+mod visible_recipients;
 
-pub use inbound::InboundHandler;
+pub use inbound::{COMMAND_SUFFIXES, InboundHandler};
 pub use outbound::run as run_out_processor;
 pub use policy_facts::resolve_recipients;
 pub use processor::run as run_in_processor;
@@ -36,9 +40,17 @@ use tokio::sync::{Semaphore, watch};
 /// `listmngr_core::Config`.
 #[derive(Debug, Clone)]
 pub struct MailRoleConfig {
+    pub bounce_maintenance_enabled: bool,
+    pub bounce_maintenance_interval: Duration,
+    pub bounce_maintenance_batch_size: u32,
+    pub dkim: listmngr_mail::dkim::SigningKeys,
     pub local_hostname: String,
     pub lmtp_listen: SocketAddr,
     pub smtp_relay: SocketAddr,
+    /// Separate SMTP sessions per recipient for non-null list envelopes only.
+    pub smtp_single_recipient: bool,
+    pub dsn_issuer: Option<listmngr_core::dsn_issuance::Issuer>,
+    pub smtp_tls: listmngr_mail::smtp::TransportSecurity,
     pub max_recipients: usize,
     pub max_message_bytes: usize,
     pub command_timeout: Duration,
@@ -72,9 +84,18 @@ impl MailRoleConfig {
             .parse()
             .map_err(|_| listmngr_core::Error::Validation("invalid mta.smtp_relay".into()))?;
         Ok(Self {
+            bounce_maintenance_enabled: config.mta.bounce_maintenance_enabled,
+            bounce_maintenance_interval: Duration::from_secs(u64::from(
+                config.mta.bounce_maintenance_interval_secs,
+            )),
+            bounce_maintenance_batch_size: config.mta.bounce_maintenance_batch_size,
+            dkim: listmngr_mail::dkim::SigningKeys::load(&config.mta.dkim_signing)?,
             local_hostname: config.mta.local_hostname.clone(),
             lmtp_listen,
             smtp_relay,
+            smtp_single_recipient: config.mta.smtp_single_recipient,
+            dsn_issuer: listmngr_core::dsn_issuance::Issuer::load(&config.mta)?,
+            smtp_tls: listmngr_mail::smtp::TransportSecurity::from_mta(&config.mta)?,
             max_recipients: config.mta.max_recipients as usize,
             max_message_bytes: config.mta.max_message_bytes as usize,
             command_timeout: Duration::from_secs(u64::from(config.mta.command_timeout_secs)),
@@ -165,17 +186,41 @@ pub async fn serve_mail_role(
 ) -> std::io::Result<()> {
     let mut tasks = tokio::task::JoinSet::new();
     let drain = role.session_drain_timeout;
+    if role.bounce_maintenance_enabled {
+        let maintenance = bounce_maintenance::run(
+            db.clone(),
+            role.bounce_maintenance_interval,
+            role.bounce_maintenance_batch_size,
+            shutdown.clone(),
+        );
+        tasks.spawn(async move {
+            maintenance.await;
+            Ok(())
+        });
+    }
     let acceptor = run_acceptor(listener, db.clone(), role.clone(), shutdown.clone());
     tasks.spawn(acceptor);
-    let inbound = processor::run(
+    // The `in` processor's future is large (chain, pipeline and templated
+    // notices all inline); keep it on the heap rather than in this frame.
+    let inbound = Box::pin(processor::run(
         db.clone(),
         config,
         role.clone(),
         "in-0".into(),
         shutdown.clone(),
-    );
+    ));
     tasks.spawn(async move {
         inbound.await;
+        Ok(())
+    });
+    let digest = digests::run(db.clone(), shutdown.clone());
+    tasks.spawn(async move {
+        digest.await;
+        Ok(())
+    });
+    let archive = archive::run(db.clone(), shutdown.clone());
+    tasks.spawn(async move {
+        archive.await;
         Ok(())
     });
     let outbound = outbound::run(db, role, "out-0".into(), shutdown.clone());
