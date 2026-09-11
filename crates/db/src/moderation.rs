@@ -8,6 +8,7 @@ use crate::mail_queue::{
 };
 use crate::{Database, db_error};
 use listmngr_core::{Error, ListId, Result, UserId};
+pub use listmngr_pipeline::handlers::Refusal;
 use serde::{Deserialize, Serialize};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use uuid::Uuid;
@@ -59,6 +60,21 @@ impl Database {
             clock: None,
         }
     }
+}
+
+/// A post the pipeline ended without delivering, as the runner reports it.
+#[derive(Debug, Clone, Copy)]
+pub struct PostRefusal<'a> {
+    /// The envelope sender; the rejection notice goes here when it is safe.
+    pub sender: &'a str,
+    /// The handler that ended the pipeline.
+    pub handler: &'static str,
+    /// The handler's reason, in Mailman's wording.
+    pub reason: &'a str,
+    pub action: Refusal,
+    /// Site policy: whether `preserve` keeps a copy (Mailman's
+    /// `filtered_messages_are_preservable`).
+    pub preservable: bool,
 }
 
 impl<'a> ModerationRepo<'a> {
@@ -253,6 +269,94 @@ impl<'a> ModerationRepo<'a> {
         audit_held(&mut tx, id, "moderation.accept", moderator, "", now_ms).await?;
         tx.commit().await.map_err(db_error)?;
         Ok((held, job))
+    }
+    /// Atomically finish the source `in`-job lease for a post the pipeline
+    /// ended without delivering, applying Mailman's disposition: `discard`
+    /// drops it, `reject` also tells the author why, `forward` sends the
+    /// only copy to the moderators, and `preserve` keeps the job in the shunt
+    /// store when the site allows it (else it is a discard). Every variant
+    /// records a `post.*` audit event in the same transaction.
+    /// # Errors
+    /// Returns stale-lease conflict or database errors.
+    pub async fn refuse(
+        &self,
+        lease: &Lease,
+        list_id: &ListId,
+        refusal: &PostRefusal<'_>,
+        now_ms: i64,
+    ) -> Result<()> {
+        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let queue = self.db.mail_queue();
+        let queue = self.clock.map_or(queue, |clock| queue.with_clock(clock));
+        let now_ms = queue.lock_time(&mut tx, lease, now_ms).await?;
+        let deadline = crate::mail_queue::MailQueueRepo::locked_deadline(&mut tx, lease).await?;
+        let preserved = refusal.action == Refusal::Preserve && refusal.preservable;
+        let job = if preserved || refusal.action == Refusal::Shunt {
+            crate::mail_queue::transition_leased_job(
+                &mut tx,
+                lease,
+                now_ms,
+                now_ms,
+                "shunt",
+                &format!("content filter: {} ({})", refusal.handler, refusal.reason),
+            )
+            .await?
+        } else {
+            ack_leased_job(&mut tx, lease, now_ms).await?
+        };
+        let action = match refusal.action {
+            Refusal::Shunt => "post.shunt",
+            Refusal::Reject => "post.reject",
+            Refusal::Forward => "post.forward",
+            Refusal::Preserve if preserved => "post.preserve",
+            Refusal::Discard | Refusal::Preserve => "post.discard",
+        };
+        Database::record_tx_with_context(
+            &mut tx,
+            &crate::AuditContext::system(),
+            action,
+            "message",
+            &job.message_id.0.to_string(),
+            serde_json::json!({
+                "list_id": list_id.as_str(),
+                "sender": refusal.sender,
+                "handler": refusal.handler,
+                "reason": refusal.reason,
+            }),
+        )
+        .await?;
+        match refusal.action {
+            Refusal::Reject => {
+                let sender = refusal.sender;
+                if listmngr_mail::owner::safe_mailbox(sender)
+                    && sender.len() <= 254
+                    && !listmngr_mail::owner::points_to_list(sender, list_id)
+                {
+                    crate::workflows::enqueue_rejection_notice(
+                        &mut tx,
+                        self.db,
+                        list_id,
+                        sender,
+                        refusal.reason,
+                        now_ms,
+                    )
+                    .await?;
+                }
+            }
+            Refusal::Forward => {
+                crate::workflows::enqueue_content_filter_forward(
+                    &mut tx,
+                    self.db,
+                    list_id,
+                    job.message_id,
+                    now_ms,
+                )
+                .await?;
+            }
+            Refusal::Shunt | Refusal::Discard | Refusal::Preserve => {}
+        }
+        queue.check_final_deadline(Some(deadline), now_ms)?;
+        tx.commit().await.map_err(db_error)
     }
     /// # Errors
     /// Returns conflict if already disposed, or a database error.

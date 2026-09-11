@@ -21,7 +21,9 @@ pub mod dkim;
 pub mod dsn;
 pub mod facts;
 pub mod handlers;
+pub mod html_text;
 pub mod lmtp;
+pub mod mime_delete;
 pub mod owner;
 pub mod smtp;
 pub mod templates;
@@ -43,6 +45,13 @@ pub enum Error {
     UnsafeStorePath,
     #[error("unsafe header name, value, or subject prefix")]
     UnsafeHeaderContent,
+    /// A pipeline handler ended processing with a disposition for the post.
+    #[error("{handler}: {reason}")]
+    Refused {
+        handler: &'static str,
+        reason: String,
+        refusal: listmngr_pipeline::handlers::Refusal,
+    },
     #[error("message store I/O failure")]
     Io(#[from] std::io::Error),
 }

@@ -166,6 +166,13 @@ fn encoded_subject(subject: &str) -> Result<String> {
 
 /// The validated transport header block, without the blank line.
 fn header_block(envelope: &Envelope<'_>, subject: &str, body_len: usize) -> String {
+    let mut raw = transport_headers(envelope, subject, body_len);
+    raw.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+    raw
+}
+
+/// Everything but the content headers.
+fn transport_headers(envelope: &Envelope<'_>, subject: &str, body_len: usize) -> String {
     let mut raw = String::with_capacity(body_len + 512);
     let _ = write!(raw, "From: {}\r\n", envelope.from);
     let _ = write!(raw, "To: {}\r\n", envelope.to);
@@ -181,15 +188,10 @@ fn header_block(envelope: &Envelope<'_>, subject: &str, body_len: usize) -> Stri
     let _ = write!(raw, "Date: {}\r\n", envelope.date);
     raw.push_str("Auto-Submitted: auto-generated\r\n");
     raw.push_str("MIME-Version: 1.0\r\n");
-    raw.push_str("Content-Type: text/plain; charset=utf-8\r\n");
     raw
 }
 
-/// Serialize a notice. The body is CRLF-normalized; it travels 7bit when it
-/// is ASCII with short lines, otherwise base64 in 76-column lines.
-/// # Errors
-/// Returns validation errors for any unsafe mailbox, host or subject.
-pub fn serialize(envelope: &Envelope<'_>, body: &str) -> Result<Vec<u8>> {
+fn validate_envelope(envelope: &Envelope<'_>) -> Result<()> {
     safe_mailbox(envelope.from)?;
     safe_mailbox(envelope.to)?;
     if let Some(reply_to) = envelope.reply_to {
@@ -202,6 +204,72 @@ pub fn serialize(envelope: &Envelope<'_>, body: &str) -> Result<Vec<u8>> {
     {
         return Err(Error::Validation("unsupported notice header".into()));
     }
+    Ok(())
+}
+
+/// A text body as a MIME part body: (transfer encoding header value, bytes).
+fn encode_text_body(body: &str) -> (&'static str, Vec<u8>) {
+    let body = body.replace("\r\n", "\n").replace('\n', "\r\n");
+    if body.is_ascii() && body.split("\r\n").all(|line| line.len() <= 998) {
+        return ("7bit", body.into_bytes());
+    }
+    let encoded = base64::engine::general_purpose::STANDARD.encode(body.as_bytes());
+    let mut bytes = Vec::with_capacity(encoded.len() + encoded.len() / 38);
+    for line in encoded.as_bytes().chunks(76) {
+        bytes.extend_from_slice(line);
+        bytes.extend_from_slice(b"\r\n");
+    }
+    ("base64", bytes)
+}
+
+/// Serialize a notice that carries another message.
+///
+/// `multipart/mixed` with the text body first and `attached` as an
+/// unmodified `message/rfc822` part. The boundary is derived from the
+/// generated `Message-ID`, which the attached bytes cannot contain.
+/// # Errors
+/// Returns validation errors for any unsafe mailbox, host or subject.
+pub fn serialize_with_message(
+    envelope: &Envelope<'_>,
+    body: &str,
+    attached: &[u8],
+) -> Result<Vec<u8>> {
+    validate_envelope(envelope)?;
+    let subject = encoded_subject(envelope.subject)?;
+    let boundary = format!("=_listmngr_{}", envelope.message_id_local);
+    if attached
+        .windows(boundary.len())
+        .any(|window| window == boundary.as_bytes())
+    {
+        return Err(Error::Validation("unsupported notice attachment".into()));
+    }
+    let mut raw = transport_headers(envelope, &subject, body.len() + attached.len());
+    let _ = write!(
+        raw,
+        "Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n"
+    );
+    let (encoding, text) = encode_text_body(body);
+    let _ = write!(
+        raw,
+        "--{boundary}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: {encoding}\r\n\r\n"
+    );
+    let mut bytes = raw.into_bytes();
+    bytes.extend_from_slice(&text);
+    bytes.extend_from_slice(
+        format!("\r\n--{boundary}\r\nContent-Type: message/rfc822\r\nContent-Disposition: inline\r\n\r\n")
+            .as_bytes(),
+    );
+    bytes.extend_from_slice(attached);
+    bytes.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    Ok(bytes)
+}
+
+/// Serialize a notice. The body is CRLF-normalized; it travels 7bit when it
+/// is ASCII with short lines, otherwise base64 in 76-column lines.
+/// # Errors
+/// Returns validation errors for any unsafe mailbox, host or subject.
+pub fn serialize(envelope: &Envelope<'_>, body: &str) -> Result<Vec<u8>> {
+    validate_envelope(envelope)?;
     let subject = encoded_subject(envelope.subject)?;
     let body = body.replace("\r\n", "\n").replace('\n', "\r\n");
     let seven_bit = body.is_ascii() && body.split("\r\n").all(|line| line.len() <= 998);

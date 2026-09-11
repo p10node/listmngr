@@ -2918,6 +2918,7 @@ async fn assert_phase_one_catalogs(app: &axum::Router, token: &str) {
             .map(|handler| handler.as_str().unwrap())
             .collect::<Vec<_>>(),
         vec![
+            "mime-delete",
             "member-recipients",
             "cleanse",
             "cleanse-dkim",

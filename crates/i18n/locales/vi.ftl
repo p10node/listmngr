@@ -21,3 +21,10 @@ receipt-leave-outcome = Yêu cầu rời đi của bạn đã hoàn tất. Bạn
 
 # Literal in every language: the reply-to-confirm parser depends on it.
 confirm-subject = confirm { $token }
+
+# Content filter (`filter_action = forward`).
+notice-content-filter-subject = Thông báo thư bị bộ lọc nội dung chặn
+content-filter-forward-body =
+    Thư đính kèm khớp với quy tắc lọc nội dung của hộp thư chung { $display_name }
+    nên không được chuyển tiếp tới các thành viên.  Bạn đang nhận bản sao
+    duy nhất còn lại của thư đã bị loại bỏ.

@@ -88,11 +88,30 @@ pub struct PipelineContext<'a> {
     pub target: Target,
 }
 
-/// Why a handler refused the message. Callers fail closed (shunt).
+/// What a handler that ends the pipeline asks the caller to do with the post.
+///
+/// Mailman's `DiscardMessage`/`RejectMessage` plus the content filter's
+/// forward and preserve variants, and the fail-closed default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// The message could not be processed safely: shunt it for an operator.
+    Shunt,
+    /// Drop it silently (Mailman `DiscardMessage`).
+    Discard,
+    /// Drop it and tell the author why (Mailman `RejectMessage`).
+    Reject,
+    /// Send the only copy to the moderators, then drop it.
+    Forward,
+    /// Keep a copy for the site administrator, then drop it.
+    Preserve,
+}
+
+/// Why a handler refused the message and what the caller should do about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandlerError {
     pub handler: &'static str,
     pub reason: String,
+    pub refusal: Refusal,
 }
 
 impl fmt::Display for HandlerError {
@@ -405,7 +424,7 @@ pub const DEFAULT_POSTING_PIPELINE: &str = "default-posting-pipeline";
 /// The shipped pipeline definitions, in Mailman's handler order.
 ///
 /// Handlers that do not exist yet are left out: `validate-authenticity`,
-/// `mime-delete`, `tagger`, `avoid-duplicates`, `to-usenet`, `after-delivery`,
+/// `tagger`, `avoid-duplicates`, `to-usenet`, `after-delivery`,
 /// `acknowledge`, `arc-sign`.
 #[must_use]
 pub fn builtin_pipelines() -> Vec<Pipeline> {
@@ -413,6 +432,7 @@ pub fn builtin_pipelines() -> Vec<Pipeline> {
         Pipeline::new(
             DEFAULT_POSTING_PIPELINE,
             vec![
+                "mime-delete",
                 "member-recipients",
                 "cleanse",
                 "cleanse-dkim",

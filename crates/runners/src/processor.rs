@@ -9,6 +9,7 @@ use crate::policy_facts::gather_context;
 use listmngr_core::{Config, ListId};
 use listmngr_db::Database;
 use listmngr_db::mail_queue::{ChildJob, Lease, Queue};
+use listmngr_db::moderation::{PostRefusal, Refusal};
 use listmngr_pipeline::handlers::{Effect, FanOut};
 use listmngr_pipeline::{Disposition, decide_posting};
 use serde_json::Value;
@@ -25,9 +26,12 @@ fn parsed_context(context: &str) -> Value {
 /// Fan an accepted post out as the list's posting pipeline directs: the
 /// `member-recipients` effect resolves the delivery roster and each `to-*`
 /// effect becomes a child job, all bound in the transaction that acknowledges
-/// the inbound job. A pipeline refusal shunts rather than delivers.
+/// the inbound job. A handler that ends the pipeline with a disposition
+/// (the content filter's `filter_action`) is applied durably instead; any
+/// other pipeline refusal shunts rather than delivers.
 async fn accept_post(
     db: &Database,
+    config: &Config,
     role: &MailRoleConfig,
     lease: &Lease,
     list_id: &ListId,
@@ -35,8 +39,33 @@ async fn accept_post(
     raw: &[u8],
 ) -> Result<(), listmngr_core::Error> {
     let list = db.lists().get(list_id).await?;
-    let data = listmngr_mail::handlers::plan(raw, &list, &lease.job.message_id.0.to_string())
-        .map_err(|error| listmngr_core::Error::Validation(error.to_string()))?;
+    let data = match listmngr_mail::handlers::plan(raw, &list, &lease.job.message_id.0.to_string())
+    {
+        Ok(data) => data,
+        Err(listmngr_mail::Error::Refused {
+            handler,
+            reason,
+            refusal,
+        }) => {
+            return db
+                .moderation()
+                .live()
+                .refuse(
+                    lease,
+                    list_id,
+                    &PostRefusal {
+                        sender: envelope_sender.unwrap_or(""),
+                        handler,
+                        reason: &reason,
+                        action: refusal,
+                        preservable: config.mailman.filtered_messages_are_preservable,
+                    },
+                    chrono::Utc::now().timestamp_millis(),
+                )
+                .await;
+        }
+        Err(error) => return Err(listmngr_core::Error::Validation(error.to_string())),
+    };
     let mut plan = None;
     let mut children = Vec::new();
     for effect in &data.effects {
@@ -82,6 +111,31 @@ async fn accept_post(
         )
         .await?;
     Ok(())
+}
+
+async fn refuse_by_chain(
+    db: &Database,
+    lease: &Lease,
+    list_id: &ListId,
+    envelope_sender: Option<&str>,
+    reason: &str,
+    action: Refusal,
+) -> Result<(), listmngr_core::Error> {
+    db.moderation()
+        .live()
+        .refuse(
+            lease,
+            list_id,
+            &PostRefusal {
+                sender: envelope_sender.unwrap_or(""),
+                handler: "chain",
+                reason,
+                action,
+                preservable: false,
+            },
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await
 }
 
 async fn process_one(
@@ -138,6 +192,7 @@ async fn process_one(
         Disposition::Accept => {
             accept_post(
                 db,
+                config,
                 role,
                 lease,
                 &list_id,
@@ -159,11 +214,29 @@ async fn process_one(
                 )
                 .await?;
         }
-        Disposition::Reject(_) | Disposition::Discard(_) => {
-            db.mail_queue()
-                .live()
-                .ack(lease, chrono::Utc::now().timestamp_millis())
-                .await?;
+        // Mailman's reject chain bounces the post back to its author with the
+        // rule's reason; discard is silent. Both leave a `post.*` audit event.
+        Disposition::Reject(reason) => {
+            refuse_by_chain(
+                db,
+                lease,
+                &list_id,
+                envelope_sender.as_deref(),
+                &reason,
+                Refusal::Reject,
+            )
+            .await?;
+        }
+        Disposition::Discard(reason) => {
+            refuse_by_chain(
+                db,
+                lease,
+                &list_id,
+                envelope_sender.as_deref(),
+                &reason,
+                Refusal::Discard,
+            )
+            .await?;
         }
     }
     Ok(())
@@ -198,7 +271,9 @@ pub async fn run(
                         &db,
                         &lease,
                         role.in_lease_ms,
-                        process_one(&db, &config, &role, &lease),
+                        // Boxed: the admission path carries every disposition's
+                        // future; keep the runner's own frame small.
+                        Box::pin(process_one(&db, &config, &role, &lease)),
                     )
                     .await
                 {

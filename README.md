@@ -624,6 +624,32 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Content filtering — bounded acceptance verified
+
+Lists filter attachments and rich text the way Mailman does. Turn on
+`filter_content`, then remove or keep MIME types (`type` or `type/subtype`)
+and file-name extensions, collapse HTML alternatives to the first part, and
+convert HTML to plain text:
+
+```sh
+curl -X PATCH -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  https://lists.example.com/api/v1/lists/dev.example.com/config \
+  -d '{"filter_content":true,"filter_types":["application/octet-stream","image"],
+       "filter_extensions":["exe","bat"],"collapse_alternatives":true,
+       "convert_html_to_plaintext":true,"filter_action":"reject"}'
+```
+
+Surviving parts are delivered byte-for-byte; a changed message carries
+`X-Content-Filtered-By: listmngr/mime-delete`. When nothing deliverable is
+left, `filter_action` decides: `discard` (silent), `reject` (the author gets
+`list:user:notice:rejected` with Mailman's reason), `forward` (the moderators,
+or the owners when the list has none, receive the only copy attached as
+`message/rfc822`) or `preserve` (kept in the shunt store for `listmngr queue`
+when `[mailman] filtered_messages_are_preservable = true`; otherwise a
+discard, as in Mailman). Every outcome is audited as `post.*`. Posts the
+chain rejects now also notify their author. See `P2-MIME-DELETE` in
+`docs/FEATURE_PARITY.md`.
+
 ## Mailman list settings — bounded acceptance verified
 
 The list configuration resource now carries Mailman's Alter Messages group

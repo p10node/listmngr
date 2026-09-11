@@ -1145,7 +1145,11 @@ config_struct!(MailmanConfig {
     default_member_action: ModerationAction = ModerationAction::Defer,
     default_nonmember_action: ModerationAction = ModerationAction::Hold,
     noreply_address: String = "noreply".into(),
-    site_owner_notify: bool = true
+    site_owner_notify: bool = true,
+    // Mailman's `filtered_messages_are_preservable`: whether a list's
+    // `filter_action = preserve` keeps a copy in the shunt store (else it
+    // behaves as discard).
+    filtered_messages_are_preservable: bool = false
 });
 config_struct!(HeaderCheck {
     header: String = String::new(),

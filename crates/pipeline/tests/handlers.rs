@@ -46,6 +46,7 @@ impl Handler for Refuse {
         _data: &mut MsgData,
     ) -> Result<(), HandlerError> {
         Err(HandlerError {
+            refusal: listmngr_pipeline::handlers::Refusal::Shunt,
             handler: "refuse",
             reason: "nope".into(),
         })
@@ -255,6 +256,7 @@ fn the_builtin_posting_pipeline_keeps_mailman_order_with_dmarc_after_the_copies(
     assert_eq!(
         posting.handlers(),
         &[
+            "mime-delete",
             "member-recipients",
             "cleanse",
             "cleanse-dkim",

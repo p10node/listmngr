@@ -371,6 +371,7 @@ default_member_action = "defer"
 default_nonmember_action = "hold"
 noreply_address = "noreply"
 site_owner_notify = true
+filtered_messages_are_preservable = false # filter_action = preserve keeps a copy in the shunt store
 
 [archive]
 enabled = true

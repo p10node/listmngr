@@ -17,3 +17,11 @@ receipt-leave-outcome = Your leave request has completed. You are not subscribed
 
 # Literal in every language: the reply-to-confirm parser depends on it.
 confirm-subject = confirm { $token }
+
+# Content filter (`filter_action = forward`).
+notice-content-filter-subject = Content filter message notification
+content-filter-forward-body =
+    The attached message matched the { $display_name } mailing list's content
+    filtering rules and was prevented from being forwarded on to the list
+    membership.  You are receiving the only remaining copy of the discarded
+    message.
