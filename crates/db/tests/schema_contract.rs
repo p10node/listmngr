@@ -16,6 +16,25 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/phase2-queue-schema.snapshot").lines())
             .chain(include_str!("fixtures/phase2-mail-policy-schema.snapshot").lines())
             .chain(include_str!("fixtures/phase2-delivery-attempt-schema.snapshot").lines())
+            .chain(include_str!("fixtures/phase4-composed-schema.snapshot").lines())
+            .chain(include_str!("fixtures/owner-schema.snapshot").lines())
+            .chain(include_str!("fixtures/message-size-schema.snapshot").lines())
+            .chain(include_str!("fixtures/dmarc-munge-schema.snapshot").lines())
+            .chain(include_str!("fixtures/smtp-bounces-schema.snapshot").lines())
+            .chain(include_str!("fixtures/smtp-failure-metadata-schema.snapshot").lines())
+            .chain(include_str!("fixtures/welcome-schema.snapshot").lines())
+            .chain(include_str!("fixtures/goodbye-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-score-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-disable-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-disable-notice-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-increment-notice-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-maintenance-schema.snapshot").lines())
+            .chain(include_str!("fixtures/dsn-issuance-schema.snapshot").lines())
+            .chain(include_str!("fixtures/dsn-plan-schema.snapshot").lines())
+            .chain(include_str!("fixtures/recipient-limit-schema.snapshot").lines())
+            .chain(include_str!("fixtures/moderation-rules-schema.snapshot").lines())
+            .chain(include_str!("fixtures/posting-pipeline-schema.snapshot").lines())
+            .chain(include_str!("fixtures/hold-notices-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )
@@ -55,7 +74,13 @@ async fn sqlite_semantic_schema(db: &Database) -> String {
             AND il.[unique]=1
           ORDER BY m.name, il.name, ii.seqno
         ) indexes
-        GROUP BY indexes.table_name, indexes.index_name",
+        GROUP BY indexes.table_name, indexes.index_name
+        UNION
+        SELECT 'U|' || m.name || '|' || p.name
+        FROM sqlite_master m JOIN pragma_table_info(m.name) p
+        WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_sqlx_%'
+          AND p.pk=1 AND upper(p.type)='INTEGER'
+          AND NOT EXISTS (SELECT 1 FROM pragma_table_info(m.name) pk WHERE pk.pk>1)",
     )
     .fetch_all(db.pool())
     .await

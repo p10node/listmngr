@@ -36,10 +36,23 @@ async fn sqlite_semantic_schema(db: &Database) -> String {
     .await
     .unwrap();
     let unique_keys: Vec<String> = sqlx::query_scalar(
-        r"SELECT 'U|' || m.name || '|' || group_concat(ii.name,',')
-        FROM sqlite_master m JOIN pragma_index_list(m.name) il JOIN pragma_index_info(il.name) ii
-        WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_sqlx_%' AND il.[unique]=1
-        GROUP BY m.name,il.name",
+        r"SELECT 'U|' || indexes.table_name || '|' || group_concat(indexes.column_name, ',')
+        FROM (
+          SELECT m.name AS table_name, il.name AS index_name, ii.name AS column_name, ii.seqno
+          FROM sqlite_master m
+          JOIN pragma_index_list(m.name) il
+          JOIN pragma_index_info(il.name) ii
+          WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_sqlx_%'
+            AND il.[unique]=1
+          ORDER BY m.name, il.name, ii.seqno
+        ) indexes
+        GROUP BY indexes.table_name, indexes.index_name
+        UNION
+        SELECT 'U|' || m.name || '|' || p.name
+        FROM sqlite_master m JOIN pragma_table_info(m.name) p
+        WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_sqlx_%'
+          AND p.pk=1 AND upper(p.type)='INTEGER'
+          AND NOT EXISTS (SELECT 1 FROM pragma_table_info(m.name) pk WHERE pk.pk>1)",
     )
     .fetch_all(db.pool())
     .await
@@ -107,6 +120,25 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/phase2-queue-schema.snapshot").lines())
             .chain(include_str!("fixtures/phase2-mail-policy-schema.snapshot").lines())
             .chain(include_str!("fixtures/phase2-delivery-attempt-schema.snapshot").lines())
+            .chain(include_str!("fixtures/phase4-composed-schema.snapshot").lines())
+            .chain(include_str!("fixtures/owner-schema.snapshot").lines())
+            .chain(include_str!("fixtures/message-size-schema.snapshot").lines())
+            .chain(include_str!("fixtures/dmarc-munge-schema.snapshot").lines())
+            .chain(include_str!("fixtures/smtp-bounces-schema.snapshot").lines())
+            .chain(include_str!("fixtures/smtp-failure-metadata-schema.snapshot").lines())
+            .chain(include_str!("fixtures/welcome-schema.snapshot").lines())
+            .chain(include_str!("fixtures/goodbye-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-score-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-disable-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-disable-notice-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-increment-notice-schema.snapshot").lines())
+            .chain(include_str!("fixtures/bounce-maintenance-schema.snapshot").lines())
+            .chain(include_str!("fixtures/dsn-issuance-schema.snapshot").lines())
+            .chain(include_str!("fixtures/dsn-plan-schema.snapshot").lines())
+            .chain(include_str!("fixtures/recipient-limit-schema.snapshot").lines())
+            .chain(include_str!("fixtures/moderation-rules-schema.snapshot").lines())
+            .chain(include_str!("fixtures/posting-pipeline-schema.snapshot").lines())
+            .chain(include_str!("fixtures/hold-notices-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )
@@ -195,7 +227,7 @@ async fn postgres_repeated_migrate_schema_and_crud_contract() {
             .await
             .unwrap();
         db.lists()
-            .set_template(&list_id, "notice", "en", "contract")
+            .set_template(&list_id, "list:user:notice:welcome", "en", "contract")
             .await
             .unwrap();
 
@@ -1183,7 +1215,7 @@ async fn add_list_owned_rows(db: &Database, lists: &[&listmngr_core::ListId]) {
             .await
             .unwrap();
         db.lists()
-            .set_template(list, "notice", "en", list.as_str())
+            .set_template(list, "list:user:notice:welcome", "en", list.as_str())
             .await
             .unwrap();
         sqlx::query("INSERT INTO header_matches(id,list_id,position,header,pattern) VALUES(?,?,0,'subject','x')")
@@ -1371,7 +1403,7 @@ async fn deleting_list_rolls_back_entire_owned_graph_when_audit_fails() {
         .await
         .unwrap();
     db.lists()
-        .set_template(&list.id, "notice", "en", "atomic")
+        .set_template(&list.id, "list:user:notice:welcome", "en", "atomic")
         .await
         .unwrap();
     sqlx::query("INSERT INTO header_matches(id,list_id,position,header,pattern) VALUES('atomic-header',?,0,'subject','x')")
@@ -1611,7 +1643,7 @@ async fn catalog_mass_and_update_mutations_roll_back_when_audit_is_sabotaged() {
     );
     assert!(
         db.lists()
-            .set_template(&list_id, "notice", "en", "changed")
+            .set_template(&list_id, "list:user:notice:welcome", "en", "changed")
             .await
             .is_err()
     );
@@ -1707,7 +1739,13 @@ async fn audit_context_records_actor_token_and_socket_ip_without_secrets() {
         .await
         .unwrap();
     db.lists()
-        .set_template_with_context(&list.id, "notice", "en", "secret template", &context)
+        .set_template_with_context(
+            &list.id,
+            "list:user:notice:welcome",
+            "en",
+            "secret template",
+            &context,
+        )
         .await
         .unwrap();
     let contextual_token = db
@@ -1737,7 +1775,7 @@ async fn audit_context_records_actor_token_and_socket_ip_without_secrets() {
             "domain.create",
             "list.create",
             "list.archiver.set",
-            "list.template.set",
+            "template.set",
             "token.create",
             "token.revoke",
         ]

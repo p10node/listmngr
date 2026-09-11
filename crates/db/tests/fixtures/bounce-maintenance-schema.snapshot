@@ -1,0 +1,3 @@
+C|mailing_lists|bounce_you_are_disabled_warnings|integer|required|3
+C|mailing_lists|bounce_you_are_disabled_warnings_interval|integer|required|7
+C|mailing_lists|bounce_notify_owner_on_removal|integer|required|1
