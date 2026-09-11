@@ -1,4 +1,628 @@
 use super::*;
+
+#[tokio::test]
+async fn single_recipient_config_reaches_real_smtp_envelopes() {
+    for enabled in [false, true] {
+        let recipients = vec!["a@example.invalid".into(), "b@example.invalid".into()];
+        let (db, lease, mut role, sink) = fixture_with_recipients(
+            "{\"list_id\":\"test.example.invalid\"}",
+            b"Subject: isolated\r\n\r\nfixture-body\r\n",
+            recipients.clone(),
+        )
+        .await;
+        let config: listmngr_core::Config = serde_json::from_value(serde_json::json!({
+            "mta": {"smtp_tls":"plaintext_trusted_relay", "smtp_single_recipient":enabled}
+        }))
+        .unwrap();
+        let configured = MailRoleConfig::from_core(&config).unwrap();
+        // Preserve the fixture relay; use every other runtime setting from config.
+        let relay = role.smtp_relay;
+        role = configured;
+        role.smtp_relay = relay;
+        role.command_timeout = Duration::from_secs(2);
+        let expected = if enabled {
+            vec![vec![recipients[0].clone()], vec![recipients[1].clone()]]
+        } else {
+            vec![recipients.clone()]
+        };
+        let capture = async {
+            let mut payloads = Vec::new();
+            for group in &expected {
+                payloads.push(capture_envelope(&sink, "test-bounces@example.invalid", group).await);
+            }
+            payloads
+        };
+        let (payloads, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(capture, deliver_one(&db, &role, lease.clone()))
+        })
+        .await
+        .unwrap();
+        assert_eq!(payloads.len(), expected.len());
+        for payload in &payloads {
+            assert!(payload.ends_with(b"\r\n\r\nfixture-body\r\n"));
+            assert_eq!(payload, &payloads[0]);
+        }
+        assert_eq!(
+            db.mail_queue().job(lease.job.id).await.unwrap().state,
+            JobState::Done
+        );
+        assert!(
+            db.mail_queue()
+                .pending_recipients(lease.job.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let sent: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM delivery_recipients WHERE job_id=$1 AND status='sent'",
+        )
+        .bind(lease.job.id.0.to_string())
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(sent, 2);
+    }
+}
+
+async fn capture_envelope(
+    sink: &tokio::net::TcpListener,
+    sender: &str,
+    recipients: &[String],
+) -> Vec<u8> {
+    capture_envelope_reply(sink, sender, recipients, Some(b"250 accepted\r\n")).await
+}
+
+async fn capture_envelope_reply(
+    sink: &tokio::net::TcpListener,
+    sender: &str,
+    recipients: &[String],
+    final_reply: Option<&[u8]>,
+) -> Vec<u8> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let (stream, _) = sink.accept().await.unwrap();
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    writer.write_all(b"220 fixture\r\n").await.unwrap();
+    let mut commands = vec![("EHLO listmngr.invalid\r\n".to_owned(), "250 fixture\r\n")];
+    commands.push((format!("MAIL FROM:<{sender}>\r\n"), "250 ok\r\n"));
+    commands.extend(
+        recipients
+            .iter()
+            .map(|r| (format!("RCPT TO:<{r}>\r\n"), "250 ok\r\n")),
+    );
+    commands.push(("DATA\r\n".to_owned(), "354 go\r\n"));
+    for (expected, response) in commands {
+        let mut line = String::new();
+        assert!(reader.read_line(&mut line).await.unwrap() > 0);
+        assert_eq!(line, expected);
+        println!("SMTP fixture: {}", line.trim_end());
+        writer.write_all(response.as_bytes()).await.unwrap();
+    }
+    let mut data = Vec::new();
+    loop {
+        let mut line = Vec::new();
+        assert!(reader.read_until(b'\n', &mut line).await.unwrap() > 0);
+        if line == b".\r\n" {
+            break;
+        }
+        data.extend_from_slice(if line.starts_with(b"..") {
+            &line[1..]
+        } else {
+            &line
+        });
+    }
+    if let Some(reply) = final_reply {
+        writer.write_all(reply).await.unwrap();
+    }
+    data
+}
+
+#[test]
+fn single_recipient_is_default_off_and_requires_boolean() {
+    let config = plaintext_config();
+    assert!(!config.mta.smtp_single_recipient);
+    assert!(
+        !MailRoleConfig::from_core(&config)
+            .unwrap()
+            .smtp_single_recipient
+    );
+    for invalid in [
+        serde_json::json!("true"),
+        serde_json::json!(1),
+        serde_json::Value::Null,
+    ] {
+        assert!(
+            serde_json::from_value::<listmngr_core::Config>(
+                serde_json::json!({"mta":{"smtp_single_recipient":invalid}})
+            )
+            .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn single_recipient_preserves_null_sender_batch() {
+    let recipients = vec!["a@example.invalid".into(), "b@example.invalid".into()];
+    let sink = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut role = MailRoleConfig::from_core(&plaintext_config()).unwrap();
+    role.smtp_single_recipient = true;
+    role.smtp_relay = sink.local_addr().unwrap();
+    let stream = tokio::net::TcpStream::connect(role.smtp_relay)
+        .await
+        .unwrap();
+    let raw = b"Subject: private notice\r\n\r\nnotice\r\n";
+    let (data, results) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            capture_envelope(&sink, "", &recipients),
+            send_transactions(stream, &role, None, &recipients, raw)
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(data, raw);
+    assert_eq!(results, vec![RecipientStatus::Sent, RecipientStatus::Sent]);
+}
+
+#[tokio::test]
+async fn single_recipient_cancel_between_sessions_quarantines_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!("sqlite://{}/queue.sqlite?mode=rwc", dir.path().display());
+    let recipients = vec![
+        "a@example.invalid".into(),
+        "b@example.invalid".into(),
+        "c@example.invalid".into(),
+    ];
+    let (db, lease, mut role, sink) = fixture_at(
+        &url,
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"Subject: cancel\r\n\r\nfirst accepted\r\n",
+        recipients.clone(),
+    )
+    .await;
+    role.smtp_single_recipient = true;
+    role.command_timeout = Duration::from_secs(30);
+    let (arrived, received) = tokio::sync::oneshot::channel();
+    {
+        let capture = async {
+            let data =
+                capture_envelope(&sink, "test-bounces@example.invalid", &recipients[..1]).await;
+            assert!(data.ends_with(b"first accepted\r\n"));
+            let (_stream, _) = sink.accept().await.unwrap();
+            arrived.send(()).unwrap();
+            std::future::pending::<()>().await;
+        };
+        let delivery = deliver_one(&db, &role, lease.clone());
+        tokio::pin!(capture, delivery);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::select! {
+                () = &mut capture => panic!("fixture must hold second greeting"),
+                () = &mut delivery => panic!("delivery must wait for greeting"),
+                result = received => result.unwrap(),
+            }
+        })
+        .await
+        .unwrap();
+        // Cancel the owned worker with one accepted and two unresolved recipients.
+    }
+    db.pool().close().await;
+    let db = Database::connect(&url, 1).await.unwrap();
+    let statuses: Vec<(String, String)> = sqlx::query_as(
+        "SELECT email,status FROM delivery_recipients WHERE job_id=$1 ORDER BY email",
+    )
+    .bind(lease.job.id.0.to_string())
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        statuses,
+        recipients
+            .into_iter()
+            .map(|email| (email, "ambiguous".into()))
+            .collect::<Vec<_>>()
+    );
+    let recovered = db
+        .mail_queue()
+        .claim(
+            Queue::Out,
+            "restart",
+            lease.job.lease_until.unwrap() + 1,
+            20_000,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    deliver_one(&db, &role, recovered).await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), sink.accept())
+            .await
+            .is_err()
+    );
+    assert!(
+        db.mail_queue()
+            .pending_recipients(lease.job.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    db.pool().close().await;
+}
+
+#[tokio::test]
+async fn single_recipient_mixed_sessions_retry_only_transient() {
+    let recipients: Vec<String> = ["a", "b", "c", "d"]
+        .iter()
+        .map(|s| format!("{s}@example.invalid"))
+        .collect();
+    let (db, lease, mut role, sink) = fixture_with_recipients(
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"Subject: mixed\r\n\r\nbody\r\n",
+        recipients.clone(),
+    )
+    .await;
+    role.smtp_single_recipient = true;
+    role.command_timeout = Duration::from_secs(2);
+    let capture = async {
+        let replies: [Option<&[u8]>; 4] = [
+            Some(b"250 accepted\r\n"),
+            Some(b"451 later\r\n"),
+            None,
+            Some(b"250 accepted\r\n"),
+        ];
+        for (recipient, reply) in recipients.iter().zip(replies) {
+            capture_envelope_reply(
+                &sink,
+                "test-bounces@example.invalid",
+                std::slice::from_ref(recipient),
+                reply,
+            )
+            .await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(capture, deliver_one(&db, &role, lease.clone()))
+    })
+    .await
+    .unwrap();
+    let statuses: Vec<String> =
+        sqlx::query_scalar("SELECT status FROM delivery_recipients WHERE job_id=$1 ORDER BY email")
+            .bind(lease.job.id.0.to_string())
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(statuses, ["sent", "pending", "ambiguous", "sent"]);
+    assert_eq!(
+        db.mail_queue()
+            .pending_recipients(lease.job.id)
+            .await
+            .unwrap(),
+        recipients[1..2]
+    );
+    let job = db.mail_queue().job(lease.job.id).await.unwrap();
+    let retry = db
+        .mail_queue()
+        .claim(Queue::Out, "retry", job.run_after + 1, 20_000)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            capture_envelope(&sink, "test-bounces@example.invalid", &recipients[1..2]),
+            deliver_one(&db, &role, retry)
+        )
+    })
+    .await
+    .unwrap();
+    let statuses: Vec<String> =
+        sqlx::query_scalar("SELECT status FROM delivery_recipients WHERE job_id=$1 ORDER BY email")
+            .bind(lease.job.id.0.to_string())
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(statuses, ["sent", "sent", "ambiguous", "sent"]);
+}
+
+#[tokio::test]
+async fn single_recipient_later_connect_and_greeting_failure_preserve_prior_sent() {
+    let recipients = vec![
+        "a@example.invalid".into(),
+        "b@example.invalid".into(),
+        "c@example.invalid".into(),
+    ];
+    let (db, lease, mut role, sink) = fixture_with_recipients(
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"Subject: reconnect\r\n\r\nbody\r\n",
+        recipients.clone(),
+    )
+    .await;
+    role.smtp_single_recipient = true;
+    role.command_timeout = Duration::from_secs(2);
+    let capture = async move {
+        capture_envelope(&sink, "test-bounces@example.invalid", &recipients[..1]).await;
+        let (stream, _) = sink.accept().await.unwrap();
+        // Session two loses its greeting; session three cannot connect.
+        drop(sink);
+        drop(stream);
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(capture, deliver_one(&db, &role, lease.clone()))
+    })
+    .await
+    .unwrap();
+    let statuses: Vec<String> =
+        sqlx::query_scalar("SELECT status FROM delivery_recipients WHERE job_id=$1 ORDER BY email")
+            .bind(lease.job.id.0.to_string())
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(statuses, ["sent", "pending", "pending"]);
+}
+
+pub(super) fn plaintext_config() -> listmngr_core::Config {
+    serde_json::from_value(serde_json::json!({"mta": {"smtp_tls": "plaintext_trusted_relay"}}))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn munge_setting_reaches_smtp_and_invalid_author_never_connects() {
+    for enabled in [false, true] {
+        let raw = b"From: Author <author@elsewhere.invalid>\r\nSender: old@elsewhere.invalid\r\nMessage-ID: <p@elsewhere.invalid>\r\n\r\nbody\r\n";
+        let (db, lease, role, sink) = fixture("{\"list_id\":\"test.example.invalid\"}", raw).await;
+        if enabled {
+            db.lists().update(&"test.example.invalid".parse().unwrap(),&serde_json::json!({"dmarc_mitigate_action":"munge_from","dmarc_mitigate_unconditionally":true})).await.unwrap();
+        }
+        let (sent, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(capture_data(&sink), deliver_one(&db, &role, lease))
+        })
+        .await
+        .unwrap();
+        let from = listmngr_mail::header_value(&sent, "From").unwrap();
+        assert_eq!(from.contains("via test@example.invalid"), enabled);
+        assert_eq!(
+            listmngr_mail::header_value(&sent, "Sender").is_none(),
+            enabled
+        );
+        assert!(sent.ends_with(b"\r\n\r\nbody\r\n"));
+    }
+    let raw = b"From: invalid\r\nMessage-ID: <bad@example.invalid>\r\n\r\nbody\r\n";
+    let (db, lease, role, sink) = fixture("{\"list_id\":\"test.example.invalid\"}", raw).await;
+    let job = lease.job.id;
+    db.lists().update(&"test.example.invalid".parse().unwrap(),&serde_json::json!({"dmarc_mitigate_action":"munge_from","dmarc_mitigate_unconditionally":true})).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), deliver_one(&db, &role, lease))
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), sink.accept())
+            .await
+            .is_err()
+    );
+    let queue: String = sqlx::query_scalar("SELECT queue FROM queue_jobs WHERE id=$1")
+        .bind(job.0.to_string())
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(queue, "shunt");
+}
+
+#[tokio::test]
+async fn loop_checks_all_original_list_post_fields_before_cooking() {
+    for markers in [
+        "List-Post: <mailto:other@example.invalid>\r\nlIsT-pOsT:\r\n\t<MAILTO:TEST@example.invalid>\r\n",
+        "List-Post: <https://example.invalid/post>,\r\n <mailto:test@example.invalid?subject=post>\r\n",
+    ] {
+        let raw = format!("Message-ID: <loop@example.invalid>\r\n{markers}\r\nbody");
+        let (db, _, _, _) = fixture("{\"list_id\":\"test.example.invalid\"}", raw.as_bytes()).await;
+        let ctx = crate::policy_facts::gather_context(
+            &db,
+            &listmngr_core::Config::default(),
+            &"test.example.invalid".parse().unwrap(),
+            Some("author@example.invalid"),
+            raw.as_bytes(),
+        )
+        .await
+        .unwrap();
+        assert!(ctx.sender.is_loop, "{markers}");
+        assert!(matches!(
+            listmngr_pipeline::decide_posting(&ctx),
+            listmngr_pipeline::Disposition::Discard(_)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn cross_list_history_survives_anonymous_smtp_normalization() {
+    let raw = b"Message-ID: <cross@example.invalid>\r\nList-Post: <mailto:prior@example.invalid>\r\nlIsT-pOsT:\r\n <mailto:older@example.invalid>\r\nX-BeenThere: oldest@example.invalid\r\n\r\nbody\r\n";
+    let (db, lease, mut role, sink) = fixture("{\"list_id\":\"test.example.invalid\"}", raw).await;
+    role.command_timeout = Duration::from_secs(2);
+    sqlx::query("UPDATE mailing_lists SET anonymous_list=1")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let (sent, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(capture_data(&sink), deliver_one(&db, &role, lease))
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        listmngr_mail::header_value(&sent, "list-post").as_deref(),
+        Some("<mailto:test@example.invalid>")
+    );
+    for name in ["prior", "older", "oldest", "unrelated", "notest"] {
+        db.lists()
+            .create(NewList {
+                list_id: format!("{name}.example.invalid").parse().unwrap(),
+                display_name: name.into(),
+                style: "legacy-default".into(),
+            })
+            .await
+            .unwrap();
+    }
+    for name in ["test", "prior", "older", "oldest", "unrelated", "notest"] {
+        let ctx = crate::policy_facts::gather_context(
+            &db,
+            &listmngr_core::Config::default(),
+            &format!("{name}.example.invalid").parse().unwrap(),
+            Some("author@example.invalid"),
+            &sent,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            ctx.sender.is_loop,
+            !["unrelated", "notest"].contains(&name),
+            "{name}"
+        );
+    }
+    // A second list replaces List-Post again, but must not erase prior hops.
+    let (again, _) = prepare(
+        &db,
+        &sent,
+        "{\"list_id\":\"unrelated.example.invalid\"}",
+        uuid::Uuid::now_v7(),
+    )
+    .await
+    .ok()
+    .unwrap();
+    let ctx = crate::policy_facts::gather_context(
+        &db,
+        &listmngr_core::Config::default(),
+        &"test.example.invalid".parse().unwrap(),
+        Some("author@example.invalid"),
+        &again,
+    )
+    .await
+    .unwrap();
+    assert!(ctx.sender.is_loop);
+}
+
+#[tokio::test]
+async fn anonymous_message_id_is_stable_across_retry_preparation() {
+    let context = "{\"list_id\":\"test.example.invalid\"}";
+    let raw = b"Message-ID: <author@private.invalid>\r\n\r\nbody";
+    let (db, lease, _, _) = fixture(context, raw).await;
+    sqlx::query("UPDATE mailing_lists SET anonymous_list=1")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let first = prepare_delivery(&db, &lease, raw, context).await.unwrap();
+    let retry = prepare_delivery(&db, &lease, raw, context).await.unwrap();
+    assert_eq!(first, retry);
+}
+
+async fn capture_data(sink: &tokio::net::TcpListener) -> Vec<u8> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let (stream, _) = sink.accept().await.unwrap();
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    writer.write_all(b"220 sink\r\n").await.unwrap();
+    for (prefix, reply) in [
+        ("EHLO", "250 sink\r\n"),
+        ("MAIL FROM:<test-bounces@example.invalid>", "250 ok\r\n"),
+        ("RCPT TO:<member@example.invalid>", "250 ok\r\n"),
+        ("DATA", "354 go\r\n"),
+    ] {
+        let mut line = String::new();
+        assert!(reader.read_line(&mut line).await.unwrap() > 0);
+        assert!(line.starts_with(prefix), "{line}");
+        writer.write_all(reply.as_bytes()).await.unwrap();
+    }
+    let mut data = Vec::new();
+    loop {
+        let mut line = Vec::new();
+        assert!(reader.read_until(b'\n', &mut line).await.unwrap() > 0);
+        if line == b".\r\n" {
+            break;
+        }
+        data.extend_from_slice(if line.starts_with(b"..") {
+            &line[1..]
+        } else {
+            &line
+        });
+    }
+    writer.write_all(b"250 accepted\r\n").await.unwrap();
+    data
+}
+
+#[tokio::test]
+async fn anonymous_setting_controls_production_smtp_identity_not_mime_body() {
+    let raw = b"From: Author <author@private.invalid>\r\nfRoM: duplicate@private.invalid\r\nReply-To: reply@private.invalid\r\nSender: sender@private.invalid\r\nTo: test@example.invalid, author@private.invalid\r\nCc: cc@private.invalid\r\nMessage-ID: <identity@private.invalid>\r\nReferences: <thread@private.invalid>\r\nIn-Reply-To: <thread@private.invalid>\r\nReceived: from private.invalid\r\n\tby private.invalid\r\nResent-From: resent@private.invalid\r\nX-Original-From: private.invalid\r\nX-Arbitrary-Identity: private.invalid\r\nAuthentication-Results: private.invalid\r\nDKIM-Signature: private.invalid\r\n folded-signature\r\nARC-Seal: private.invalid\r\nARC-Message-Signature: private.invalid\r\nARC-Authentication-Results: private.invalid\r\nDomainKey-Signature: private.invalid\r\nBcc: hidden-secret\r\nResent-Bcc: hidden-secret\r\nApproved: hidden-secret\r\nList-Archive: <https://obsolete.invalid>\r\nSubject: Hello\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed;\r\n boundary=boundary\r\n\r\n--boundary\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\nAP9ib2R5\r\n--boundary--\r\n";
+    for anonymous in [true, false] {
+        let (db, lease, mut role, sink) =
+            fixture("{\"list_id\":\"test.example.invalid\"}", raw).await;
+        role.command_timeout = Duration::from_secs(2);
+        sqlx::query("UPDATE mailing_lists SET anonymous_list=$1 WHERE list_id=$2")
+            .bind(i64::from(anonymous))
+            .bind("test.example.invalid")
+            .execute(db.pool())
+            .await
+            .unwrap();
+        let (sent, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(capture_data(&sink), deliver_one(&db, &role, lease.clone()))
+        })
+        .await
+        .unwrap();
+        let boundary = sent.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        let original_boundary = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        assert_eq!(&sent[boundary + 4..], &raw[original_boundary + 4..]);
+        let headers = String::from_utf8_lossy(&sent[..boundary]);
+        assert_eq!(headers.contains("private.invalid"), !anonymous, "{headers}");
+        if anonymous {
+            assert_eq!(
+                listmngr_mail::header_value(&sent, "from").as_deref(),
+                Some("test@example.invalid")
+            );
+            assert_eq!(
+                listmngr_mail::header_value(&sent, "reply-to").as_deref(),
+                Some("test@example.invalid")
+            );
+            assert!(
+                listmngr_mail::parse_message_id(&sent)
+                    .unwrap()
+                    .ends_with("@example.invalid")
+            );
+        } else {
+            assert_eq!(
+                listmngr_mail::header_value(&sent, "from").as_deref(),
+                Some("Author <author@private.invalid>")
+            );
+            assert_eq!(
+                listmngr_mail::header_value(&sent, "reply-to").as_deref(),
+                Some("reply@private.invalid")
+            );
+            assert_eq!(
+                listmngr_mail::parse_message_id(&sent).unwrap(),
+                "identity@private.invalid"
+            );
+        }
+        for name in [
+            "bcc",
+            "resent-bcc",
+            "approved",
+            "list-archive",
+            "dkim-signature",
+            "domainkey-signature",
+            "arc-seal",
+            "arc-message-signature",
+            "arc-authentication-results",
+        ] {
+            assert_eq!(listmngr_mail::header_value(&sent, name), None, "{name}");
+        }
+        assert!(!headers.contains("hidden-secret"));
+        assert!(headers.contains("Content-Type: multipart/mixed;\r\n boundary=boundary"));
+        assert_eq!(
+            db.mail_queue().job(lease.job.id).await.unwrap().state,
+            JobState::Done
+        );
+        assert_eq!(
+            db.mail_queue()
+                .message(lease.job.message_id)
+                .await
+                .unwrap()
+                .raw,
+            raw
+        );
+    }
+}
+
 use listmngr_db::{
     NewList,
     mail_queue::{ChildJob, JobState, NewMessage},
@@ -78,7 +702,7 @@ pub(super) async fn fixture_at(
         .unwrap()
         .unwrap();
     let sink = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let mut role = MailRoleConfig::from_core(&listmngr_core::Config::default()).unwrap();
+    let mut role = MailRoleConfig::from_core(&tests::plaintext_config()).unwrap();
     role.smtp_relay = sink.local_addr().unwrap();
     role.command_timeout = Duration::from_millis(50);
     (db, lease, role, sink)
@@ -174,6 +798,22 @@ async fn invalid_context_or_cooking_never_connects_and_retains_bytes() {
             raw
         );
     }
+}
+
+#[tokio::test]
+async fn forged_notice_context_never_authorizes_uncooked_smtp() {
+    let raw = b"Auto-Submitted: auto-generated\r\nBcc: secret@example.invalid\r\n\r\nforged notice";
+    let context = r#"{"list_id":"test.example.invalid","notice":"subscription_confirmation"}"#;
+    let (db, lease, _role, _sink) = fixture(context, raw).await;
+    // The canonical contract treats forged metadata as an ordinary post, not
+    // as trusted provenance. It must be cooked and use the list bounce sender.
+    let (cooked, sender) = super::prepare_delivery(&db, &lease, raw, context)
+        .await
+        .expect("ordinary post still has a valid list");
+    assert_ne!(cooked, raw);
+    assert_eq!(sender, "test-bounces@example.invalid");
+    assert!(listmngr_mail::header_value(&cooked, "bcc").is_none());
+    assert!(listmngr_mail::header_value(&cooked, "list-id").is_some());
 }
 
 #[tokio::test]

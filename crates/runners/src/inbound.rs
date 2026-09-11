@@ -1,14 +1,14 @@
 //! The LMTP-facing durable-intake handler: validates recipients against real
 //! list identity and durably enqueues before any 250, exactly like `queue inject`.
-use listmngr_core::ListId;
+use listmngr_core::{EmailCommand, ListId};
 use listmngr_db::Database;
 use listmngr_db::mail_queue::{NewMessage, Queue};
-use listmngr_mail::lmtp::{LmtpHandler, RecipientOutcome};
+use listmngr_mail::lmtp::{LmtpHandler, RecipientOutcome, RecipientRejection};
 use serde_json::json;
 use std::time::Duration;
 
 /// Sub-address suffixes this runtime explicitly recognizes as list command
-/// addresses it does not yet implement, so they are refused rather than
+/// addresses, so unsupported commands are refused rather than
 /// silently misrouted as a differently-named list's normal posting address.
 const RESERVED_SUFFIXES: &[&str] = &[
     "-owner",
@@ -19,6 +19,22 @@ const RESERVED_SUFFIXES: &[&str] = &[
     "-unsubscribe",
     "-bounces",
     "-confirm",
+];
+
+/// Supported sub-address routes (without the leading hyphen), including owner
+/// forwarding and the untrusted bounce inbox.
+///
+/// Map producers share this contract; token-bearing plus extensions remain
+/// unsupported. The historical constant name is retained.
+pub const COMMAND_SUFFIXES: &[(&str, &str)] = &[
+    ("owner", "owner"),
+    ("bounces", "bounces"),
+    ("join", "join"),
+    ("subscribe", "join"),
+    ("leave", "leave"),
+    ("unsubscribe", "leave"),
+    ("confirm", "confirm"),
+    ("request", "request"),
 ];
 
 #[derive(Debug, Clone)]
@@ -37,6 +53,105 @@ fn split_recipient(address: &str) -> Option<(String, String)> {
     Some((local.to_ascii_lowercase(), domain))
 }
 
+fn invalid_metadata() -> RecipientOutcome {
+    RecipientOutcome {
+        code: 550,
+        detail: "5.6.0 invalid message metadata".into(),
+    }
+}
+
+fn message_identity(external_id: Option<&str>, bounce: bool) -> Option<(String, String)> {
+    // An internal storage identity only; never inserted into the raw report and
+    // never evidence of sender authenticity or correlation with an outgoing job.
+    let id = external_id
+        .map(str::to_owned)
+        .or_else(|| bounce.then(|| format!("bounce-{}@listmngr.invalid", uuid::Uuid::now_v7())))?;
+    let hash = listmngr_mail::message_id_hash(&id).ok()?;
+    Some((id, hash))
+}
+
+fn parse_command(route: &str, data: &[u8]) -> Option<EmailCommand> {
+    use listmngr_mail::commands::{confirmation_token, parse};
+    match route {
+        "join" => Some(EmailCommand::Join),
+        "leave" => Some(EmailCommand::Leave),
+        "confirm" => confirmation_token(data).map(EmailCommand::Confirm),
+        "request" => parse(data),
+        _ => None,
+    }
+}
+
+impl InboundHandler {
+    async fn delivery_target(
+        &self,
+        recipient: &str,
+    ) -> Result<(ListId, Option<&'static str>), RecipientRejection> {
+        // Ordinary recipients were admitted during RCPT. Only suffix routing
+        // needs disambiguation from an exactly-named posting address.
+        let Some((local, domain)) = split_recipient(recipient) else {
+            return Err(RecipientRejection::Permanent(
+                "malformed recipient address".into(),
+            ));
+        };
+        if RESERVED_SUFFIXES
+            .iter()
+            .any(|suffix| local.ends_with(suffix))
+        {
+            self.target(recipient).await
+        } else {
+            format!("{local}.{domain}")
+                .parse::<ListId>()
+                .map(|id| (id, None))
+                .map_err(|_| RecipientRejection::Permanent("malformed recipient address".into()))
+        }
+    }
+
+    async fn list_exists(&self, list_id: &ListId) -> Result<bool, RecipientRejection> {
+        match self.db.lists().get(list_id).await {
+            Ok(_) => Ok(true),
+            Err(listmngr_core::Error::NotFound(_)) => Ok(false),
+            Err(_) => Err(RecipientRejection::Temporary(
+                "temporary recipient lookup failure".into(),
+            )),
+        }
+    }
+
+    async fn target(
+        &self,
+        address: &str,
+    ) -> Result<(ListId, Option<&'static str>), RecipientRejection> {
+        let Some((local, domain)) = split_recipient(address) else {
+            return Err(RecipientRejection::Permanent(
+                "malformed recipient address".into(),
+            ));
+        };
+        if let Ok(id) = format!("{local}.{domain}").parse::<ListId>()
+            && self.list_exists(&id).await?
+        {
+            return Ok((id, None));
+        }
+        for suffix in RESERVED_SUFFIXES {
+            let Some(base) = local.strip_suffix(suffix) else {
+                continue;
+            };
+            if let Ok(id) = format!("{base}.{domain}").parse::<ListId>()
+                && self.list_exists(&id).await?
+            {
+                if let Some((_, command)) = COMMAND_SUFFIXES
+                    .iter()
+                    .find(|(supported, _)| Some(*supported) == suffix.strip_prefix('-'))
+                {
+                    return Ok((id, Some(command)));
+                }
+                return Err(RecipientRejection::Permanent(format!(
+                    "list command address ({suffix}) is not implemented by this runtime"
+                )));
+            }
+        }
+        Err(RecipientRejection::Permanent("unknown recipient".into()))
+    }
+}
+
 impl LmtpHandler for InboundHandler {
     fn local_hostname(&self) -> &str {
         &self.local_hostname
@@ -52,27 +167,13 @@ impl LmtpHandler for InboundHandler {
     }
 
     async fn accept_recipient(&mut self, address: &str) -> Result<(), String> {
-        let Some((local, domain)) = split_recipient(address) else {
-            return Err("malformed recipient address".into());
-        };
-        if let Ok(list_id) = format!("{local}.{domain}").parse::<ListId>()
-            && self.db.lists().get(&list_id).await.is_ok()
-        {
-            return Ok(());
-        }
-        for suffix in RESERVED_SUFFIXES {
-            let Some(base) = local.strip_suffix(suffix) else {
-                continue;
-            };
-            if let Ok(list_id) = format!("{base}.{domain}").parse::<ListId>()
-                && self.db.lists().get(&list_id).await.is_ok()
-            {
-                return Err(format!(
-                    "list command address ({suffix}) is not implemented by this runtime"
-                ));
-            }
-        }
-        Err("unknown recipient".into())
+        self.validate_recipient(address)
+            .await
+            .map_err(|error| error.detail().to_owned())
+    }
+
+    async fn validate_recipient(&mut self, address: &str) -> Result<(), RecipientRejection> {
+        self.target(address).await.map(|_| ())
     }
 
     async fn deliver(
@@ -81,56 +182,99 @@ impl LmtpHandler for InboundHandler {
         recipients: &[String],
         data: &[u8],
     ) -> Vec<RecipientOutcome> {
-        let Ok(external_id) = listmngr_mail::parse_message_id(data) else {
-            return recipients
-                .iter()
-                .map(|_| RecipientOutcome {
-                    code: 550,
-                    detail: "5.6.0 invalid message metadata".into(),
-                })
-                .collect();
+        let Ok(external_id) = listmngr_mail::parse_optional_message_id(data) else {
+            return recipients.iter().map(|_| invalid_metadata()).collect();
         };
-        let hash = listmngr_mail::message_id_hash(&external_id).unwrap_or_default();
+
         let now_ms = chrono::Utc::now().timestamp_millis();
         let mut outcomes = Vec::with_capacity(recipients.len());
+        let mut inputs = Vec::with_capacity(recipients.len());
+        let mut queued_indices = Vec::with_capacity(recipients.len());
         for recipient in recipients {
-            let Some((local, domain)) = split_recipient(recipient) else {
-                outcomes.push(RecipientOutcome {
-                    code: 550,
-                    detail: "5.1.1 malformed recipient".into(),
-                });
+            let target = self.delivery_target(recipient).await;
+            let (list_id, command) = match target {
+                Ok(target) => target,
+                Err(error) => {
+                    outcomes.push(RecipientOutcome {
+                        code: match &error {
+                            RecipientRejection::Temporary(_) => 451,
+                            RecipientRejection::Permanent(_) => 550,
+                        },
+                        detail: error.detail().into(),
+                    });
+                    continue;
+                }
+            };
+            let bounce = command == Some("bounces");
+            let Some((external_id, hash)) = message_identity(external_id.as_deref(), bounce) else {
+                outcomes.push(invalid_metadata());
                 continue;
             };
-            let Ok(list_id) = format!("{local}.{domain}").parse::<ListId>() else {
+            if command.is_some()
+                && !bounce
+                && (mail_from.is_none_or(str::is_empty)
+                    || !listmngr_mail::commands::allows_reply(data))
+            {
                 outcomes.push(RecipientOutcome {
                     code: 550,
-                    detail: "5.1.1 unknown recipient".into(),
+                    detail: "5.7.1 command requires a non-automatic reply address".into(),
                 });
                 continue;
-            };
-            let context = json!({
+            }
+            if command == Some("owner")
+                && !listmngr_mail::owner::allows_forward(data, mail_from, &list_id)
+            {
+                outcomes.push(RecipientOutcome {
+                    code: 550,
+                    detail: "5.7.1 unsafe owner forwarding request".into(),
+                });
+                continue;
+            }
+            let mut context = json!({
                 "version": 1,
                 "list_id": list_id.to_string(),
                 "envelope_sender": mail_from,
                 "message_id_hash": hash,
-            })
-            .to_string();
+            });
+            if command == Some("owner") {
+                context["owner_route"] = json!(true);
+            } else if let Some(command) = command.filter(|_| !bounce) {
+                let Some(command) = parse_command(command, data) else {
+                    outcomes.push(RecipientOutcome {
+                        code: 550,
+                        detail: "5.6.0 unsupported or malformed email command".into(),
+                    });
+                    continue;
+                };
+                context["subscription_command"] = json!(command);
+            }
             let input = NewMessage {
                 raw: data.to_vec(),
                 external_id: external_id.clone(),
-                context,
-                queue: Queue::In,
+                context: context.to_string(),
+                queue: if bounce { Queue::Bounces } else { Queue::In },
                 max_attempts: self.in_max_attempts,
             };
-            match self.db.mail_queue().enqueue(input, now_ms).await {
-                Ok(_) => outcomes.push(RecipientOutcome {
+            inputs.push(input);
+            queued_indices.push(outcomes.len());
+            outcomes.push(RecipientOutcome {
+                code: 451,
+                detail: "4.3.0 temporary storage failure".into(),
+            });
+        }
+        if !inputs.is_empty()
+            && self
+                .db
+                .mail_queue()
+                .enqueue_batch(&inputs, now_ms)
+                .await
+                .is_ok()
+        {
+            for index in queued_indices {
+                outcomes[index] = RecipientOutcome {
                     code: 250,
                     detail: "2.1.5 accepted for delivery".into(),
-                }),
-                Err(_) => outcomes.push(RecipientOutcome {
-                    code: 451,
-                    detail: "4.3.0 temporary storage failure".into(),
-                }),
+                };
             }
         }
         outcomes
