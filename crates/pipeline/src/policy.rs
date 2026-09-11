@@ -4,6 +4,10 @@
 //! enforce (header-match rules, list emergency mode) holds the message for a
 //! human rather than silently delivering it. See `docs/PLAN.md` §4.3 for the
 //! full Mailman rule set this is a bounded subset of.
+//!
+//! The decision itself lives in [`crate::chain`]; this module owns the facts
+//! the caller must gather, recipient selection, and header decoration.
+use crate::chain::{ChainError, Outcome, builtin};
 use listmngr_core::{DeliveryMode, DeliveryStatus, ModerationAction};
 
 /// Final disposition of one inbound post, with a short, non-secret reason.
@@ -15,26 +19,79 @@ pub enum Disposition {
     Discard(String),
 }
 
-/// Sender-specific pre-checks, evaluated before any membership-based moderation.
-#[derive(Debug, Clone, Copy, Default)]
+/// Sender-specific facts, gathered by the `in` runner.
+#[derive(Debug, Clone, Default)]
 pub struct SenderChecks {
     pub is_banned: bool,
     /// The inbound `List-Post` header already names this list (a loop).
     pub is_loop: bool,
+    /// The runner verified an `Approved:` posting key against the list's
+    /// moderator password. Verification never happens in the pipeline.
+    pub is_approved: bool,
+    /// A `nonmember` role row exists for this sender, carrying its override.
+    pub nonmember_action: Option<ModerationAction>,
 }
 
-/// List-configuration facts that force a hold when this runtime does not yet
-/// enforce a control the operator has enabled.
-#[derive(Debug, Clone, Copy, Default)]
+/// One per-list `header_matches` row, or one site-wide antispam check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderMatch {
+    /// Header field name, matched case-insensitively.
+    pub header: String,
+    /// Regular expression, searched (unanchored, case-insensitive) in each
+    /// occurrence of the header.
+    pub pattern: String,
+    /// Chain to jump to on match; `None` means the site default (`hold`).
+    pub chain: Option<String>,
+    /// Tag recorded on the outcome when this row matches.
+    pub tag: Option<String>,
+}
+
+/// List-configuration facts, sampled before evaluation.
+#[derive(Debug, Clone, Default)]
+// These controls can independently hold a message; they are not exclusive states.
+#[allow(clippy::struct_excessive_bools)]
 pub struct ListChecks {
     pub emergency: bool,
-    /// The list has `header_matches` rows configured, which this runtime does
-    /// not yet enforce; fail closed rather than silently ignore them.
-    pub has_unsupported_header_matches: bool,
+    /// Original headers plus body exceed the configured per-list byte limit.
+    pub message_too_large: bool,
+    /// Visible To/Cc count exceeds the limit, or cannot be safely parsed.
+    pub too_many_recipients: bool,
+    /// The list's posting address, lowercased, for `implicit-dest`.
+    pub posting_address: String,
+    /// `administrivia` setting: hold posts that look like email commands.
+    pub administrivia: bool,
+    /// `require_explicit_destination` setting.
+    pub require_explicit_destination: bool,
+    /// `acceptable_aliases`: exact addresses or `^`-prefixed regexes.
+    pub acceptable_aliases: Vec<String>,
+    /// Legacy nonmember lists: exact addresses or `^`-prefixed regexes.
+    pub accept_these_nonmembers: Vec<String>,
+    pub hold_these_nonmembers: Vec<String>,
+    pub reject_these_nonmembers: Vec<String>,
+    pub discard_these_nonmembers: Vec<String>,
+    /// Per-list `header_matches` rows in position order.
+    pub header_matches: Vec<HeaderMatch>,
 }
 
+/// Message-derived facts. Extracted by the runner so the pipeline never parses
+/// MIME itself.
+#[derive(Debug, Clone, Default)]
+pub struct MessageChecks {
+    /// Unfolded header fields in order; names as written, values trimmed.
+    pub headers: Vec<(String, String)>,
+    /// Non-blank lines of the first text part, stopping at a `-- ` signature
+    /// separator, capped at one more than [`ADMINISTRIVIA_MAX_LINES`] so the
+    /// rule can tell "short" from "too long" without seeing the whole body.
+    pub body_lines: Vec<String>,
+    /// Visible To/Cc mailboxes, lowercased.
+    pub recipients: Vec<String>,
+}
+
+/// Bodies longer than this many non-blank lines are never administrivia.
+pub const ADMINISTRIVIA_MAX_LINES: usize = 10;
+
 /// Every fact the policy needs, gathered by the caller (the `in` runner) from
-/// the durable list/member/ban state.
+/// the durable list/member/ban state and the raw message.
 ///
 /// No network or database access happens here.
 #[derive(Debug, Clone)]
@@ -43,6 +100,12 @@ pub struct PostingContext {
     pub envelope_sender: Option<String>,
     pub sender: SenderChecks,
     pub list: ListChecks,
+    pub message: MessageChecks,
+    /// Site-wide `[antispam] header_checks`, evaluated by `suspicious-header`.
+    pub site_header_checks: Vec<HeaderMatch>,
+    /// Site-wide `[antispam] jump_chain`: where a per-list header rule that
+    /// names no chain sends the message.
+    pub site_jump_chain: String,
     /// `Some` if the sender address matches an existing list membership
     /// (any role), carrying that member's per-member override, if any.
     pub member_moderation_action: Option<Option<ModerationAction>>,
@@ -50,37 +113,83 @@ pub struct PostingContext {
     pub default_nonmember_action: ModerationAction,
 }
 
+impl Default for PostingContext {
+    /// A nonmember posting with no sender and site-default actions; tests and
+    /// fact gatherers fill in what they know.
+    fn default() -> Self {
+        Self {
+            envelope_sender: None,
+            sender: SenderChecks::default(),
+            list: ListChecks::default(),
+            message: MessageChecks::default(),
+            site_header_checks: Vec::new(),
+            site_jump_chain: "hold".into(),
+            member_moderation_action: None,
+            default_member_action: ModerationAction::Defer,
+            default_nonmember_action: ModerationAction::Hold,
+        }
+    }
+}
+
+impl PostingContext {
+    /// First occurrence of a header, matched case-insensitively.
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.message
+            .headers
+            .iter()
+            .find(|(field, _)| field.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Every occurrence of a header, matched case-insensitively, in order.
+    pub fn headers(&self, name: &str) -> impl Iterator<Item = &str> + '_ {
+        let name = name.to_owned();
+        self.message
+            .headers
+            .iter()
+            .filter(move |(field, _)| field.eq_ignore_ascii_case(&name))
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// The chain entry point for ordinary list postings.
+pub const POSTING_CHAIN: &str = "default-posting-chain";
+
+/// Decide one inbound post by running the built-in `default-posting-chain`.
+///
+/// A mis-wired chain cannot produce an accept: any [`ChainError`] fails closed
+/// to a hold, matching this module's conservative posture.
+///
 /// # Panics
 /// Never panics; total over `PostingContext`.
 #[must_use]
 pub fn decide_posting(ctx: &PostingContext) -> Disposition {
-    let Some(sender) = ctx.envelope_sender.as_deref() else {
-        return Disposition::Discard("null reverse path".into());
-    };
-    if ctx.sender.is_banned {
-        return Disposition::Reject(format!("{sender} is banned from this list"));
+    decide_posting_traced(ctx).disposition
+}
+
+/// Decide one inbound post and keep the rule trace, for the
+/// `X-Mailman-Rule-Hits` / `X-Mailman-Rule-Misses` headers and for audit.
+///
+/// # Panics
+/// Never panics; total over `PostingContext`.
+#[must_use]
+pub fn decide_posting_traced(ctx: &PostingContext) -> Outcome {
+    match builtin().run(POSTING_CHAIN, ctx) {
+        Ok(outcome) => outcome,
+        Err(error) => fail_closed(&error),
     }
-    if ctx.sender.is_loop {
-        return Disposition::Discard("List-Post header names this list (loop)".into());
-    }
-    if ctx.list.emergency {
-        return Disposition::Hold("list is in emergency moderation mode".into());
-    }
-    if ctx.list.has_unsupported_header_matches {
-        return Disposition::Hold(
-            "list has header-match rules not yet enforced by this runtime".into(),
-        );
-    }
-    let action = match ctx.member_moderation_action {
-        Some(Some(action)) => action,
-        Some(None) => ctx.default_member_action,
-        None => ctx.default_nonmember_action,
-    };
-    match action {
-        ModerationAction::Defer | ModerationAction::Accept => Disposition::Accept,
-        ModerationAction::Hold => Disposition::Hold("moderation policy".into()),
-        ModerationAction::Reject => Disposition::Reject("moderation policy".into()),
-        ModerationAction::Discard => Disposition::Discard("moderation policy".into()),
+}
+
+/// Turn an engine misconfiguration into a hold. The reason names the fault
+/// without echoing message content.
+fn fail_closed(error: &ChainError) -> Outcome {
+    Outcome {
+        disposition: Disposition::Hold(format!("posting chain misconfigured: {error}")),
+        hits: Vec::new(),
+        misses: Vec::new(),
+        effects: Vec::new(),
+        tags: Vec::new(),
     }
 }
 
@@ -105,7 +214,9 @@ pub fn select_recipients(candidates: &[CandidateRecipient], sender_email: &str) 
         .iter()
         .filter(|candidate| candidate.delivery_status == DeliveryStatus::Enabled)
         .filter(|candidate| candidate.delivery_mode == DeliveryMode::Regular)
-        .filter(|candidate| candidate.receive_own_postings || candidate.email != sender_email)
+        .filter(|candidate| {
+            candidate.receive_own_postings || !candidate.email.eq_ignore_ascii_case(sender_email)
+        })
         .map(|candidate| candidate.email.clone())
         .collect()
 }
@@ -124,7 +235,7 @@ pub struct ListHeaderInfo {
 #[must_use]
 pub fn list_headers(info: &ListHeaderInfo) -> Vec<(String, String)> {
     let mut headers = vec![
-        ("List-Id".to_owned(), info.list_id.clone()),
+        ("List-Id".to_owned(), format!("<{}>", info.list_id)),
         (
             "List-Post".to_owned(),
             format!("<mailto:{}>", info.posting_address),

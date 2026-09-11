@@ -13,3 +13,4 @@ workspace = true
 
 [dependencies]
 listmngr-core = { path = "../core", version = "0.1.0" }
+regex.workspace = true
