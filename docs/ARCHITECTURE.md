@@ -1,6 +1,1566 @@
 # Architecture
 
+## Aggregate final-audit authority — bounded acceptance verified
+
+`DigestRepo::collect` preserves list-before-queue reservation order, captures the
+persisted lease deadline under the queue lock before ACK clears the lease, then
+uses the shared final clock check after the awaited `queue.ack` audit and directly
+before commit. Expiry rolls back the digest post and queue/audit transaction;
+heartbeat renewal is resolved from stored authority rather than the stale caller
+snapshot. Unleased issue publication/bump semantics are unchanged. Focused
+SQLite and actual PostgreSQL audit-wait controls pass. Leased workflow completion
+uses its common commit helper after the earlier queue reservation, covering
+child-producing and no-child early returns. Moderation hold captures authority
+before ACK, then validates after held insertion and the later `moderation.hold`
+audit. Unleased workflow APIs and moderation review remain unchanged.
+Frozen `target/aggregate-authority-gates-20260910-045720/` passed all 25 gates,
+workspace615/0/48 and mandatory PostgreSQL31/0/0; all 390 source/harness hashes
+matched. The new PG matrix observes 8 digest, 24 workflow and 8 moderation waits.
+Fresh-binary native digest/CLI/restart/SMTP evidence covers both database engines;
+expiry injection remains a separate DB-layer fixture, not a running-service test.
+No commit/fsync-latency guarantee or DSN issuance authority is implied.
+
+## P2-DSN-PRODUCER-PREREQUISITE — isolated transport, no issuance authority
+
+The default-off `mta.smtp_single_recipient` config is propagated to the mail
+role's real outbound consumer. After cooking/signing once and reserving every
+pending recipient through the existing audited `begin_delivery`, non-null list
+mail uses sequential one-recipient SMTP sessions with the configured TLS/AUTH
+policy on each connection. Default batching and null-envelope batching remain.
+Ordered transport outcomes are committed together through existing fenced
+`finish_delivery_with_smtp`; known transient outcomes alone are eligible for
+retry. Cancellation/failed final commit retains conservative ambiguity for all
+reserved recipients, even a recipient whose SMTP session has not begun. There
+is no new DB schema, issuance record, HMAC, token intake or DSN mutation authority.
+Frozen local acceptance passed 23/23 gates, including actual API→LMTP→SMTP
+default/enabled/disabled modes across process restarts on SQLite and PostgreSQL.
+Exact socket/restart scope, costs and remaining durable-authority
+requirements: [DSN_PRODUCER_PREREQUISITE.md](DSN_PRODUCER_PREREQUISITE.md).
+
+## P2-DELIVERY-AUTHORITY — final-audit lease fencing
+
+Shared queue methods re-sample the live clock after their last audit/write and
+before commit. Existing authorities use the current deadline read under the
+queue lock, not the caller's stale lease snapshot; claim and heartbeat use the
+newly granted/renewed deadline. At exact expiry, the complete transaction rolls
+back. The outbound runner returns without SMTP commands when reservation fails.
+This is a pre-commit boundary, not a promise about subsequent commit/network
+latency. Archive's separate producer increment captures the current deadline
+under the queue lock before ACK clears authority, then invokes the shared final
+check after ACK's audit and immediately before commit. List-before-queue lock
+order, explicit-time fixtures, live production clock propagation, thread repair,
+idempotent indexing and the current `never` policy are preserved. Exact expiry
+rolls back inserted archive rows, existing-reply thread updates, index/ACK audits
+and queue completion. Digests/workflows/moderation free-ACK callers still need
+their own final-audit increments.
+
+Archive-only evidence in `target/archive-final-audit/`: behavioral SQLite and
+observed native PostgreSQL 14 RED→GREEN; eight audit-wait cases covering normal
+and renewed deadlines, exact expiry and valid controls, public/never policies.
+Focused shared/sibling queue tests, archive/runner tests, fmt and DB strict Clippy
+pass. Final `target/archive-authority-gates-20260910-034840/` passes 25/25 gates,
+workspace612/0/45 and mandatory PostgreSQL28/0/0, with 382 stable paths.
+Both databases pass native API→LMTP→SMTP/restart with public→never→public archive
+policy and distinct retained bodies. These process positives supplement, not
+replace, the DB-level adversarial audit-wait tests. Limited static review found
+no new P1/P2; all six reviewed source hashes match the final candidate.
+Earlier shared-only `target/delivery-authority-gates-20260910-024940/` passes all 23 gates:
+workspace611/0/44, mandatory PostgreSQL27/0/0 and 378 stable source/harness paths,
+including native API→LMTP→SMTP/restart regressions on both backends.
+See [DELIVERY_AUTHORITY.md](DELIVERY_AUTHORITY.md). No HMAC/ledger/intake is added.
+
+## P2-DSN-INSPECTION — read-only claims, not bounce authority
+
+Opt-in CLI queue inspection reads the retained bounce bytes through a bounded
+mail-crate RFC3464 inspector. Only typed recipient/Action/Status claims are
+printed, always marked untrusted. There is no queue acknowledgement, score,
+notification, member change or new intake route. Returned original-message
+headers are never used as recipient authority. SMTP failure scoring remains
+separate; outbound-issued correlation must precede any future incoming DSN
+mutation. Corrected frozen gates passed 20/20 with 372 stable paths:
+workspace598/0/43 and mandatory PostgreSQL26/0/0. Strict raw boundary framing
+must agree with every direct MIME part's offsets to prevent partial inspection.
+Supported syntax,
+budgets and evidence boundaries: [DSN_INSPECTION.md](DSN_INSPECTION.md).
+
+## Unicode-prefix serialization — bounded composed acceptance verified
+
+Non-ASCII prefixes now use a dedicated Subject-field path: collect continuations,
+decode using mail-parser, compare the exact decoded prefix, then emit bounded
+UTF-8-aligned RFC2047 Base64 words. No other retained field or MIME body is rebuilt;
+ASCII/empty/absent prefix behavior remains unchanged. This avoids relying on
+SMTPUTF8 for this producer alone, without adding SMTP capability negotiation.
+The parent transferred the verified cook delta and new tests from the dirty seed
+worktree, then reconciled the shared DB consumer test with the new wire contract
+without weakening storage/rollback/ASCII assertions. The corrected frozen run
+`target/unicode-prefix-gates-20260909-153157/` passed 18/18 steps, workspace
+588/0/43 and mandatory PostgreSQL26/0/0, with 367 unchanged hashes. Native browser
+→LMTP→SMTP passed seven cases per backend with independent Python decoding of
+received Unicode subjects. The earlier failed, moving snapshot is not acceptance.
+See [UNICODE_SUBJECT_PREFIX.md](UNICODE_SUBJECT_PREFIX.md).
+
+## P4-WEB-SUBJECT-PREFIX — owner settings adapter
+
+`SettingsForm.subject_prefix: Option<String>` admits a supplied string, including
+empty, without trimming or Unicode normalization. Only `Some` enters the JSON
+patch passed to `browser_update_list_settings`; omission never replays the GET
+snapshot. Existing live owner/session authority, locked config validation and
+attributed atomic audit remain the mutation boundary. The common DB validator
+rejects CR/LF, rolling back the complete patch. The UI escapes the stored value
+inside a labelled text input; help describes empty/whitespace and future outgoing
+composition. No schema, dependency, mail composer or transport behavior changed.
+
+Sequential historical tests: POST failed 422 versus 303, then passed before the
+missing-label RED; escaped input then passed (`target/web-prefix-red-post.log`,
+`web-prefix-green-post.log`, `web-prefix-red-input.log`, `web-prefix-green-input.log`).
+Supplementary controls first ran GREEN: exact Unicode/plus/space/tab and empty,
+omitted audit keys, CR/LF and duplicate rejection, wrong CSRF, cross-list denial,
+moderator demotion and lost address verification, full list/config-audit snapshot
+preservation, forced audit failure with a changed prefix and successful retry.
+The PostgreSQL matrix owns its schema/router and is explicitly registered in
+`scripts/test-postgres.sh`; no extra logins were appended to shared feature routers.
+The old stale-omission `[new]` test is unchanged.
+
+Fresh frozen run `target/web-prefix-gates-20260909-143205/`: **17/17**, workspace
+**582/0/43**, PostgreSQL **26/0/0**, **362 source/harness hashes stable**. All
+CLAUDE.md gates, strict all-feature Clippy, deny and online audit passed (existing
+RUSTSEC-2023-0071 waiver unchanged). Native Chromium saved, reloaded and cleared
+an escaped Unicode prefix with zero page/console errors. Separate parent native
+browser → LMTP → SMTP tracers passed seven ASCII-prefix cases on each database:
+default, changed literal `%d`, sibling isolation, enabled restart, empty, empty
+restart and exact spaces. They compare exact Subject/body bytes and delivery
+multiplicity; they do not demonstrate RFC2047 or SMTPUTF8 interoperability.
+The SMTP sender does not negotiate SMTPUTF8; Unicode configuration roundtrip is
+therefore not a Unicode wire-compatibility claim. See [WEB_SUBJECT_PREFIX.md](WEB_SUBJECT_PREFIX.md).
+Historical invalid rows, automatic repair, new prefix-specific in-flight
+revocation races and whole Mailman parity remain outside this increment.
+The worker snapshot is in `target/web-prefix-handoff.md`; the parent's later
+closure documentation changes no production or test source.
+
+## Subject-prefix producer/consumer validation
+
+`Lists::update_tx` rejects CR/LF only when `subject_prefix` is supplied, preserving
+the existing `cook_headers` defense. The common transactional path protects both
+config API flavors, JSON/form and PUT/PATCH, without truncation or silent repair.
+Other text fields keep their multiline semantics; legacy invalid stored values
+are not scanned or modified by this increment. No schema, dependency, transport
+or browser-control change is introduced.
+
+`P1-SUBJECT-PREFIX-VALIDATION`: frozen 17/17 gates passed, workspace579/0/42,
+mandatory PostgreSQL25/0/0. Evidence includes producer/consumer RED→GREEN,
+whole-patch validation rollback on both engines, SQLite audit-failure rollback
+and both-flavor router regressions. Existing browser/SMTP probes were rerun as
+regressions, not as a new prefix-specific end-to-end tracer. Details:
+[SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
+
+## P3-I18N — bounded acceptance verified
+
+`crates/i18n` is the message catalog layer: Fluent (`fluent-bundle`) resources
+for `en` and `vi` embedded at build time, one concurrent bundle per language
+built once, and a small API — `negotiate` maps a BCP 47 tag to a shipped
+catalog by exact match and then primary subtag (`vi-VN` → `vi`, `fr` → `en`),
+`choose` takes the first preference a catalog serves, and `message` renders an
+id with arguments, falling back from the requested language to `en` and
+finally to the id itself so a missing translation never fails a notice.
+Bidi isolation marks are switched off because the output lands in
+`Subject:` headers, not HTML.
+
+The recipient's language is decided once per notice inside the producer's
+transaction (`listmngr_db::notices::recipient_language`): the member's own
+`preferred_language` (member, then address, then user preference layer, the
+same precedence `resolve_member` uses), then the list's `preferred_language`,
+then the site default that `Database::with_default_language` carries from
+`site.default_language`. The chosen tag drives both the subject
+(`listmngr_i18n::message`) and the body: template resolution now tries each
+scope in that language and then `en`, and the built-in catalog itself is
+served in Vietnamese (`listmngr_mail::templates::builtin_in`) before English.
+Owner and moderator notices are rendered per recipient, so two owners with
+different preferences receive different languages for the same hold. The
+confirmation subject is deliberately identical in every catalog because the
+reply-to-confirm parser reads it. Runners and the browser UI resolve member
+preferences against the configured site default instead of a hardcoded `en`.
+
+## P2-TEMPLATES — bounded acceptance verified
+
+Generated notices render from Mailman-named templates. The pure engine in
+`crates/mail/src/templates.rs` holds the catalog of names, the built-in
+English bodies, `$placeholder` expansion with Python `string.Template`
+semantics (unknown placeholders are left as written and substituted values
+are never re-scanned), and the URI loaders: `mailman:///name` selects the
+catalog, `file:///` reads a bounded UTF-8 file, and `https://` is parsed and
+stored but not fetched by this runtime. `crates/db/src/templates.rs` resolves a
+name for a list by trying the list, then its domain, then the site, each in
+the requested language and then `en`, before falling back to the built-in; a
+stored template that cannot be loaded is logged by name and scope only and
+skipped, because a broken template must never block the subscription or hold
+that needs it. The site scope stores an empty `scope_id` rather than NULL so
+the unique constraint and upserts behave on both engines.
+
+`crates/db/src/notices.rs` is the one serializer every notice uses: the list
+snapshot is read inside the producer's transaction, Mailman placeholders are
+filled from it, and the message is emitted with ASCII-validated `From`/`To`/
+`Reply-To`/`Message-ID`/`Date`, an RFC 2047 subject when non-ASCII, and a
+CRLF-normalized body that travels 7bit when ASCII with short lines and base64
+otherwise — so an operator-written template can neither inject headers nor
+exceed the transport line limit. The confirmation challenge keeps its
+`confirm TOKEN` subject because replying with it intact is the email
+confirmation path.
+
+Holding a post now also produces notices inside the hold transaction: the
+poster gets `list:user:notice:hold` when `respond_to_post_requests` and the
+envelope sender is a safe, non-list mailbox (a null or list-owned reverse path
+never produces backscatter), and every owner and moderator gets
+`list:admin:action:post` when `admin_immed_notify`. Mailman's `/uris`
+resource manages template URIs per list, domain and site; inline bodies with a
+language are a listmngr extension on `/lists/{id}/templates/{name}`.
+
+## P2-PIPELINE-HANDLERS — bounded acceptance verified
+
+Accepted posts run a Mailman-named handler pipeline. The engine
+(`crates/pipeline/src/handlers.rs`) holds the `Handler` trait, the registry,
+the pipeline definitions and the pure fan-out handlers; the handlers that need
+MIME and header surgery (`crates/mail/src/handlers.rs`) are registered into one
+shipped registry that `listmngr_mail::handlers::builtin_registry()` exposes.
+
+This runtime keeps one immutable stored message and cooks lazily per consumer,
+so the same pipeline definition is executed two ways. The `in` runner runs it
+with `Target::Plan`: every handler runs and the recorded effects —
+`member-recipients`, `to-archive` (skipped when `archive_policy=never`),
+`to-digest`, `to-outgoing` — become the recipient plan and child jobs bound in
+the transaction that acknowledges the inbound job; a pipeline that enqueues
+outgoing mail without resolving recipients is refused and shunted. Each
+consumer then runs the pipeline with its own target and stops at its fan-out
+handler: the archive and digest copies are the bytes as of `to-archive` and
+`to-digest`, the delivery copy as of `to-outgoing`. That is what places the
+delivery-only `dmarc` mitigation after the archive and digest copies — exactly
+the snapshot Mailman's `to-*` handlers would have taken at those positions —
+without storing three copies.
+
+`cleanse` removes list controls, private recipients, moderator fields and the
+`Approved:` body line; `cleanse-dkim` removes the original DKIM/ARC signatures;
+`cook-headers` applies anonymous-list identity, `Precedence: list` and the
+`X-BeenThere` history read from the original bytes; `subject-prefix` and
+`rfc-2369` follow; `dmarc` rewrites `From`/`Reply-To` when unconditional
+mitigation is enabled and refuses conditional mitigation. Handler failures
+carry the handler name and are shunted, never delivered. The list setting
+`posting_pipeline` selects a registered, executable pipeline that both resolves
+recipients and delivers; `virgin` and the declared owner pipeline are refused
+for posts. `/api/v1/system/pipelines` projects the registry as it is.
+
+## P2-CHAIN-RULES — bounded acceptance verified
+
+The `default-posting-chain` follows Mailman 3's built-in chain, minus the
+`dmarc-mitigation` and `news-moderation` links whose rules do not exist yet:
+`no-senders` → `approved` → `emergency` → `loop` → `banned-address` →
+`member-moderation` → `nonmember-moderation` → deferred `administrivia`,
+`implicit-dest`, `max-recipients`, `max-size`, `no-subject`,
+`suspicious-header` → `any` (jump `moderation`) → detour `header-match` →
+`accept`. Rules read the immutable `PostingContext` and share a mutable
+`EvalState` (Mailman's `msgdata`): hits, misses, reasons, tags, effects and the
+moderation action a member or nonmember rule recorded. Several deferred hits
+therefore yield one hold whose reason lists each of them in chain order, an
+explicit `accept` bypasses the deferred checks as in Mailman, and the
+`moderation` chain holds when nothing recorded an action.
+
+Facts are gathered once by the `in` runner (`crates/runners/src/policy_facts.rs`)
+from the list row, member/nonmember rows, bans, the list's `header_matches`
+rows, site `[antispam]` config and the raw message: unfolded header fields, a
+bounded preview of the first plain text part, and canonical To/Cc mailboxes
+come from `listmngr_mail::facts` and `visible_recipients`, so the pipeline
+never parses MIME. `Approved:` keys are verified in the runner against the
+list's Argon2id `moderator_password` and stripped by `cook_post` — the shared
+path for delivery, archive and digest — from both the header spellings and an
+unencoded first body line; an encoded body-line key is ignored rather than
+risk leaking it.
+
+The `header-match` chain is dynamic: it evaluates the list's rows in position
+order with the same bounded, case-insensitive regex compilation the repository
+validated them with, jumps to the row's terminal chain (site `jump_chain`
+default `hold`), records the row's tag, and fails closed to a hold naming the
+row when a stored pattern no longer compiles or names an unknown chain.
+
+Deliberate deviations from Mailman are recorded in `FEATURE_PARITY.md`:
+stricter `no-senders`, owners/moderators as explicitly accepted senders, and
+the retained `moderation policy` reason text.
+
+## P2-CHAIN-ENGINE — bounded acceptance verified
+
+Inbound moderation runs on a chain/rule engine in `crates/pipeline/src/chain.rs`
+using Mailman 3 concept names, so operators reading Mailman documentation
+recognize this runtime. A chain is an ordered list of links; each link names a
+rule and the action taken when that rule hits: `jump` transfers without
+returning, `detour` runs a sub-chain and resumes only if that chain did not
+terminate, `defer` records the hit and continues, `run` records a named effect,
+and `stop` ends evaluation. Terminal chains (`accept`, `hold`, `reject`,
+`discard`) produce the disposition and carry the reason of the rule that jumped
+to them; the `moderation` chain maps the resolved member or nonmember action the
+way Mailman reads `msgdata['moderation_action']`.
+
+The engine stays pure: rules read only the `PostingContext` the `in` runner
+gathered, so no database or network access happens during evaluation. Evaluation
+is bounded by a hop limit, and every failure mode — unknown chain, unknown rule,
+a chain that ends without a disposition, or an exceeded hop limit — is an error
+that `decide_posting` converts into a hold. A mis-wired chain therefore cannot
+produce an accept.
+
+The shipped `default-posting-chain` reproduces the previous flat early-return
+precedence exactly, and a characterization test holds it to that over the whole
+input domain rather than over sampled cases. The rule set is unchanged by this
+increment; `header-match` and `dmarc-mitigation` are declared as empty chains and
+reported `executable: false` rather than pretending to enforce anything.
+`/api/v1/system/chains` now projects the live registry, including each chain's
+real link order. `/api/v1/system/pipelines` remains a name catalog because no
+handler registry exists yet.
+
+## P4-WEB-EMERGENCY — bounded local acceptance verified
+
+The owner settings adapter accepts optional `emergency: bool` and patches only
+supplied values. The existing locked list validator, owner/session checks and
+atomic attributed audit remain unchanged. The labelled Yes/No control displays
+current state and explains hold-versus-shutdown semantics. The existing posting
+policy handles null senders, bans and loops before emergency holds; no policy
+ordering, delivery pause, mass release or schema change is introduced.
+
+Two sequential RED→GREENs cover POST admission and rendering. The final frozen
+run passed 17/17 gates, workspace575/0/41 and mandatory PostgreSQL24/0/0, plus
+browser→LMTP→held/SMTP on both engines. A dedicated PostgreSQL schema/router
+avoids coupling independent feature matrices through their login rate bucket.
+See [WEB_EMERGENCY.md](WEB_EMERGENCY.md) for evidence and limits.
+
+## P4-WEB-NOTICES — bounded local acceptance verified
+
+The owner list settings form exposes `send_welcome_message` and
+`send_goodbye_message` using labelled Yes/No selects. Optional boolean extraction
+keeps false distinct from omission; only supplied fields enter the shared locked
+configuration patch. The existing validator, live authority checks and attributed
+audit transaction remain unchanged. Settings updates never enqueue notices;
+the existing successful subscription/removal transaction owns publication.
+No schema, delivery defaults, templates or recall behavior changed.
+
+Three sequential behavioral RED→GREENs cover goodbye POST, welcome POST and UI.
+Frozen acceptance passed 17/17 gates, workspace574/0/40 and PostgreSQL23/0/0.
+Both-backend native-browser configuration followed by actual membership APIs
+and SMTP verifies default-off, enabled/disabled, sibling survival and restarts.
+See [WEB_NOTICE_CONTROLS.md](WEB_NOTICE_CONTROLS.md) for exact evidence and
+separate router-publication, browser, PostgreSQL and SMTP boundaries.
+
+## P4-WEB-POSTING-LIMITS — bounded local acceptance verified
+
+The owner settings form exposes `max_message_size` and `max_num_recipients` as
+labelled integer inputs with explicit units, inequalities and disable semantics.
+POST extraction uses `Option<u32>`; only supplied values enter the JSON patch.
+The existing `browser_update_list_settings` path checks live owner/session
+authority, locks the fresh list row, invokes the common validator (0..2147483647)
+and commits the configuration and attributed audit together. No new schema,
+policy engine, permissions or delivery defaults are introduced.
+
+Two sequential behavioral RED→GREENs cover POST admission and UI rendering.
+Omission, zero/max/overflow, invalid/duplicate values, authority, CSRF/Origin
+and audit rollback controls pass, with the owned-schema PostgreSQL matrix
+registered in `scripts/test-postgres.sh`. The frozen 17-gate run passed workspace
+571/0/40 and PostgreSQL 23/0/0; native browser→LMTP→held/SMTP runs cover both
+backends and restart. See [WEB_POSTING_LIMITS.md](WEB_POSTING_LIMITS.md) for exact
+evidence and remaining boundaries. This is not full administration parity.
+
+## P4-LIST-COPY — bounded local acceptance verified
+
+The account form exposes **Receive list copies when directly addressed** as a
+labelled Yes/No select. Strict optional `receive_list_copy=true|false` updates only
+the membership override, in the existing authority/policy/update/audit transaction.
+Omission preserves stored NULL/false/true and the legacy audit shape; legacy
+browser preference wrappers remain available. Shared and unrelated fields are unchanged.
+
+Regular accepted posts and transactional held review now suppress a member with
+effective `receive_list_copy=false` only when the original uncooked To/Cc contains
+that canonical mailbox. Repeated/folded fields and groups are included; Bcc, body,
+substrings and display-name text are not mailbox matches. Malformed headers do not
+authorize suppression. The shared conservative parser also serves digest collection
+and retains recipient-limit admission's unknown/fail-closed behavior. Original SMTP
+spelling, delivery mode/status and independent own-post controls remain intact.
+This opt-in duplicate-suppression heuristic is **not authentication or proof of
+prior delivery**. The low-level explicit-snapshot `ModerationRepo::accept` primitive
+is unchanged; production REST and browser review use the transactional resolver.
+
+Sequential behavioral RED→GREEN evidence covers regular processing, held review,
+POST 422→303, missing→present UI, then repeated digest headers. Supplementary
+SQLite and isolated PostgreSQL controls cover headers, inheritance, preference
+preservation, authorization, strict forms and audit rollback. Exact commands/logs
+and owned SHA inventory are in `target/list-copy-handoff.md`. The completed frozen
+parent run `target/list-copy-parent-gates-20260909-100711/` passed 63/63 gates:
+workspace 568/0/39, mandatory PostgreSQL 22/0/0, actual browser/SMTP and restart
+on both engines. All 349 frozen paths remained stable and were independently
+matched before the later posting-limits increment. Bounded static review found
+no P1/P2. The historical handoff's pending full-gate status is now superseded;
+this does not establish authenticated authorship, exhaustive races or full parity.
+
+
+## P4-WEB-OWN-POSTINGS — bounded local acceptance verified
+
+The existing `/web/members/{id}/preferences` POST accepts a strict optional
+`receive_own_postings: Option<bool>` form field; malformed or duplicate values
+are rejected by form extraction. The account form renders the effective layered
+value with an explicitly labelled true/false select, avoiding checkbox omission.
+`Database::browser_preferences` retains its public signature as a wrapper into
+`browser_preferences_with_own_postings(..., Option<bool>)`. Both use the same
+`browser_write_tx` reservation, live session and verified member ownership checks,
+and unchanged mode/status restrictions. The narrow SQL update uses integer-backed
+`COALESCE($4,receive_own_postings)` so omission retains the current stored value,
+not a pretransaction snapshot. Shared user/address layers and other preference
+columns are not replayed. Explicit values add a boolean `receive_own_postings`
+to the same atomic `preferences.update` audit; omission retains its two-key shape.
+No new schema, dependencies, sender authentication, suspension bypass or delivery
+policy is introduced. Worker evidence: `target/web-own-postings-handoff.md`.
+Frozen `target/web-own-postings-parent-gates-20260909-090105/` passed 58/58 gates:
+workspace561/0/37 and mandatory PostgreSQL20/0/0, including the registered
+PostgreSQL router/rollback controls. Actual Chromium→SMTP on both backends proves
+false/true persistence, peer and sibling delivery, restart in both states,
+omission preservation and exact actor-attributed audits. All 339 source/harness
+paths remained stable; independent bounded review found no causal P1/P2.
+Receipt: `target/web-own-postings-final-receipt.json`. The documented audit
+exception remains. New concurrency/late-expiry guarantees are not claimed;
+saving the displayed inherited value intentionally creates a member override.
+
+## Automatic warning/removal scheduler — bounded local acceptance verified
+
+`P3-BOUNCE-SCHEDULER` explicitly opts the real `serve_mail_role` into a new owned
+`JoinSet` child before inbound/outbound consume their config/database values.
+`MailRoleConfig::from_core` projects default-false enable, default60-second interval
+and default100-member batch. Core loading rejects interval outside 1..86400,
+batch outside 1..1000 even when disabled, and enable without `mta.enabled`.
+Existing supported SMTP transport validation remains mandatory. All actual
+runtime constructors use `from_core`; no list flag implicitly starts the child.
+
+The scheduler calls existing real-clock `Database::bounce_maintenance().sweep`
+once per completion-based delay. First page is delayed too. Pages never overlap
+within this instance; there is no catch-up and no detached page task. Repository
+SQL LIMIT/keyset ordering and per-list `process_bounces` gating are reused without
+schema changes. Each returned cursor includes failed/non-due scanned members;
+empty resets to None for the next delayed cycle. Page errors preserve the cursor
+and defer retry. Only fixed generic failure text or bounded summary counts are
+logged, never cursor/member identifiers, raw errors, DSNs or message content.
+
+Both sleep and sweep are raced against owned shutdown, including already-true
+and closed channels. Dropping the sweep cancels its future; SQLx transaction
+drop initiates rollback of an uncommitted transaction, not prior member commits.
+An in-flight commit acknowledgement can remain uncertain. Existing supervisor
+drains and then aborts/reaps owned children; no whole-page atomicity is claimed.
+No leader election or new DB clock is introduced; `sweep_at` stays a deterministic
+repository testing facility, not a production scheduler/CLI clock override.
+
+README contains safe TOML/environment defaults and explicit activation policy.
+Focused evidence includes real serve→private warning publication, real SQLite
+multi-page progress and positive/zero list intervals, plus separately spawned
+paused-time cursor/error/no-catch-up/cancellation controls. Frozen parent run
+`target/bounce-scheduler-parent-gates-20260909-063657/` passed 50/50 gates:
+workspace554/0/35, mandatory PostgreSQL18/0/0, six actual no-CLI scheduler cases
+per backend with held notices across graceful restart and exact SMTP readback.
+Build/fmt/strict Clippy/client/browser/DKIM/TLS/AUTH/security passed with the
+documented advisory exception. Source/harness stable; bounded independent review
+no P1/P2. Receipt `target/bounce-scheduler-final-receipt.json`; acceptance prose
+checked separately afterward. A held-pool cancellation test is not a direct
+held-SQL-transaction/earlier-commit cancellation test; no full replacement claim.
+Older manual-only assertions below describe the prior explicit-CLI increment
+and are superseded only for this opt-in scheduler.
+
+## Explicit warning/removal transaction — bounded local acceptance verified
+
+`P3-BOUNCE-MAINTENANCE` is an operator-triggered CLI vertical, not a `serve`
+scheduler. `listmngr bounce sweep [--limit 1..1000] [--after UUID]` enumerates one
+SQL-limited, UUID-keyset page of Member candidates with own `by_bounces` status
+and processing enabled. It never materializes the full disabled roster. Every
+scanned ID advances the cursor, including failures and non-due candidates; the
+next empty page terminates a pass. Restart without a cursor for a new pass.
+
+`Database::bounce_maintenance()` exposes `sweep(limit, after)` using a live UTC
+clock and `sweep_at(limit, after, now: DateTime<Utc>)` for deterministic database
+tests. There is no public CLI clock override. Each member transaction starts
+with a write reservation on that Member before reads, reuses the scorer's
+address/preference association locks, locks current list configuration, and
+rereads current eligibility after waits. Production UTC is sampled after these
+locks and before mutation. Status/config changes that win their lock ordering
+are respected, including explicit reenable and non-bounce reasons.
+
+Warning eligibility is count below configured maximum and null/elapsed receipt;
+removal is count at/above maximum and elapsed receipt, or configured maximum zero.
+The exact positive interval boundary is inclusive. A first null receipt is due
+immediately. One sweep takes one action per member; interval zero allows another
+warning in the next serialized invocation rather than claiming time-wide
+exactly-once behavior. Winning direct-RCPT scoring disable resets
+`total_warnings_sent=0,last_warning_sent=NULL` in its existing transaction.
+
+The warning increments the existing count, stores its timestamp, queues private
+MIME and records `bounce.warning` with member ID, warning number and configured
+count in the same transaction. Its subject is `Membership disabled warning` and
+its human restoration contact/Reply-To is the real owner address. Removal uses
+existing `DELETE ... RETURNING` authority plus optional goodbye, followed by the
+shared safe admin renderer for `Member removed by bounces` and `bounce.remove`.
+Only the ordinary Member row is removed: other roles, identities, users, addresses
+and other-list associations survive. `bounce.removal_notice` records recipient
+count including zero for an empty enabled roster. Admin roles deduplicate by
+canonical address while delivery retains original transport spelling.
+
+Migration 0025 adds warning maximum 3 (0..100), whole-day interval 7 (0..36500),
+and default-true removal notification; processing stays default-off. Both frozen
+semantic corpus consumers compose the additive snapshot without changing old
+migrations. Native/compat config, form booleans, `Nd` interval compatibility,
+PATCH/PUT semantics and OpenAPI share the canonical persisted settings.
+
+Each member commits or rolls back independently; failure does not starve later
+page members. CLI returns a bounded aggregate JSON summary and fails its exit
+status on any failed item, without logging raw errors/secrets. Each generated
+MIME is bounded at 4096 bytes and reuses workflow provenance/null-sender/no-loop
+outgoing handling. Publication counts are not SMTP-delivery guarantees. Unsafe
+admin rosters roll back the entire member operation (including a queued goodbye);
+existing admin roster enumeration is not an aggregate fanout quota. PostgreSQL
+row waits, pool pressure or aggregate teardown may cause a member-level failure;
+no universal deadlock-free/automatic retry guarantee is asserted. Published
+snapshots are not revoked by later roster changes. No incoming DSN, probes,
+recovery tokens, localization or automatic maintenance schedule is introduced.
+
+Frozen `target/bounce-maintenance-parent-gates-20260909-054944/` passed 46/46 gates:
+workspace 546/0/35, mandatory PostgreSQL 18/0/0, and seven real client/CLI/LMTP/SMTP/
+restart cases on each engine. PostgreSQL executed the owned-schema atomicity,
+positive-interval concurrent winner and observed preference-lock reenable test.
+The process oracle verified warning rejection before member deletion, followed
+by goodbye/admin rejection, with actual attempts and no extra bounce events.
+Build/fmt/strict Clippy, browser/client/DKIM/TLS/AUTH/security passed with the
+documented advisory exception. Source/harness stable; bounded independent static
+review no P1/P2. Live-clock due-crossing and held-list-config race tests remain
+unclaimed; placement after locks is source-reviewed, not universal concurrency
+proof. Receipt: `target/bounce-maintenance-final-receipt.json`. Acceptance prose
+was checked separately after the frozen run. Focused RED/GREEN provenance:
+`target/bounce-maintenance-handoff.md`. Earlier sections are
+historical evidence and do not imply acceptance of this candidate.
+
+## Increment notice transaction — bounded local acceptance verified
+
+`P3-BOUNCE-INCREMENT-NOTICE`: additive migration 0024 persists default-false
+`bounce_notify_owner_on_bounce_increment`; constructor, legacy deserialization,
+native/compat config, PATCH preservation, PUT reset and OpenAPI agree.
+`process_bounces` stays false. After the existing member/address/preference locks
+and effective-status read, fresh ordered UTC-day eligibility (not numeric delta)
+authorizes the private increment producer. It receives the post-stale score before
+threshold reset. In this direct-RCPT/no-VERP implementation, threshold crossings
+also notify, independently of the existing disable flag and unchanged disable body.
+Same-day refresh, replay/out-of-order, disabled delivery, config-only changes,
+non-RCPT/nonmember/internal failures do not authorize publication.
+
+The shared bounded admin renderer snapshots owners plus moderators once per
+notice type, deduplicates canonical addresses, preserves original transport
+spelling and excludes other-list/ordinary-member recipients. Subject:
+`Member bounce score increased`; body: member/list/pre-reset score, without raw
+post, diagnostic or secret; complete MIME ≤4096 bytes. Existing private
+`workflow_notices` job provenance authorizes the unchanged null-envelope/no-loop
+consumer. Score/receipt/event-processed/outcome, optional disable, both notice
+types and all audits remain in the same fenced completion transaction. Distinct
+`bounce.increment_notice` audits count recipients, including zero; false emits
+neither notice nor notice audit. Unsafe rosters inherit transactional rejection;
+later roster edits do not revoke materialized snapshots, and aggregate roster
+cardinality/memory is not newly bounded. No locks, preference resolution or lease
+checks were weakened. No warning/removal/probe/incoming-DSN claims are added.
+
+Frozen run `target/bounce-increment-parent-gates-20260908-203556/` passed 42/42
+gates: workspace 531/0/34, mandatory PostgreSQL 17/0/0 (including new audit sabotage
+and retry), nine actual client/LMTP/SMTP/restart cases on each engine, strict
+Clippy/build/fmt, browser/DKIM/TLS/AUTH/security with the documented advisory
+exception. Parent supplemental assertions distinguish exact pre-reset score 1
+from 2, not only job counts. Source/harness fingerprints stayed stable and bounded
+independent static review found no P1/P2. Receipt:
+`target/bounce-increment-final-receipt.json`. Acceptance text was updated after
+the frozen run and checked separately; historical receipts below remain historical.
+
+
+## Owner disable notice — bounded local acceptance verified
+
+`P3-BOUNCE-DISABLE-NOTICE` adds `bounce_notify_owner_on_disable` with canonical
+**true** default (including legacy JSON and migration 0023); `process_bounces`
+remains **false**. Native/compat JSON and form config, Python `True`/`False`,
+PATCH omission preservation, PUT omission reset, attribute reads and OpenAPI
+are covered by focused tests. This does not introduce warning/probe/recovery,
+incoming DSN/VERP, removal, templates, authentication or migration/cutover parity.
+
+Only a winning automatic disable publishes fixed, bounded private MIME naming
+the member and list. Within the existing fenced completion transaction, one
+roster SELECT snapshots current owners plus moderators, deduplicated by canonical
+address identity. Each receives a separate persisted job with `workflow_notices`
+provenance; ordinary members and other-list admins are excluded. Subsequent roster
+changes do not revoke materialized recipients. There is no local `-owner` relay
+hop. Empty rosters still disable and record `bounce.disable_notice` with
+`recipient_count: 0`, creating no job. False configuration creates no notice.
+Blob/message/job/provenance, score reset, disable, event, audits and delivery
+outcome commit or roll back together. Replay/config edits do not notify.
+Generated notices use null reverse paths and existing no-bounce-recursion
+provenance; their SMTP failure neither re-enables nor scores recipients. No
+subscriber post, raw diagnostic or secret is included; MIME is capped at 4096
+bytes per admin. Unsafe recipient rosters fail transactionally, not by loopback.
+
+Compatibility `/3.1/members` distinguishes owner/moderator role assignment from
+subscriber confirmation. The existing list-scoped `members:write` authorization
+still precedes mutation; missing flags are accepted only for these two compat
+roles. The repository receives the actual `pre_verified` value, never implicit
+true. Native creation, ordinary member/nonmember confirmation and invitation
+guards are unchanged. Parent router RED→GREEN and the real SQLite client/process
+probe cover this integration repair without synthesizing verification state.
+
+Frozen candidate acceptance: 38/38 gates PASS, workspace 524/0/33 and mandatory
+PostgreSQL 16/0/0; real client→LMTP→SMTP→restart on both engines, build/fmt/strict
+Clippy, browser/client/DKIM/TLS/AUTH and security with the documented advisory
+exception. Source/harness stable; bounded read-only review found no concrete
+P1/P2, not universal concurrency proof. Run:
+`target/bounce-notice-parent-gates-20260908-195604/`; receipt:
+`target/bounce-notice-final-receipt.json`. Acceptance documentation changed after
+the frozen run, with separate artifact/fmt/diff checks. Whole replacement remains
+open; prior no-notice statements and counts refer to earlier increments.
+
+
+## Threshold-triggered suspension — bounded local acceptance verified
+
+Migration 0022 adds `bounce_score_threshold` as bounded positive DOUBLE PRECISION
+(default 5). Native and compatibility config expose numeric values, including
+fractions, with PATCH preservation and PUT reset. `process_bounces` stays off by
+default. A fresh eligible UTC-day observation compares its post-stale score with
+the threshold; numerical change alone is not eligibility (stale 1→1 still counts).
+At threshold, only the Member preference becomes `by_bounces` and score resets
+to zero, within the existing fenced event/outcome/audit transaction. New regular
+recipient selection excludes disabled members; existing snapshots are not revoked.
+
+The scorer locks member, address and sorted preference rows before rereading
+effective status; address preference creation shares the address lock. Member
+PATCH updates only requested preference fields, never a stale full snapshot.
+Two PostgreSQL barrier tests cover member/address/user and first-time address
+preference changes plus metadata/mode PATCH preservation. They do not prove all
+browser, identity/deletion interleavings or universal deadlock freedom.
+Final frozen gates passed: workspace 518/0/32, PostgreSQL 15/0/0 and all 34 checks.
+HTTP/client→LMTP→SMTP→restart probes passed on both backends with independent
+healthy-recipient and exact DATA/recipient checks. Warnings, notifications,
+probes, removal and incoming DSN/VERP processing remain separate.
+
+## Bounded direct SMTP bounce scorer
+
+Migration 0021 persists default-off `process_bounces` and a 1–3650-day
+`bounce_info_stale_after` (default seven). Existing member score/timestamp columns
+are projected read-only by native and compatibility member APIs. Compatibility
+config maps integer storage to `Nd` duration strings; native config remains typed
+integer days. This does not implement arbitrary Mailman duration expressions.
+
+Only a newly inserted job/recipient SMTP failure event with RCPT stage, permanent
+5xx and a current Member can score when the list flag is on. The scorer acquires
+a member write lock before reading its score and receipt timestamp. Event, score,
+processed marker and audit remain inside the existing lease-fenced recipient
+transaction. Duplicate events do not score again. The first eligible event per
+UTC day adds one; at or beyond the stale duration since the most recent receipt,
+a new eligible event resets to one. Later same-day receipts refresh the timestamp
+without increasing score, and out-of-order timestamps are ignored. The accepted
+scoring-only slice did not change preferences; the suspension candidate above
+extends that boundary. Existing unprocessed historical events are not replayed.
+
+Static locking/transaction inspection is not a production contention proof.
+Direct relay RCPT errors are not authenticated external DSNs; broader bounce
+classification, VERP, disable/warning/probe policy and cutover remain open.
+Bounded local acceptance is recorded in `P3-DIRECT-BOUNCE-SCORE`: workspace
+512/0/30, PostgreSQL 13/0/0, plus actual SMTP scoring/readback across process
+restart on SQLite and owned PostgreSQL. This does not prove PostgreSQL contention
+or expand the explicitly excluded policy and DSN scope.
+
+## Transactional removal notices
+
+`send_goodbye_message` is a portable default-off list boolean (migration 0020).
+The private DB deletion helper uses `DELETE ... RETURNING list_id,address_id,role`:
+only an actual Member deletion can notify. It resolves the surviving address's
+original transport spelling and the list flag inside the same transaction, renders
+bounded fixed MIME, and publishes through job-bound `workflow_notices` provenance.
+Direct deletion and shared bulk/sync/confirmed/browser deletion paths reuse this
+helper; list teardown publishes while the list still exists. Preferences, removal,
+notice rows and audit roll back together on failure. Durable notice context and
+recipient snapshots do not depend on a surviving membership/list at SMTP time.
+Completion receipts remain distinct from optional goodbye notices.
+
+The email-address DELETE alias shared by native and compatibility APIs requires
+`members:write`, list authorization and explicit `pre_confirmed=true` plus
+`pre_approved=true`. It selects only a matching Member, not another role at the
+same address, and forwards the immutable audit context to repository deletion.
+Missing/false approval flags and unknown fields are rejected, not discarded.
+This bounded alias does not implement Mailman's pending-unsubscribe policy matrix.
+
+`P3-GOODBYE` distinguishes router/pool-reopen SMTP tests from the independent real
+HTTP/mailmanclient/process-restart tracer and live PostgreSQL gate. Neither is a
+deployed MTA/cutover test, and atomic publication is not exactly-once SMTP delivery.
+
+## Optional verified-TLS SMTP AUTH PLAIN
+
+`SmtpAuthSecret` redacts both Debug and serialization. `MtaConfig::smtp_auth_credentials`
+validates both-or-neither nonempty <=255-byte/control-free credentials and REQUIRED
+TLS, or reads a bounded private `smtp_auth_password_file` (one final LF/CRLF allowed).
+Unix opens use O_NOFOLLOW/O_NONBLOCK, check the opened descriptor is regular and
+reject group/other permissions. Inline+file ambiguity fails closed. `Config::load`
+redacts extraction errors because parser diagnostics may echo input values.
+`TransportSecurity::from_mta` repeats validation for direct callers and owns the
+encoded secret privately; `authentication()` exposes only Disabled/Plain policy.
+No configurable insecure certificate verifier exists.
+
+After verified TLS, `smtp/auth.rs` performs fresh EHLO and exact case-insensitive
+AUTH/PLAIN extension-token admission, excluding greeting and all pre-TLS state.
+One bounded negotiation permits an initial response and at most one **empty** 334
+challenge; exact 235 is mandatory. Authentication returns a local redacted I/O
+error before the shared transaction, so 535/454 do not become mailbox failures.
+RFC4954's SMTP command limit is enforced: oversized initial responses use bare
+AUTH PLAIN then empty334. The state machine rejects235 unless credentials have
+actually been sent; the continuation response is not the initial AUTH command.
+The same `run_transaction` handles no-auth and authenticated envelope/DATA paths;
+its optional EHLO config denotes whether authenticated EHLO already completed.
+No duplicate EHLO is emitted after AUTH. Lease fencing, signing and final DATA
+publication are unchanged. All authenticated outcome free text is replaced before
+return, retaining typed stage/code and ambiguous-vs-known final-DATA disposition.
+
+Focused same-stack Rustls loopback fixtures use OpenSSL-generated identities,
+owned target TempDirs and memory SQLite. P2-SMTP-AUTH distinguishes observed REDs
+from supplemental controls. Parent independent OpenSSL process and CLI file
+matrices plus full candidate gates now PASS as recorded in FEATURE_PARITY.
+These are not deployed third-party relay certification. No zeroization/core-dump protection, password
+rotation without restart, LOGIN/XOAUTH2 or implicit/opportunistic TLS is claimed.
+
+## Local outgoing failure classification
+
+The message fetch and signing-authority job/message/list lookups distinguish
+database dependency failure from invalid or missing context. A shared local
+failure transition retries dependencies with the existing lease-fenced backoff,
+while invalid context/signing is shunted. No transport reservation, SMTP connect
+or mailbox bounce is authorized on these paths. Failure to persist the transition
+is logged; normal lease recovery remains necessary if the database stays down.
+The regression separates an actual closed-pool signing lookup after successful
+preparation from deterministic retry/shunt disposition tests on an owned SQLite
+fixture; it is not a full production outage/recovery simulation.
+
+## REQUIRED SMTP STARTTLS transport
+
+Parent bounded local acceptance now includes the independent real-process
+OpenSSL matrix and the combined workspace/PostgreSQL/client/browser/security
+gates recorded under `P2-STARTTLS` in `FEATURE_PARITY.md`. The retained original
+failed receipt and separate PostgreSQL revalidation distinguish infrastructure
+preflight repair from product behavior. This does not establish live MTA cutover
+or a complete Mailman replacement.
+
+`MailRoleConfig::from_core` constructs a private `TransportSecurity` policy from
+`mta.smtp_tls`, optional `smtp_tls_server_name` and `smtp_tls_ca_file`. Unsupported
+enabled modes fail closed; a disabled default role has a non-sending policy.
+Required mode validates the explicit DNS/IP server name (or derives the numeric
+relay IP), loads bundled public roots plus optional additional PEM CA certificates,
+and builds an immutable Rustls client config with explicit ring provider. The
+existing relay `SocketAddr` contract is unchanged. No configurable/dangerous
+certificate verifier or global provider installation is exposed.
+
+The runner still prepares/signs the final bytes and reserves the durable attempt,
+then calls `mail::smtp::send_secure`. A single upgrade deadline bounds initial
+220 greeting, EHLO writes/response, exact case-insensitive STARTTLS extension
+**token** (excluding EHLO's greeting line), STARTTLS/220 and verified TLS 1.2/1.3.
+It rejects unsolicited buffered plaintext at the upgrade boundary. Only after
+TLS succeeds does the same `run_transaction` used by plaintext execute, beginning
+with fresh EHLO. MAIL/RCPT/DATA, partial recipient preservation, dot-stuffing,
+DATA ambiguity and immediate final DATA publication are not forked. Transport
+errors before this transaction become safe transient outcomes, not remote SMTP
+5xx metadata or bounce events. Post-TLS SMTP failures retain their ordinary typed
+stage semantics. The subsequent AUTH increment above adds PLAIN only, never downgrade.
+
+Locked existing versions: tokio-rustls 0.26.5, Rustls 0.23.43, pki-types 1.15.1,
+webpki-roots 1.0.9. The direct tokio-rustls dependency disables defaults and selects
+ring/tls12; safe default protocol versions are TLS 1.2 and 1.3. Trust is loaded at
+role construction, not per delivery; no OS trust/keychain or live DNS dependency
+is used for this transport. CA rotation needs restart and bundled-root updates
+need rebuild. This does not add revocation/OCSP policy, mutual TLS, implicit TLS,
+LMTP encryption or production MTA acceptance.
+
+Real runner/owned SQLite/TCP→STARTTLS→Rustls tests assert exact envelope and cooked
+bytes, post-TLS EHLO and pending/no-bounce negative controls. These are same-stack
+Rustls peers with OpenSSL-generated owned certificates, not independent live-MTA
+interoperability. See P2-STARTTLS. Earlier whole-candidate gates below are baseline
+evidence only until parent re-verifies this source change.
+
+
+## Visible recipient moderation
+
+Migration `0019_recipient_limit.sql` adds default-zero `max_num_recipients`,
+bounded to the signed portable SQL INTEGER range. The core record, SQL
+projection/update, strict JSON/form config and OpenAPI share the contract;
+business changes and audit insertion remain one transaction. PATCH omission
+preserves the value; PUT omission resets it.
+
+Inbound policy facts use parsed mailboxes from every top-level To/Cc occurrence,
+including groups, not comma splitting or delivery roster length. Conservative
+header completeness and delimiter checks prevent forgiving parser recovery from
+silently undercounting malformed input. A nonzero limit holds on parse failure
+or `count >= limit`, matching Mailman's documented equality boundary. The
+existing policy/transaction path preserves original raw bytes and commits a held
+message without outgoing/archive/digest children. Zero bypasses only this check.
+This does not implement every Mailman acceptance rule or exhaustive RFC address
+syntax. See `P2-RECIPIENT-LIMIT` for exact evidence.
+
+## Outbound DKIM — bounded local acceptance verified
+
+Fresh frozen-candidate verification passed workspace (480/0/30), canonical
+PostgreSQL (13/0/0), a real PostgreSQL HTTP→LMTP recipient-policy tracer,
+mailmanclient 3.3.5 and Chromium browser/DB-effect acceptance. Seven real SMTP
+fixture profiles passed independent dkimpy verification and eight negative
+controls each. No source changed during gates; subsequent edits are evidence
+documentation only. Local acceptance does not establish production deployment
+or the remaining Mailman replacement obligations.
+
+The signer explicitly selects relaxed header/simple body canonicalization.
+Independent RFC body hashes reproduced a mail-auth 0.12.1 relaxed-body defect
+for trailing whitespace-only lines. Simple mode avoids that dependency path
+without rewriting MIME content or weakening verification; it is less tolerant
+of subsequent body whitespace changes. Regression expectations come from dkimpy
+1.1.8 rather than the signer's own canonicalizer.
+
+`mta.dkim_signing` holds operator-controlled domain, selector and key-file paths.
+`MailRoleConfig::from_core` loads validated identities and RSA signers once;
+configuration serialization itself does not read key bytes. Runtime Debug and
+signing errors redact key material. Unix opens use `O_NONBLOCK` before checking
+descriptor metadata, preventing FIFO startup hangs without a check/open race.
+Only regular files are admitted; group/other permissions are rejected on Unix,
+and reads are capped at 64 KiB. No deployment keys are used by tests.
+
+The final outgoing signing hook reloads stored job/message/list authority and
+selects the key by the stored list's mail host. It runs after ordinary cooking or
+the existing producer-owned private/owner/digest preparation and before SMTP.
+The library owns DKIM canonicalization and RSA-SHA256; local preparation only
+normalizes SMTP line endings, rejects bare CR and ambiguous/missing From, and
+requests From oversigning. The signed copy is not written back into the spool.
+Local failure shunts without opening SMTP or recording a mailbox failure.
+The hook does not change envelope recipients, null reverse paths, lease fencing
+or SMTP uncertainty semantics.
+
+The parent reproduced FIFO blocking with a subprocess-bounded integration test,
+then repaired it with a nonblocking open. Test key permissions are explicitly set
+to 0600 rather than depending on the installed OpenSSL's creation mode. Mail
+and runners all-target tests pass (153/0/1), as does strict affected-package
+Clippy. Read-only source review, workspace build/Clippy, fresh security checks and
+PostgreSQL 14.24 canonical tests plus a serial CLI tracer also passed. The first
+full run timed out in workspace tests and failed capture freshness; it is not
+accepted. A resource-bounded full retry remains pending. Independent dkimpy
+1.1.8 verification of seven synthetic TCP SMTP
+captures now passes (ordinary, owner, private rejection, digest regular/plain/
+MIME/summary). Each includes seven rejection controls. Capture exports have
+separate names; final gates require new message/key bytes for every profile,
+freeze copies, then verify those copies. This covers these concrete producers,
+not every possible notice subtype or a production relay deployment.
+No incoming authentication, ARC, DNS publication or live MTA cutover is claimed.
+
+## Bounded transactional welcome producer
+
+Migration `0018_welcome_notice.sql` adds portable integer-backed boolean
+`mailing_lists.send_welcome_message`, NOT NULL, default 0, CHECK 0/1. Both semantic
+schema compositors include an additive welcome snapshot; historical corpora are
+unchanged. Core, REST GET/JSON/form write, PUT reset and OpenAPI use the same
+default-off contract. Authorization stays in existing list-config handlers.
+
+The two actual membership INSERT sites (`subscribe_with_context` and
+`insert_mass_members`, also used by confirmed workflows) invoke
+`welcome_new_member` with only the new member ID before transaction commit.
+The helper reads Member-role list identity, stored address.original_email and
+the current flag from DB, suppresses notices to banned mailboxes and renders a
+fixed English text notice. This optional producer does not redefine administrative
+admission; public/email workflow ban enforcement remains at its existing boundary.
+It does not accept raw MIME, recipient input, display names or template content.
+Transport mailboxes are checked; complete output is capped at 4096 bytes.
+Configuration is sampled within the membership transaction; this is not a claim
+of serialization with every concurrent policy/ban change on PostgreSQL.
+
+Raw blob, message, outgoing job, exact private recipient and `workflow_notices`
+job-bound provenance share the existing membership/audit transaction. Rollback
+of audit, provenance or recipient publication removes all attempted effects and
+permits retry. Unique membership constraints/no-op filtering and single-use
+workflow consumption prevent duplicate welcomes for the same insertion. A
+later genuine unsubscribe/re-subscribe may receive a new welcome.
+The workflow's existing completion receipt is separate and unconditional;
+pending challenges and receipts must be counted separately from welcomes.
+Leased email completion retains its final expiry/ACK fencing. No runner cooking,
+provenance bypass, delivery uncertainty or recipient-authority rule is widened.
+
+Worker evidence: focused default/role/list/no-op/bulk/confirmed-join and sabotage
+tests, plus real authenticated API enablement/subscription → pool close/reopen →
+existing TCP SMTP sink, asserting null reverse path and only the stored mailbox.
+This is production-router HTTP handling plus real SMTP, not a live MTA or
+production deployment. Parent final acceptance passed all nine gates: workspace
+465/0/30 ignored (81 summaries), build/fmt/strict Clippy/artifact/diff, fresh
+official HTTPS audit and unchanged-policy deny, plus PostgreSQL 14.24 canonical
+13 tests and serial CLI welcome tracer. All 28 required tests passed; source
+fingerprints remained unchanged. Owned PostgreSQL cleanup was independently
+checked. This does not certify PostgreSQL contention or live MTA/cutover.
+See `P3-WELCOME` and `target/welcome-evidence/final.json`. Custom templates,
+per-request overrides, localization, goodbye/admin notices and scoring are out
+of scope. Durable exactly-one publication is not exactly-once external delivery.
+
+## Untrusted incoming bounce inbox
+
+Bare `-bounces` recipients resolve to `Queue::Bounces`, not the ordinary inbound
+processor. The shared suffix table also produces Postfix map entries. Exact
+posting-list names retain precedence; plus/VERP recipients remain unsupported.
+Null reverse paths and automatic messages are appropriate for reports and bypass
+only email-command reply eligibility, not bounded header validation or durable
+enqueue. The existing `enqueue_batch` transaction commits raw blobs, per-list
+message contexts, queue jobs and audit together before LMTP DATA success.
+
+The optional Message-ID parser shares the strict bounded parser; only an absent
+ID is permitted on bounce routes. A generated UUID-based identity is internal
+metadata, not a modification of the report, sender authentication or outgoing
+delivery correlation. Invalid/duplicate IDs are still rejected. Existing posts
+and commands still require IDs. Inbox messages are untrusted: they neither
+populate `bounce_events` nor mutate subscriber delivery state. Existing CLI
+queue listing/metadata/raw export provides operator inspection after reopening
+the database. `queue acknowledge-bounce JOB_ID --reason STRING` delegates to
+`Database::acknowledge_bounce`: its first transactional statement is a conditional
+UPDATE guarded by stored ID, queue=bounces and state=ready. The row/writer lock
+serializes with claim (SQLite BEGIN IMMEDIATE / PostgreSQL row selection lock).
+It changes only state to done; queue, attempts, scheduling timestamps, message,
+context and raw remain unchanged. One `queue.acknowledge_bounce` audit records the
+job target, ready→done and trimmed reason (nonempty, no controls, ≤2048 UTF-8 bytes).
+No raw/context/token is copied into the audit. Audit failure rolls back; retry is
+valid. Missing/wrong-queue/leased/shunted/done jobs conflict, including repeated
+acknowledgements, without new audit or timestamp writes. CLI is trusted local
+administration, not an HTTP authorization surface. `queue ls --state` validates
+ready/leased/done/shunted and applies SQL filtering before the unchanged 1000-row
+limit; no state option preserves retained-job listing. Normal show/raw still work.
+No bounce worker, trusted DSN/VERP correlation, automatic forwarding,
+quota or retention cleanup is added. Unacknowledged reports remain ready;
+protected spool storage and monitored growth remain operator obligations.
+`P3-BOUNCE-INBOX` records the disposable LMTP/SQLite/CLI acceptance scope.
+Prior intake-only parent evidence is `target/bounce-inbox-parent-gates-1/`: workspace
+452/0/30 ignored, all build/static/security gates and explicit real Postfix map
+lookup pass; Rust/schema fingerprints remain unchanged. Independent read-only
+review found no concrete regression within this bounded scope. PostgreSQL,
+actual daemon delivery and full bounce processing remain unverified.
+Acknowledgement evidence in `target/bounce-ack-evidence/`: focused DB tests 3/0,
+real CLI tests 3/0, affected strict Clippy and fmt PASS. Audit sabotage/retry,
+state/lease/reason rejection, retained bytes and filter-before-limit are exercised
+on disposable SQLite. Parent strengthened the claim race to a file-backed database
+with two prewarmed pool connections and a barrier, asserting exactly one winner
+and the corresponding acknowledgement audit count; this is not PostgreSQL
+lock-contention certification. Final workspace: 457 passed / 0 failed / 30 ignored
+(79 summaries); all 20 required regressions, build/fmt/strict Clippy/artifact/diff
+and fresh official HTTPS audit pass. Default deny fetch failed over SSH; online
+retry with a fresh advisory directory and per-process Git-config isolation passed
+the unchanged policy. The canonical `scripts/test-postgres.sh` gate passed 13 tests
+on disposable PostgreSQL 14.24. A separate CLI/PG synthetic queue fixture passed
+ready/default/done listing, acknowledgement, wrong-queue/replay rejection, exact
+raw retention and one audit. Its first two attempts failed on tracer-only CLI
+argument/exit-code assumptions; both failures are retained, not behavioral RED.
+All three owned clusters were stopped/removed, and their ports verified closed.
+Rust/schema fingerprints stayed frozen; see `target/bounce-ack-evidence/final.json`.
+Other PostgreSQL versions, acknowledgement/claim contention on PostgreSQL,
+actual daemon delivery and full bounce processing remain outside this evidence.
+
+## Durable direct SMTP failure observations
+
+The bounded typed slice uses neutral `SmtpFailureStage`/`SmtpFailure` core
+values. SMTP `RecipientStatus::RemotePermanentFailure` carries the exact 5xx
+reply code and EHLO/MAIL FROM/RCPT/DATA-start/DATA-final command stage alongside
+internal diagnostics. The outgoing consumer passes metadata keyed by original
+recipient to `MailQueueRepo::finish_delivery_with_smtp`; the old
+`finish_delivery` entrypoint delegates with no metadata for existing fixtures
+and callers. No new JSON input is accepted or interpreted. Non-5xx retry,
+non-220 greeting, local validation and ambiguous-delivery classifications are
+unchanged, and resolving DATA only fills still-pending recipient outcomes.
+
+Additive migration `0017_smtp_failure_metadata.sql` adds nullable `smtp_stage`
+(with a closed stage vocabulary) and `smtp_code` (500–599). It performs no
+backfill: old events and legacy/local failures remain unknown, never inferred
+from free text. New metadata is inserted with the existing event/audit/lease
+transaction and uniqueness fence, not a second post-commit update. The existing
+read DTO and authenticated API expose nullable stage/code but not diagnostics;
+RCPT 5xx is still not a mailbox validity verdict. Both semantic schema composers
+include the additive snapshot. Disposable SQLite/TCP focused evidence is under
+`target/smtp-stage-evidence/`; final parent evidence is under
+`target/smtp-stage-parent-gates-1/`: workspace 447 passed / 0 failed / 30 ignored,
+build, fmt, strict workspace Clippy, deny, fresh HTTPS RustSec audit, artifact
+and diff checks PASS. Rust/schema fingerprints stayed unchanged during gates.
+No live PostgreSQL/MTA certification is claimed.
+
+`MailQueueRepo::finish_delivery` records `RecipientOutcome::Failed` before
+resolving a reserved attempt. The event producer joins the stored leased `out`
+job, message and recipient, requires the current attempt token and excludes
+job-bound `workflow_notices`, `owner_deliveries` and `digest_deliveries`.
+Caller-editable lease message/queue metadata and JSON notice flags do not grant
+event authority. A valid stored list context is required. Pending-but-unreserved,
+already-terminal, bogus, transient, sent and ambiguous outcomes create no event.
+
+Migration `0016_smtp_bounces.sql` gives `bounce_events` a unique job/recipient key
+and list-owned cascading deletion. Message/job IDs are retained metadata without
+spool FKs, so spool retention does not erase history. Event insertion and
+`bounce.record` audit share the recipient/queue transaction. The completion path
+reads the current deadline under the queue lock and resamples time after the
+transition audit, rolling back all effects if the lease has expired. PostgreSQL
+lock contention and runtime portability of the new migration are not yet certified.
+
+`BounceRepo` exposes bounded, ordered metadata reads. REST authorizes `lists:read`
+and resource binding before lookup and uses the existing flavor-aware pagination
+envelopes. Raw diagnostics, message contents and stored transport context are not
+projected. Records remain `processed=false`; there is no scoring or event TTL
+worker. A permanent SMTP result can reflect relay/sender/content policy rather
+than an invalid mailbox, so it must not implicitly disable membership. Digest
+classification, authenticated incoming DSNs/VERP, warning/probe/removal processing
+and owner notifications remain separate unfinished product paths.
+
+## Atomic confirmation completion receipts
+
+`WorkflowRepo::confirm_owned` publishes a generated completion receipt after token
+admission and join/leave mutation, in the same transaction as token consumption
+and `subscription.confirm` audit. The email path also includes its final fenced
+ACK. Unleased public REST and browser form confirmations now publish the same
+receipt; their response formats and token admission rules are unchanged. Each
+successfully consumed token permits one receipt,
+including idempotent join-already-member/leave-already-absent outcomes. Replays,
+expired tokens, ban denial and stale leases cannot publish a success receipt.
+
+Receipt addressing comes from `subscription_workflows.original_email`, not the
+confirming envelope or MIME headers. The transport-safe mailbox guard is applied
+before rendering. A fresh message ID and fixed action-specific English text
+avoid copying secrets or request bytes. Text explicitly describes a historical
+confirmation-time result, not a live membership query at SMTP delivery time.
+The existing `enqueue_notice` transaction stores immutable bytes, a single
+recipient and job-bound `workflow_notices` provenance. Existing outbound retry,
+uncertainty and null-sender semantics apply; no SMTP exactly-once claim is added.
+Anonymity and DMARC post transformations cannot recook these private receipts.
+
+SQLite trigger controls cover failure at receipt provenance, confirmation audit
+and ACK audit with rollback of membership/preferences/addresses, token state,
+spool, recipients, provenance and audit. Existing inbound-handler/SMTP fixtures
+follow the delivered challenge's actual Reply-To and subject for both actions,
+using a different confirming sender. This is not live LMTP/MTA or PostgreSQL
+acceptance, nor configurable welcome/goodbye template support.
+
+The HTTP increment additionally exercises the actual public router for private
+join/leave receipts and replay, unleased join and actual-member leave rollback
+at receipt-provenance and confirmation-audit failures, and the existing
+repository-to-SMTP fixture for both completion notices. The reopened file-backed
+SQLite concurrent-consumer test requires exactly one receipt as well as one
+membership/audit effect. HTTP publication and repository-to-SMTP consumption are
+separate evidence boundaries, not a new end-to-end HTTP-to-SMTP service harness.
+No schema/configuration fields or direct administrative member-write behavior
+changed. Template settings, localization, bounce processing and full PLAN P3
+remain open.
+
+## Bounded unconditional DMARC munge_from
+
+PLAN §4.1 / §4.10 are the normative broader contract. This increment exposes only
+`DmarcMitigateAction::{NoMitigation,MungeFrom}` and a boolean unconditional flag.
+Defaults remain `no_mitigation,false`; `no_mitigation,true` is an inactive valid
+pair; only `munge_from,true` activates rewriting. Conditional `munge_from,false`
+and unsupported actions are rejected rather than silently skipping DNS policy.
+The list row is locked before merging PATCH data and validating the resulting
+pair. Settings and `list.config` audit commit together; audit failure rolls both
+back. Additive migration `0015_dmarc_munge.sql` supplies portable SQLite/PostgreSQL
+columns, defaults and SQL pair/action constraints; the shared semantic schema
+snapshot includes the new columns. No live PostgreSQL gate was run for this slice.
+REST JSON/form PATCH/PUT and attribute routes share this writer on both prefixes;
+PUT defaults include both settings and OpenAPI exposes the bounded enum.
+
+`mail::cook_individual_post` applies unconditional rewriting via `mail::munge`
+only for non-anonymous individual deliveries, then shared `mail::cook_post`
+privacy. It validates bounded header syntax and exactly one supported author
+mailbox before returning any cooked bytes. MIME builder quotes/encodes decoded
+name plus original address and list attribution into list-domain From. Sender
+and all previous From/Reply-To fields (including continuations) are removed;
+valid single/multiple Reply-To targets are re-rendered, otherwise author fallback.
+Malformed/ambiguous/control-bearing authors fail closed; obsolete mailbox forms
+and SMTPUTF8 mailboxes are intentionally unsupported. Already list-addressed
+From is safely re-rendered without stacking attribution on repeated publication.
+The original MIME body is spliced byte-for-byte, never parsed/rebuilt for cooking.
+This is identity presentation, **not author authentication** or a trusted marker.
+
+Outgoing preparation maps cooking failure to the existing shunt path before
+connecting to SMTP. The runner selects the individual renderer only after
+database-owned owner/notice/digest provenance checks. A caller-controlled context
+flag cannot authorize an exemption. Digest collection and archive publication
+retain shared privacy cooking without DMARC rewriting; MIME/summary articles keep
+original From and plaintext formatting remains unchanged. This matches Mailman's
+[individual-delivery boundary](https://docs.mailman3.org/projects/mailman/en/latest/src/mailman/handlers/docs/dmarc-mitigations.html).
+Anonymity still suppresses author identity across publication paths and selects
+current privacy settings with authorized archive bytes. Original authors cannot
+be restored from already anonymized stored bytes.
+Owner deliveries and database-proven workflow notices keep their separate
+preparation paths. No DNS lookup, PSL, DMARC verification, DKIM/ARC signing,
+transport TLS, real MTA activation or remote deliverability claim is added.
+
+## Individual ban resources
+
+`GET /api/v1/lists/{id}/bans/{email}` and its `/3.1` counterpart resolve the
+percent-encoded ban resource emitted by creation and collection responses.
+Authorization precedes lookup and requires target-list `lists:read`. `BanRepo::get`
+uses bounded validation/canonical mailbox normalization and an exact list/value
+SQL predicate; regex text is an identifier, not a query to evaluate. Global rows
+are not exposed. Reads perform no policy mutation or admission decision.
+
+
+## Experimental subscription ban admission
+
+Public/browser request/confirm and inbound email join commands converge on
+`WorkflowRepo`. Join checks list-local and existing global bans before issuing a
+challenge and again inside the token-consumption transaction. The latter matches
+against stored `original_email`, never caller-supplied identity. Exact identities
+and case-sensitive regex input share the same matcher as posting policy facts.
+
+Suppressed requests preserve generic success, with no new workflow, outgoing
+notice or cooldown; normal bounded expiry cleanup and inbound lease ACK still
+apply. A newly banned token yields the ordinary invalid-confirmation error and
+rolls back token consumption, membership and confirm audit. It can be retried
+after unban before expiry. Email confirmation errors still follow the existing
+runner error handling; repository rollback does not promise automatic replay
+after an operator removes a ban. Leave and help are not denied by bans; their
+existing rate limits remain. Existing memberships are not evicted.
+
+List ban create/delete now acquire the existing site-wide `subscription_rate`
+writer reservation before the list writer, matching workflow serialization.
+The broad reservation trades concurrency for atomic admission; SQLite tests
+cover transaction effects and reservation failures, not PostgreSQL contention.
+Out-of-band global-row SQL edits have no new writer-coordination guarantee.
+Privileged member CRUD/imports and global-ban administration are not changed.
+
+## Experimental moderator rejection notices
+
+`moderation::review_tx(Reject)` and the legacy `reject`/`dispose` path share one
+transaction-local publisher. It reloads the original stored envelope and raw
+message, checks the list association and canonical held-sender agreement, and
+applies the conservative owner-mail admission guard. Invalid/null senders,
+self-list/control addresses, malformed context or headers, and automatic/list
+messages produce no notice; rejection and the full moderator reason still persist.
+Accept, defer and discard do not publish rejection notices.
+
+An admitted rejection creates a new message/blob, one out job and one recipient.
+The historical `workflow_notices` table now provides job-bound provenance for
+both subscription and moderation producers. Its private publisher accepts no
+external raw MIME; the rejection entry point builds fixed headers and a base64
+UTF-8 plain-text body, rendering at most 4096 comment bytes at a character boundary
+plus a truncation marker. Routing context contains the list ID only, never notice
+authority. The existing outgoing provenance check preserves generated MIME and
+uses `MAIL FROM:<>`; subscriber cooking, archive and digest are bypassed. Original
+message bytes are not copied into the notice or changed in storage.
+
+Disposition, notice publication, moderation log and audit commit or roll back
+together; a repeated decision conflicts without duplicate publication. This is
+durable publication, not exactly-once SMTP delivery. Existing outgoing retry and
+ambiguous-delivery semantics apply. Admission does not authenticate the remote
+envelope sender: moderators should discard suspected spam/forgeries rather than
+reject them. Automatic policy rejections, hold/owner notifications, configurable
+templates/languages and complete anti-backscatter protection are outside this slice.
+
+## Experimental list-scoped posting bans
+
+`db::bans` uses the existing bans schema. Exact mailboxes are normalized through
+the core Address identity; patterns beginning with `^` preserve their original
+case and compile using Rust regex, with a 1024-byte source, 1 MiB compiled-size
+and 64-level nesting limit. Whitespace/control input and unsupported regex syntax
+are rejected before acquiring a writer. Creates/deletes reserve the workflow
+writer and then the list writer, and commit the ban mutation plus immutable
+edge user/token/IP audit in the same transaction. Duplicate creates conflict;
+missing list/ban operations return not-found. Collection SQL filters by list
+before applying stable lexical ordering and bounded LIMIT/OFFSET. Count and page
+are separate reads, not a concurrent snapshot or stable pagination across edits.
+
+REST shares `authorize_list`, JSON/form extraction and native/compat pagination.
+Only list-local rows are exposed; global rows are neither listed nor deleted.
+Posting fact gathering compares exact bans with canonical mailbox identity on
+both sides, while regexes see the original sender. This prevents trailing-dot
+and IDNA spellings from bypassing an exact ban without changing regex case rules.
+The in processor's existing reject decision ACKs the input without children;
+raw retained bytes are unchanged. There is no SMTP-time failure or generated
+rejection notice. Removal affects subsequent policy evaluations, not posts that
+have already passed evaluation. This slice does not fence concurrent ban changes
+against posting publication or alter owner routing. Public/email subscription
+admission is described above; global administration remains absent. SQLite fixture execution is not PostgreSQL,
+full Mailman-client, or live transport acceptance.
+
+## Per-list posting size moderation
+
+Migration `0014_message_size.sql` adds a default-zero, nonnegative
+`max_message_size` column bounded at 2147483647 KiB for portable INTEGER
+storage. Repository updates validate the JSON integer and commit with the
+existing list-config audit transaction. Both schema corpus consumers include
+the additive snapshot without weakening historical equality.
+
+The in runner samples the list setting at policy evaluation and measures the
+original stored bytes (headers plus body), using wide integer arithmetic for
+the KiB conversion. Null-sender, ban and loop decisions retain precedence;
+otherwise an oversized post is held before membership accept can bypass the
+control, including posts from owners. The existing durable moderation path
+retains raw bytes and produces no delivery/archive/digest children on hold.
+An exact-boundary post passes the size check; zero disables only this check.
+The global LMTP transport cap and administrative/command routes are unchanged.
+This does not establish streaming intake or a process-memory bound.
+
+REST config GET/PATCH/PUT and OpenAPI expose the field on both prefixes.
+Only form input converts known numeric config strings (`max_message_size`,
+`next_digest_number`) at the HTTP boundary; JSON strings remain invalid.
+PATCH preserves omitted fields and PUT restores the default-zero limit.
+SQLite fixture coverage is not PostgreSQL or live MTA acceptance.
+
+## Experimental owner forwarding
+
+The LMTP resolver recognizes `-owner` only after exact-list lookup. It derives
+`owner_route` from the envelope recipient, never from message headers/body.
+`mail::owner` conservatively rejects null/unsafe senders, automatic/list traffic,
+malformed headers and own-list posting/suffix/plus routes. Domain identity uses
+the same normalization as intake, while SMTP mailbox validation additionally
+rejects whitespace/control bytes and non-ASCII/non-dot-atom transport addresses.
+
+`db::owner_mail::forward` reserves the list and live input lease, snapshots
+addresses having an owner or moderator membership using `EXISTS` (one transport
+address even with both roles), and rejects empty/unsafe rosters. An outgoing
+child, recipients, `owner_deliveries` provenance, audit and input completion
+commit together. The live deadline is rechecked after the final ACK/audit write;
+stale leases and audit faults roll the whole handoff back. Invalid owner routing
+is explicitly shunted rather than acknowledged or sent to subscribers. No
+archive/digest child or recooked intake blob is created.
+
+The outgoing worker requires job-bound `owner_deliveries` provenance to select
+owner cooking. An arbitrary outgoing context flag is insufficient. Header
+allowlisting retains author/reply/thread/MIME presentation, removes Bcc,
+approval/authentication/transport claims and unrelated controls, preserves body
+octets, adds `Auto-Submitted: auto-forwarded`, and uses a null reverse path.
+It does not apply post subject prefixes or anonymous-list rewriting. This is
+administrative forwarding, not full configurable owner-chain policy or the
+complete notices lifecycle. Prepared-byte tests do not certify remote SMTP
+acceptance, DMARC alignment, PostgreSQL or MTA cutover.
+
+## Lease renewal scheduling and authority
+
+`runners/src/heartbeat.rs::run_while_renewing` delegates to one private
+`renewing` scheduler; its callback still calls the real queue repository's
+`.live().heartbeat`. Initial ownership validation, biased renewal priority,
+TTL/3 cadence and per-renewal timeout are unchanged. Timeout or repository
+failure drops work and returns `LeaseLost`; no new retry or grace period exists.
+Persistent writes retain their own post-lock live-clock fencing.
+
+Paused-time tests drive the same scheduler with controlled renewal futures:
+work outlives a 150ms lease through eight renewals, failed initial validation
+never polls work, mid-operation failure drops work, and a blocked renewal drops
+both futures before an outer watchdog. Actual SQLite tests separately verify
+competing-claim exclusion, exact-expiry recovery, stale-owner rejection, and
+real wrapper renewal before polling work. Holding the sole pool connection
+exercises real timeout cancellation without expiring the still-valid lease.
+This is compositional scheduler/repository evidence, not a proof of real-time
+scheduling latency or a new PostgreSQL/MTA acceptance run.
+
+## Explicit Postfix map publication
+
+`cli/src/aliases.rs` supplies `aliases regen --output DIRECTORY` with an optional
+concrete `--lmtp-target`. One existing list-repository SELECT supplies all three
+maps, including unadvertised lists. BTree sets deduplicate exact recipients and
+active domains. The map generator and LMTP dispatcher share `COMMAND_SUFFIXES`;
+exact list names still win over suffix routing. Owner routing is supported; bounce and
+plus-token routes and unresolved domain aliases are not advertised.
+
+Each output is an anchored POSIX regexp map, not a wildcard-domain transport or
+virtual rewrite. Publication writes/syncs files in a private staging directory,
+syncs it, renames to a new UUID generation on the same filesystem, then syncs the
+parent. Existing generations are never edited. No database/audit write, daemon
+reload, migration, auto-refresh or active-generation pointer is introduced.
+Operators must protect the parent directory and explicitly grant MTA read access.
+This is a snapshot, not a transaction with later list changes or Postfix reload.
+
+Tests exercise actual CLI publication, prior-generation retention, list deletion,
+input rejection, database/I/O failure, audit non-mutation and actual Postfix
+lookup versus LMTP recipient validation. Postmap uses a fixture-only config and
+does not send mail. No full MTA, PostgreSQL or IPv6-connectivity acceptance is
+inferred. See `POSTFIX_MAPS.md` and acceptance ID `P2-MTA-MAPS`.
+
+## Owner browser list settings
+
+`GET/POST /web/lists/{id}/settings`, linked from `/web/admin`, exposes exactly
+`display_name`, `description`, `advertised`, `default_member_action`,
+`default_nonmember_action`, and `archive_policy`. Forms reject unknown,
+duplicate, missing and invalid enum/boolean fields before business mutation;
+text fields retain the ordinary list repository's string contract. The existing
+browser request-body limit, HTML escaping, same-origin checks and CSRF checks
+apply. `default` maps to NULL (the configured server fallback); explicit `defer`
+retains its existing runtime meaning. No bearer authority is created or accepted
+as a substitute for a browser session.
+
+Both read and save use `browser_write_tx` and the shared live `browser_owner_tx`:
+verified list owner or verified server owner, never moderator-only. SQLite
+reserves its writer before reading; PostgreSQL's existing NOWAIT table-lock
+reservation conflicts with ordinary session/credential/user/address/member/list
+DML. Session credentials and expiry are checked after reservation/retry and
+again before commit. The ordinary `ListRepo::update_with_context` now delegates
+to `ListRepo::update_tx`; browser saves call that same validator, locked fresh
+list snapshot, update and attributed `list.config` audit within their authority
+transaction. There is no browser GET snapshot reused at POST, so unrelated
+configuration cannot be restored from a stale form. Concurrent edits to the same
+six exposed fields remain last successful writer wins; no optimistic conflict UI
+is claimed. Broad-lock throughput remains unmeasured.
+
+Evidence: HTTP 404→200 RED→GREEN, SQLite valid/foreign/moderator/revoked authority,
+Origin/CSRF/validation and audit rollback; a shared 12-case causal lock corpus
+observes actual lock failure before committing revocation or an unrelated field
+change. Its SQLite execution passed. Real Chromium saved/reloaded all six fields
+with escaped hostile text and no script element. All required local workspace
+gates passed in `listmngr-composed-final-gates-9d8jigcg`. New PostgreSQL HTTP and
+causal lock tests compile, but their live execution was permission-denied and
+is not certified. See the settings evidence rows in `FEATURE_PARITY.md`.
+
+## Owner member search
+
+The member roster accepts `q` plus `page`. `browser_search_members` lowercases the
+query against canonical stored email, escapes the explicit LIKE escape character
+and wildcard characters, and applies the bound pattern inside the same authorized,
+list/role-constrained SQL before LIMIT/OFFSET. The original unfiltered DB method
+delegates with an empty query, retaining the same live owner transaction boundary.
+Queries over 320 UTF-8 bytes or containing control characters are rejected at the
+HTTP and DB boundaries; SQLite's NUL/LIKE behavior must not produce broader matches
+or diverge from PostgreSQL's text handling.
+
+`webui_member_query.rs` serializes only a local list-derived URL, not an arbitrary
+return URL. Generated previous/next links and hidden policy-form fields retain
+the query/page; both are validated before a policy write. A new GET search resets
+the page. Empty matches have explicit feedback and a clear-search link. Query
+values are escaped in HTML and encoded in URLs. The row/query bounds do not imply
+a bounded SQL scan cost; substring search and broad-lock throughput are unmeasured.
+
+## Browser member posting administration
+
+`api/src/webui_admin.rs` serves the authenticated `/web/admin` index, per-list
+`/web/lists/{id}/members` roster and protected member-policy POST. Account navigation
+links to the index. HTML uses escaped identities and explicit unique label/control
+associations. Both enumerations return 20 rows with one lookahead; page offsets
+are capped. The index applies owner permission before LIMIT, not after fetching
+a global page. Member-role rows alone are shown; owner/moderator-role rows are not
+editable through this surface.
+
+`db/src/web_admin.rs` owns live session/credential validation, verified owner
+membership (including AsUser consistency), or verified server-owner authority.
+The shared DML-conflicting browser transaction protects both reads and writes.
+Policy updates constrain member ID, list ID and role in SQL, write an attributed
+`member.update` audit in the same transaction, and recheck session expiry after
+the writes. Audit failure rolls back the policy. No caller-provided admin flag or
+synthetic API token is used.
+
+Only `members.moderation_action` changes. The existing runner reads this field
+through `policy_facts::gather_context`; this increment does not alter transport,
+already-held dispositions, delivery snapshots or policy evaluation. In particular,
+explicit `defer` currently accepts after safety checks, whereas NULL falls back to
+the list default; the UI names these separately. Mass operations,
+role administration remain future work. Causal lock/revocation
+coverage here is SQLite; PostgreSQL has real HTTP/update/audit-rollback coverage,
+not a new causal contention matrix. Broad-lock throughput remains unmeasured.
+
+## Authenticated membership departure
+
+`api/src/webui_membership.rs` exposes `/web/members/{id}/leave`: GET is a
+non-mutating confirmation, POST uses the existing strict Origin/CSRF boundary.
+The account link no longer routes members through an advertised-only list page.
+The preview names the exact canonical membership address and list and offers
+Cancel; it does not take a caller-supplied email or grant global-admin deletion.
+
+`db/src/web_membership.rs` uses the shared browser writer boundary for both preview
+and commit. Session/credential authority, verified address ownership, member role
+and AsUser identity are rechecked inside it. The existing membership/preferences
+deletion helper and attributed `member.delete` audit commit together, with a final
+session check after the writes. Replay, foreign membership and owner/moderator-role
+IDs are denied. Accounts, addresses, other memberships and administrative roles
+are preserved. This does not cancel immutable queued delivery/digest snapshots or
+change the anonymous email-confirmation workflow. Coarse-lock throughput remains
+open; dedicated causal contention here is SQLite, while PostgreSQL covers HTTP
+behavior and audit-failure rollback.
+
+## Authenticated password change
+
+`api/src/webui_password.rs` exposes `/web/account/password` GET/POST with the
+existing Origin/CSRF/session checks, 8 KiB form limit and shared 5/min login
+work limiter. The current password is required, confirmation must match, and
+the database's configured strength/1024-byte password policy applies. Password
+fields are never reflected into HTML, logged or included in audit data.
+
+`db/src/web_password.rs` verifies the current hash and computes the replacement
+before acquiring browser writer locks. Inside that boundary it revalidates session
+authority and verified account-address availability, conditionally updates only
+the proved credential hash/version, deletes all that user's browser sessions and
+records `user.password` attributed to that user. A final expiry check after writes
+and audit rolls back the whole operation if authority has expired. Credential,
+session and audit rollback are tested together; other users' sessions survive.
+The response clears the cookie and requires a fresh login. Independent API tokens,
+email reset/recovery, signup, 2FA and coarse-lock throughput are separate concerns.
+
+## Archive conversation hints
+
+The archive processor validates the message's own external ID as before, but treats
+References/In-Reply-To as optional hints. It selects the first valid Message-ID
+from References, otherwise the first valid In-Reply-To, otherwise its own hash.
+Invalid hint entries are skipped rather than failing archival with invalid
+Message-ID. Existing repository completion still resolves the candidate to an
+indexed parent root inside its list-lock transaction and unifies provisional
+roots when a parent arrives late. Index/audit/final lease ACK fencing is unchanged.
+Single/list parser representations are handled; no subject-based merging, historical
+reindex, or automatic retry of previously shunted jobs is introduced.
+
+## Session-authorized archive browser
+
+`api/src/webui_archive.rs` serves `/web/lists/{id}/archive` through the existing
+browser security-header middleware. It reads the existing policy-gated archive
+repository without synthesizing a bearer identity. Public archives remain anonymous;
+private archives use the DB-owned browser authority described below. The repository
+rechecks policy at its read boundary and
+returns currently cooked MIME-derived subject/plain text, which the page HTML
+escapes rather than rendering message HTML. Requests select at most 21 rows to
+render 20 plus a next-page indication. Page numbers are 1–5001; search and thread
+values are at most 200 UTF-8 bytes. Links URL-encode filters and HTML-escape URLs.
+Search is the existing bounded literal SQL substring search, not ranked full text.
+Per-message links use `?message={hash}` and `ArchiveRepo::read_browser_message`, selecting
+one exact list-scoped hash under the same repository authority and current
+publication cooking as archive search. Unrelated raw messages are not
+fetched or decoded. Hashes must be nonempty and at most 200 UTF-8 bytes. Combining
+a permalink with a nonempty search/thread filter or page other than 1 is rejected,
+not silently ignored. Missing hashes return 404; links remain subject to current
+private/never policy, and are not a grant of access. These are native browser URLs,
+not a claim of HyperKitty URL compatibility.
+The browser's `format=mbox` projection uses the same authorized selection and
+cooked MIME payloads with the existing mboxrd serializer. It fetches only 20 rows,
+not the HTML paginator's 21st look-ahead row, or exactly one permalink message.
+The response is an `application/mbox` attachment named `archive.mbox` under browser
+no-store/nosniff policy. The generated download URL preserves page, search, thread
+and optional message identity; unsupported formats are rejected. This bounded
+selection download is not full-archive backup/export completeness or a new
+aggregate byte-memory limit.
+`db/src/browser_archive.rs` owns private page/thread/search/message/export reads.
+It acquires the existing browser DML-conflicting serialization boundary, then
+revalidates the opaque session token, CSRF/user binding, credential version,
+expiry and verified address/member ownership (including AsUser identity). A
+server-owner flag does not bypass membership. Current archive policy and all raw
+rows are read on that same transaction; session validity is checked again after
+the archive SELECT before commit, then the shared publication renderer handles
+the authorized bytes. No business state or audit row is written by an archive read.
+The account page links directly to enabled archives, including unadvertised lists.
+Public-only fallback keeps its existing authorization-qualified SELECT.
+
+This implementation reuses coarse browser writer locks, including unrelated
+tables; its throughput/contention cost is not resolved. SQLite actual-writer-wait
+regressions cover revocation and expiry; PostgreSQL executes the HTTP matrix but
+does not yet have a private-archive-specific causal contention matrix. Richer
+thread presentation remains unimplemented.
+
+Individual attachments use `?message={hash}&attachment={zero_based_index}` through
+the same `read_browser_message` authorization and list/hash selection; no spool or
+filesystem access is introduced. Search/thread/page conflicts and mbox overrides
+are rejected. `mail/src/attachments.rs` projects the pinned MIME parser's attachment
+sequence from authorized cooked bytes. Input is capped at 10 MiB, attachment count
+at 64, displayed names at 200 characters; parser-reported encoding errors reject
+the projection instead of exposing its recovered fallback as a valid download.
+Binary parts retain transfer-decoded bytes. Text/HTML attachments are decoded
+from the selected part's original `offset_body..offset_end` in the parsed message,
+using its transfer encoding, not the parser's charset-normalized display string.
+This preserves non-UTF-8 text payload octets and content line endings without
+changing archive display text or bypassing current publication/authorization.
+These limits apply after the repository read/publication stage, not to total DB
+transfer, earlier parsing, nested-content privacy or process memory. Oversized or
+invalid messages remain readable but show an attachment-unavailable notice.
+Names are HTML-escaped and never used in paths or response headers. Downloads
+always use `application/octet-stream`, `attachment; filename=attachment-N.bin`,
+and existing no-store/nosniff middleware, including HTML attachments. This does
+not scan downloaded files or make them safe to execute locally.
+
+## Composed-source verification boundary
+
+Parent verification of the integrated browser/login, held-recipient, email,
+digest/archive and lease source passed the required workspace artifact, format,
+locked build/test, strict Clippy, deny and audit gates (with only the documented
+`RUSTSEC-2023-0071` audit ignore). The PostgreSQL script executed all 13 exact live
+tests in a newly created fixture database. Four additional PostgreSQL UI tests
+executed login issuance, forms/session bounds and in-flight revocation/authority
+matrices, each in its own new database. Their source fingerprint was unchanged;
+all created databases were dropped and their absence verified.
+
+Actual Chromium exercised login, preferences, confirmation, held review and
+logout with database effect assertions. Confirmation used a private DB token
+bridge, not SMTP. These gates do not establish PostgreSQL recipient-selection
+contention coverage, hosted deployment acceptance, or full Mailman parity.
+Exact commands and logs are recorded in `FEATURE_PARITY.md`.
+
+## Mailbox identity versus transport
+
+Subscription workflows store normalized `email` for identity/rate limits and
+`original_email` for eventual delivery (migration `0010_workflow_mailbox.sql`).
+Confirmation validates that the two normalize identically and preserves existing
+address ownership and spelling. It does not verify a pre-registered user account:
+list membership confirmation is not account authentication. Regular recipient
+selection emits `original_email`; own-post exclusion compares normalized identity.
+Legacy workflows can only backfill the spelling previously persisted, not recover
+case that was already lost. Digest recipient spelling needs composed verification.
+
 This document describes the implemented Phase 0/1 runtime and experimental opt-in Phase 2 mail role. Phase 2 acceptance and later roadmap components remain incomplete.
+
+## Composed acceptance boundaries
+
+### Lease-clock follow-up
+
+Queue and sibling archive/digest repositories preserve explicit-now fixture APIs
+and opt into live clocks in production. Completion locks the list and queue,
+performs publication writes, then samples the clock again immediately before ACK;
+an expired lease rolls back publication and audit together. The archive runtime
+uses `process_live`, while deterministic callers retain `process(..., now_ms)`.
+Injected-clock regressions exercise pool/row/list/publication contention with
+valid-lease controls on SQLite and isolated PostgreSQL. These gates do not certify
+browser transaction-bound authorization or standalone live email-only acceptance.
+
+The PostgreSQL gate explicitly runs digest publish rollback/single-winner and
+concurrent list-settings PATCH regressions in isolated schemas. SQLite semantic
+schema extraction includes implicit uniqueness of an `INTEGER PRIMARY KEY` rowid
+alias, not only entries exposed by `pragma_index_list`.
+
+Accepted held posts can start independent outbound, digest and archive jobs.
+SMTP completion alone is not queue quiescence. The real-client replay probe
+waits for all accepted child jobs to finish before asserting an unchanged queue
+snapshot, while retaining the duplicate-audit and exactly-one-delivery checks.
+
+## Durable email-command integration
+
+`listmngr_core::EmailCommand` is the single serialized command model. The mail
+adapter parses bounded MIME carriers without depending on the DB; inbound LMTP
+stores that typed command in durable context and the `in` worker dispatches it
+before posting-policy evaluation. Exact list addresses take precedence over
+supported command suffixes. Automatic/null envelope senders are rejected for
+commands; unsupported syntax is a permanent DATA failure rather than a silent
+posting route. `-owner` uses the separate administrative route above; other
+unsupported command families remain rejected.
+
+The workflow repository commits command ACK, challenge/help notice, cooldown,
+membership/token effects and audit together. Production calls `.live()`; the
+shared injectable lease clock is sampled after the rate/queue locks and again
+immediately before the final fenced ACK, including throttled/unknown-list paths.
+Post-business expiry rolls the entire transaction back. Confirmation still binds
+to the stored mailbox, never a mailbox argument from the reply. Migration 0010
+preserves transport spelling; 0012 stores bounded per-list/mailbox help cooldowns.
+The original Phase 1 schema snapshot is unchanged; additive schema assertions
+use the existing separate composed snapshot.
+
+Help notice rendering in `db/src/workflows.rs` now emits a list-derived
+`Reply-To` pointing to the request bot, while retaining the owner `From` address
+and explicitly documenting separate human contact. Users must replace the help
+subject with one supported command; this does not add natural-language parsing,
+subject fallback, scripts, or new commands. The SMTP fixture parses the delivered
+help's Reply-To, submits a `join` there via `InboundHandler`, consumes its leased
+command through the live-clock workflow repository, then observes a second SMTP
+DATA containing the confirmation. Both sends use the exact envelope mailbox and
+null reverse path; input From/Reply-To/body are not reflected. Both input/output
+jobs finish, with no membership, owner delivery, archive or digest post created.
+This is handler → SQLite → actual outbound SMTP fixture evidence, not an LMTP
+wire session, live MTA, PostgreSQL or whole-product acceptance.
+
+Passing commands: `cargo test --locked -p listmngr-runners --lib help_reply_reaches_command_bot_and_sends_confirmation_not_owner_mail -- --nocapture`;
+`cargo test --locked -p listmngr-mail -p listmngr-db -p listmngr-runners --all-targets`;
+`cargo clippy --locked -p listmngr-db -p listmngr-runners --all-targets --all-features -- -D warnings`.
+Logs: `target/help-reply-evidence/`; see `P3-HELP-REPLY` for RED and gate details.
+
+Both challenge and help notices register their specific outgoing job in
+`workflow_notices` (migration 0011), atomically with spool/audit. Outbound bypass
+uses that DB provenance, not a JSON notice marker or Auto-Submitted header.
+Forged markers remain ordinary posts subject to cooking and the list bounce
+sender. Digest provenance, cooked archive publication, and accepted-post fanout
+to Out + Digest + Archive remain unchanged. `policy_facts` continues to emit
+original recipient spelling and compare normalized own-post identity.
+
+Standalone live email-only join/leave/restart acceptance is **BLOCKED by denied
+authorization**. Neither the denied harness nor an equivalent standalone flow
+was executed during integration. Existing fixture unit/DB/runner tests are
+permitted regression evidence; they do not establish live email-only acceptance
+or the broader Mailman product contract.
 
 ## Dependency direction
 
@@ -21,7 +1581,7 @@ Dependencies must not point back up the graph. The nine workspace crates have th
 | `listmngr-runners` | Opt-in LMTP intake, inbound policy, outbound SMTP, heartbeat and role supervision; not full Phase 2 acceptance |
 | `listmngr-archive` | Future archive boundary; no Phase 5 archive claim |
 | `listmngr-api` | Axum `/api/v1` and Mailman-compatible `/3.1` adapters, auth, OpenAPI |
-| `listmngr-web` | Web adapter boundary; full administration UI is Phase 4 |
+| `listmngr-web` | Dependency-free escaped semantic HTML and local responsive CSS used by the browser router; not full Phase 4 administration |
 | `listmngr` (`cli`) | Binary commands, configuration bootstrap, migration, and HTTP process startup |
 
 ## Process and request model
@@ -30,7 +1590,106 @@ Dependencies must not point back up the graph. The nine workspace crates have th
 
 `/healthz` proves that the process can answer. `/readyz` proves database-backed readiness. `listmngr status` is an HTTP client of these two endpoints, in that order, not a second database connection. It uses `web.listen`, maps wildcard binds to IPv4/IPv6 loopback, disables environment proxies and redirects, and limits each request to two seconds. Exit codes distinguish transport failure (3), unhealthy HTTP status (4), and not-ready HTTP status (5). The same binary probe runs in the shell-free container. None of these signals is a substitute for end-to-end mail delivery evidence.
 
+## Browser boundary
+
+`api::webui` mounts `/web` outside API Bearer/Basic middleware but inside the
+outer request-correlation layer. `web` only renders escaped HTML and local CSS;
+there is no JavaScript dependency or fabricated archive endpoint. CSP denies
+scripts, external resources and framing. Trace logging records paths, not query
+strings. `Referrer-Policy: strict-origin` strips credentials in paths/queries while
+allowing Chromium native form POSTs to retain their same-origin Origin header.
+
+Migration `0009_web_sessions.sql` stores SHA-256 session-token digests, CSRF
+secrets, optional user IDs, credential versions and fixed expiry. Login rotates
+and audits atomically; logout revokes and audits atomically. Password changes
+invalidate a session on subsequent lookup. Lookup checks time after acquiring a
+pool connection; session issuance cleans at most 100 expired rows. Browser
+credentials are not API scope tokens and cannot authorize `/api/v1` calls.
+Exact configured Origin and constant-time CSRF comparison protect all form
+POSTs, including login and anonymous request/confirm forms. HTTPS sets Secure;
+HTTP is allowed only with a configured loopback hostname/address. A small
+node-local global login bucket bounds password hashing (five attempts/minute).
+
+Self-service actions require current verified address ownership; AsUser records
+also require matching user identity. Moderator access requires current verified
+linked owner/moderator membership for the specific list, or server-owner status
+and a verified linked address. Held review calls the existing transactional
+moderation repository, preserving pending-state fencing, comments, audit and real
+queue/recipient effects. Browser audit currently attributes user, not API token
+or socket peer IP. Public forms call the existing durable subscription workflow;
+GET confirmation is non-consuming. Neither browser acceptance nor repository
+notice inspection proves SMTP delivery.
+
+The public directory, account subscriptions, moderation index and held queues use
+SQL LIMIT 21 with 20 rendered records, ordered pagination, and an explicit maximum
+page of 10,000. Account queries filter verified address ownership, subscription
+mode and member role before LIMIT/OFFSET; moderation discovery uses SQL EXISTS
+for verified list roles or verified server-owner authority before pagination.
+Held raw previews use SQL `substr` before fetching bytes, capped at 65,536 bytes
+each. Resource-specific write/held authorization still enumerates memberships;
+full large-install scalability is not established. Authorization is checked at handler
+entry, outside the downstream mutation transaction: concurrent ownership/role or
+credential changes during an in-flight action have not been linearizability-tested.
+A subsequent browser-write repair supersedes the preceding handler-only warning
+for preferences and moderation mutations: `browser_preferences` and
+`browser_review` revalidate session, credential version, expiry and authority in
+the business/audit transaction. SQLite uses BEGIN IMMEDIATE; PostgreSQL uses
+SHARE ROW EXCLUSIVE NOWAIT locks conflicting with ordinary revocation DML and
+rolls back before retry. These coarse locks serialize browser writes; throughput
+has not been benchmarked. GET authorization and held recipient resolution before
+the transaction remain separate open boundaries; the held-recipient snapshot
+follow-up is explicitly NOT closed by the login repair.
+
+`Database::browser_login` now owns password verification through session issuance.
+Its private non-Debug proof contains the exact Argon2 hash, credential version,
+user ID and canonical verified address. Hash verification finishes before writer
+reservation. `issue_browser_login` acquires `browser_write_tx`, samples the clock,
+and rechecks exact credential material, live verified address ownership, and the
+predecessor token/CSRF/user/expiry/version. Rotation, bounded expiry cleanup and
+`web.login` audit share that transaction; denial or audit failure mints nothing.
+The older `create_web_session(Some(user), ...)` is a trusted low-level provisioning
+primitive, NOT a password-authentication boundary; the HTTP login never calls it.
+No schema, pagination, preference or held-recipient selection behavior is changed.
+
+Fresh commands from `/tmp/listmngr-webui`:
+
+```sh
+CARGO_TARGET_DIR=/tmp/listmngr-webui/target cargo test -p listmngr-db --lib browser_login_issuance -- --nocapture
+CARGO_TARGET_DIR=/tmp/listmngr-webui/target cargo clippy -p listmngr-db -p listmngr-api --all-targets -- -D warnings
+CARGO_TARGET_DIR=/tmp/listmngr-webui/target cargo test -p listmngr-api -p listmngr-db
+```
+
+All passed; README records the explicitly executed disposable PostgreSQL command.
+Both backend lock matrices observe actual database busy/lock-not-available errors
+before committing ordinary competing DML. They cover valid login, hash/version
+changes, address unverify/unlink/reassignment, predecessor expiry/rotation/CSRF,
+and audit rollback. The deterministic initial reset test failed against the old
+issuance handoff while the valid-login counterpart passed, then both passed after
+the repair. Later lock matrices are supplemental coverage, not retroactive RED.
+
+
 ## Data and transaction boundaries
+
+Posting defaults are nullable per-list overrides over site defaults. The
+announcement preset supplies `hold`, including an additive migration for existing
+announcement lists. The same persisted data feeds inbound policy. Config PATCH
+reserves the writer before its read/merge; isolated PostgreSQL lock-wait and SQLite
+audit-failure tests protect that boundary. The pure digest renderer uses pinned
+MIME parser/builder dependencies and stable issue IDs/boundaries; its passing
+tests do not establish the still-in-progress durable digest/archive integration.
+
+### Explicit uncertainty recovery
+
+`listmngr-db::queue_operations` provides operator resolution separate from normal
+lease-owned delivery. `queue recipients` exposes email/status/detail without raw
+mail or attempt tokens. `queue resolve` locks an inactive outgoing/quarantine job,
+conditionally changes exactly one ambiguous recipient, and records `queue.resolve`
+with the operator reason in the same transaction. Acknowledged retry restores the
+outgoing queue and only the selected recipient's pending state; confirmed sent or
+failed outcomes do not schedule mail. Active/stale/repeated resolutions conflict.
+Automatic workers still never retry an unknown result. CLI execution is trusted
+local administration, not an HTTP self-service authorization capability.
+
 
 PostgreSQL is the intended production backend; current mail-path production acceptance remains open. SQLite is a single-node development/test backend. SQLx migrations are embedded in `listmngr-db` and applied by `listmngr migrate` or server startup. Repository statements use numbered parameters accepted by both backends, and the live PostgreSQL contract exercises repeated migration plus Domain/User/Address/List/Member/Preferences/Token/Audit behavior rather than connectivity alone. Business mutations, owned-row cleanup, and their audit records share one transaction. IDs and timestamps use portable textual forms at repository boundaries.
 
@@ -123,9 +1782,9 @@ is dropped after the final DATA result rather than blocking publication on QUIT.
   can therefore use stale time after waiting beyond the lease deadline, including
   `begin_delivery`. Real two-connection deadline-under-lock coverage and an explicit
   production/synthetic clock seam remain required.
-- The role requires `mta.enabled` and explicit
-  `mta.smtp_tls = "plaintext_trusted_relay"`; transport TLS and SMTP AUTH are not
-  implemented. Do not expose this experimental role as an untrusted public MTA.
+- The role requires `mta.enabled` and explicit `plaintext_trusted_relay` or
+  verified `required` STARTTLS (see current transport section above). SMTP AUTH
+  remains unsupported. Do not expose the unencrypted LMTP listener as a public MTA.
 - No DKIM/DMARC/ARC, notices/bounce processing, digests, subscription workflows,
   archive, full administration UI, or Mailman migration is provided by this slice.
 
@@ -176,3 +1835,51 @@ The real-client harness feeds its fixture password through stdin. The PostgreSQL
 ## Security boundaries
 
 Bearer tokens carry scopes and optional list/domain bounds. Mailman Basic compatibility is disabled by default, is accepted only below `/3.1`, and, when configured, trusts the actual socket peer CIDR—not forwarded headers. `/api/v1` accepts Bearer authentication and successful typed GET responses carry content-derived ETags; `/3.1` retains the Mailman-compatible JSON shape instead. Secrets are returned once and only digests persist. Reverse proxies must sanitize forwarding headers and terminate TLS according to the operator threat model. See `SECURITY.md` for threats and residual risks.
+
+
+## P4-BOUNCE-WEB-RECOVERY — bounded local acceptance verified
+
+Logged-in web confirmation now offers `GET /web/members/{id}/recover` and an
+existing-CSRF/configured-Origin protected POST at the same URL. Only a live
+session's verified, owned ordinary membership with **direct** `by_bounces`
+preferences qualifies (as-user memberships must also match the session user).
+The GET never mutates; the POST resets delivery status, bounce score and warning
+cycle atomically with session-user-attributed `bounce.recover`. Other preferences
+and historical bounce events are untouched. General preference editing still
+rejects restricted reasons. The existing browser transaction barrier coordinates
+with scorer/maintenance DML, with live-session revalidation after writes.
+
+The user must verify their mailbox is working before restoring delivery. This
+slice sends no challenge, probe or recovery email and provides no token-based
+recovery. Earlier no-web-recovery evidence describes the previous implementation;
+this narrowly authorized action does not establish full P4 or Mailman replacement.
+Frozen `target/web-bounce-recovery-parent-gates-20260909-072736/` passed 54/54
+gates: workspace558/0/36, mandatory PostgreSQL19/0/0, and native Chromium recovery
+with actual restored SMTP delivery after scheduler/restart on both engines.
+Foreign-member, bad CSRF/Origin, revoked-session and generic-preference bypass
+controls preserve state; the healthy and still-disabled recipients remain distinct.
+The SQL assertions retain complete historical bounce rows and exact audit actor.
+SQLite's eight-case observed-BUSY matrix covers post-wait revocation/natural expiry
+and moderator changes with a valid counterpart. DB rollback tests preserve status,
+mode, score and warning state; an enabled maintenance control excludes recovery.
+No recovery-specific PostgreSQL contention matrix, audit/COMMIT-wait expiry proof,
+or same-identity multi-role/list execution matrix is claimed. Already-published
+warning jobs remain durable; recovery cannot recall them or mail already sent.
+
+Build/fmt/strict Clippy/client/browser/DKIM/TLS/AUTH/security passed with the
+documented advisory exception; 334/334 source/harness hashes were stable, and
+bounded independent static review found no P1/P2. Receipt:
+`target/web-bounce-recovery-final-receipt.json`. Acceptance prose is a separately
+checked post-run documentation change. Initial sequential RED/GREEN is recorded
+in `target/web-bounce-recovery-handoff.md`; post-implementation security controls
+are supplemental coverage, not retroactive strict per-guard TDD.
+
+## Ordinary DSN issuance boundary
+
+Migration 0026 binds new message intake to immutable list epochs and published
+ordinary recipients to planned memberships. Opt-in `begin_delivery_with_dsn`
+commits reservation + immutable HMAC issuance + audit before SMTP, with the final
+lease fence after the last audit. The shared singleton transport negotiates ENVID
+using current EHLO DSN capability, including after STARTTLS/AUTH. Historical
+unbound jobs are not adopted; null/internal notices and digests are excluded.
+See [DSN_ISSUANCE.md](DSN_ISSUANCE.md) for exact authority and evidence limits.

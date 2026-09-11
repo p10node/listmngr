@@ -3,7 +3,21 @@
 > Mailman 3 alternative (Core + Postorius + HyperKitty + mailman-web + django-mailman3 + mailmanclient) viết bằng Rust.
 > Single binary, feature parity, UI hiện đại, security-first.
 
-## Implementation status — development checkpoint (2026-09-06)
+## Verification update — bounded acknowledgement (2026-09-07)
+
+The historical checkpoint below is not the latest implementation inventory.
+`P3-BOUNCE-ACK` in `FEATURE_PARITY.md` records the current bounded CLI operator
+acknowledgement and SQL-filtered backlog: workspace 457/0/30 ignored, full static
+checks and fresh security checks passed (deny required an isolated-fetch retry).
+The canonical `scripts/test-postgres.sh` gate passed 13 tests on an owned,
+disposable PostgreSQL 14.24 cluster; a separate real CLI/PG acknowledgement,
+retained-raw and audit tracer also passed. Fixtures were stopped and removed.
+This supersedes the historical "no current PostgreSQL PASS" below only for that
+explicit scope. Other server versions, PG acknowledgement contention, live MTA,
+full bounce correlation/scoring and production replacement remain unverified.
+The normative phase requirements and checkboxes are unchanged.
+
+## Historical implementation checkpoint (2026-09-06)
 
 This document is the **normative product contract and future roadmap**, not an
 inventory of delivered features. Its original requirements, examples, phase
@@ -783,7 +797,7 @@ Mục tiêu: tạo domain/list/user/member qua REST + CLI; `mailmanclient` subse
 
 Mục tiêu: gửi thư vào list → member nhận; hold/accept qua REST.
 
-Current bounded status (not completion of the checkboxes below): database raw
+Historical bounded checkpoint (2026-09-06; not completion of the checkboxes below): database raw
 intake, claim/lease/retry/shunt, standalone filesystem storage, CLI
 `queue inject/show/ls`, heartbeat, repository `unshunt`, atomic child handoff,
 opt-in supervisor and LMTP/inbound/outbound workers, held REST, and durable
