@@ -26,6 +26,14 @@ async fn seeded_list(db: &Database) -> listmngr_core::ListId {
         })
         .await
         .unwrap();
+    // Hold notices are covered by their own tests.
+    db.lists()
+        .update(
+            &list_id,
+            &serde_json::json!({"respond_to_post_requests": false, "admin_immed_notify": false}),
+        )
+        .await
+        .unwrap();
     list_id
 }
 

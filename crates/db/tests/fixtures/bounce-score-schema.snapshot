@@ -1,0 +1,2 @@
+C|mailing_lists|bounce_info_stale_after|integer|required|7
+C|mailing_lists|process_bounces|integer|required|0

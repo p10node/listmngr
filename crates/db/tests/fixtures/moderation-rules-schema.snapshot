@@ -1,0 +1,8 @@
+C|mailing_lists|administrivia|integer|required|1
+C|mailing_lists|require_explicit_destination|integer|required|1
+C|mailing_lists|acceptable_aliases|text|required|[]
+C|mailing_lists|accept_these_nonmembers|text|required|[]
+C|mailing_lists|hold_these_nonmembers|text|required|[]
+C|mailing_lists|reject_these_nonmembers|text|required|[]
+C|mailing_lists|discard_these_nonmembers|text|required|[]
+C|mailing_lists|moderator_password|text|optional|-
