@@ -1,3 +1,26 @@
+#[path = "rest/bans.rs"]
+mod bans;
+#[path = "rest/bounce_increment.rs"]
+mod bounce_increment;
+#[path = "rest/bounce_maintenance.rs"]
+mod bounce_maintenance;
+#[path = "rest/bounce_notice.rs"]
+mod bounce_notice;
+#[path = "rest/bounce_score.rs"]
+mod bounce_score;
+#[path = "rest/goodbye.rs"]
+mod goodbye;
+#[path = "rest/goodbye_unsubscribe.rs"]
+mod goodbye_unsubscribe;
+#[path = "rest/smtp_bounces.rs"]
+mod smtp_bounces;
+#[path = "rest/subject_prefix.rs"]
+mod subject_prefix;
+#[path = "rest/template_uris.rs"]
+mod template_uris;
+#[path = "rest/welcome.rs"]
+mod welcome;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
@@ -659,6 +682,441 @@ async fn create_configurable_list(app: &axum::Router, token: &str) {
         .status(),
         StatusCode::CREATED
     );
+}
+
+#[tokio::test]
+async fn dmarc_config_roundtrips_and_rejects_conditional_transitions() {
+    let (app, token, _) = setup(&["admin"]).await;
+    create_configurable_list(&app, &token).await;
+    for prefix in ["/api/v1", "/3.1"] {
+        let uri = format!("{prefix}/lists/dev.example.com/config");
+        for (method, payload, status) in [
+            (
+                "PATCH",
+                r#"{"dmarc_mitigate_action":"munge_from","dmarc_mitigate_unconditionally":true}"#,
+                StatusCode::OK,
+            ),
+            (
+                "PATCH",
+                r#"{"dmarc_mitigate_unconditionally":false}"#,
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "PATCH",
+                r#"{"dmarc_mitigate_action":"wrap_message"}"#,
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "PATCH",
+                r#"{"dmarc_mitigate_action":"reject"}"#,
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "PATCH",
+                r#"{"dmarc_mitigate_action":"discard"}"#,
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "PUT",
+                r#"{"dmarc_mitigate_action":"munge_from"}"#,
+                StatusCode::BAD_REQUEST,
+            ),
+        ] {
+            assert_eq!(
+                call(&app, method, &uri, Some(&token), Some(payload))
+                    .await
+                    .status(),
+                status,
+                "{prefix} {payload}"
+            );
+        }
+        let response = call(&app, "GET", &uri, Some(&token), None).await;
+        let value: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(value["dmarc_mitigate_action"], "munge_from");
+        assert_eq!(value["dmarc_mitigate_unconditionally"], true);
+        assert_eq!(
+            call(&app, "PUT", &uri, Some(&token), Some("{}"))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        let response = call(&app, "GET", &uri, Some(&token), None).await;
+        let value: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(value["dmarc_mitigate_action"], "no_mitigation");
+        assert_eq!(value["dmarc_mitigate_unconditionally"], false);
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                &uri,
+                Some(&token),
+                Some(r#"{"dmarc_mitigate_action":"munge_from"}"#)
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        for method in ["PATCH", "PUT"] {
+            assert_eq!(
+                call_form(
+                    &app,
+                    method,
+                    &uri,
+                    &token,
+                    "dmarc_mitigate_action=munge_from&dmarc_mitigate_unconditionally=true"
+                )
+                .await
+                .status(),
+                StatusCode::OK
+            );
+        }
+        assert_eq!(
+            call(&app, "PUT", &uri, Some(&token), Some("{}"))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+}
+
+#[tokio::test]
+async fn message_size_config_roundtrips_and_put_resets_on_both_prefixes() {
+    let (app, token, _) = setup(&["admin"]).await;
+    create_configurable_list(&app, &token).await;
+    for prefix in ["/api/v1", "/3.1"] {
+        let uri = format!("{prefix}/lists/dev.example.com/config");
+        for (method, payload, expected) in [
+            ("PATCH", r#"{"max_message_size":7}"#, 7),
+            ("PATCH", r#"{"description":"retains size"}"#, 7),
+            ("PUT", r#"{"description":"resets size"}"#, 0),
+        ] {
+            assert_eq!(
+                call(&app, method, &uri, Some(&token), Some(payload))
+                    .await
+                    .status(),
+                StatusCode::OK
+            );
+            let response = call(&app, "GET", &uri, Some(&token), None).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["max_message_size"], expected, "{prefix} {method}");
+        }
+        assert_eq!(
+            call_form(
+                &app,
+                "PATCH",
+                &uri,
+                &token,
+                "max_message_size=2&next_digest_number=9"
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        for (field, expected) in [("max_message_size", 2), ("next_digest_number", 9)] {
+            let response = call(&app, "GET", &format!("{uri}/{field}"), Some(&token), None).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                &uri,
+                Some(&token),
+                Some(r#"{"max_message_size":"2"}"#)
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            call_form(&app, "PATCH", &uri, &token, "max_message_size=invalid")
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                &uri,
+                Some(&token),
+                Some(r#"{"max_message_size":-1}"#)
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+}
+
+#[tokio::test]
+async fn recipient_limit_config_roundtrips_and_put_resets_on_both_prefixes() {
+    let (app, token, _) = setup(&["admin"]).await;
+    create_configurable_list(&app, &token).await;
+    for prefix in ["/api/v1", "/3.1"] {
+        let uri = format!("{prefix}/lists/dev.example.com/config");
+        for (method, payload, expected) in [
+            ("PATCH", r#"{"max_num_recipients":7}"#, 7),
+            ("PATCH", r#"{"description":"retains size"}"#, 7),
+            ("PUT", r#"{"description":"resets size"}"#, 0),
+        ] {
+            assert_eq!(
+                call(&app, method, &uri, Some(&token), Some(payload))
+                    .await
+                    .status(),
+                StatusCode::OK
+            );
+            let response = call(&app, "GET", &uri, Some(&token), None).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["max_num_recipients"], expected, "{prefix} {method}");
+        }
+        assert_eq!(
+            call_form(
+                &app,
+                "PATCH",
+                &uri,
+                &token,
+                "max_num_recipients=2&next_digest_number=9"
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        for (field, expected) in [("max_num_recipients", 2), ("next_digest_number", 9)] {
+            let response = call(&app, "GET", &format!("{uri}/{field}"), Some(&token), None).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                &uri,
+                Some(&token),
+                Some(r#"{"max_num_recipients":"2"}"#)
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            call_form(&app, "PATCH", &uri, &token, "max_num_recipients=invalid")
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                &uri,
+                Some(&token),
+                Some(r#"{"max_num_recipients":-1}"#)
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+}
+
+#[tokio::test]
+async fn acceptance_rules_config_roundtrips_and_password_is_write_only() {
+    let (app, token, _) = setup(&["admin"]).await;
+    create_configurable_list(&app, &token).await;
+    for prefix in ["/api/v1", "/3.1"] {
+        let uri = format!("{prefix}/lists/dev.example.com/config");
+        let initial = response_json(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(initial["administrivia"], true, "{prefix}");
+        assert_eq!(initial["require_explicit_destination"], true, "{prefix}");
+        assert_eq!(
+            initial["acceptable_aliases"],
+            serde_json::json!([]),
+            "{prefix}"
+        );
+        assert_eq!(
+            initial["hold_these_nonmembers"],
+            serde_json::json!([]),
+            "{prefix}"
+        );
+        assert!(initial.get("moderator_password").is_none(), "{prefix}");
+
+        let patch = r#"{
+            "administrivia": false,
+            "require_explicit_destination": false,
+            "acceptable_aliases": ["^.*@example\\.com$"],
+            "accept_these_nonmembers": ["friend@example.com"],
+            "hold_these_nonmembers": ["^held@"],
+            "reject_these_nonmembers": [],
+            "discard_these_nonmembers": ["junk@example.com"],
+            "moderator_password": "let me in"
+        }"#;
+        assert_eq!(
+            call(&app, "PATCH", &uri, Some(&token), Some(patch))
+                .await
+                .status(),
+            StatusCode::OK,
+            "{prefix}"
+        );
+        let saved = response_json(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(saved["administrivia"], false, "{prefix}");
+        assert_eq!(saved["require_explicit_destination"], false, "{prefix}");
+        assert_eq!(
+            saved["acceptable_aliases"],
+            serde_json::json!(["^.*@example\\.com$"]),
+            "{prefix}"
+        );
+        assert_eq!(
+            saved["accept_these_nonmembers"],
+            serde_json::json!(["friend@example.com"])
+        );
+        assert_eq!(
+            saved["hold_these_nonmembers"],
+            serde_json::json!(["^held@"])
+        );
+        assert_eq!(
+            saved["discard_these_nonmembers"],
+            serde_json::json!(["junk@example.com"])
+        );
+        assert!(
+            saved.get("moderator_password").is_none(),
+            "{prefix}: password must never be projected"
+        );
+        let attr = response_json(
+            call(
+                &app,
+                "GET",
+                &format!("{uri}/moderator_password"),
+                Some(&token),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert!(
+            attr.is_null() || attr.as_str().is_none_or(|text| !text.contains("let me in")),
+            "{prefix}: attribute read leaked the password: {attr}"
+        );
+
+        // Form encoding toggles the booleans too.
+        assert_eq!(
+            call_form(
+                &app,
+                "PATCH",
+                &uri,
+                &token,
+                "administrivia=true&require_explicit_destination=true"
+            )
+            .await
+            .status(),
+            StatusCode::OK,
+            "{prefix}"
+        );
+        let saved = response_json(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(saved["administrivia"], true, "{prefix}");
+        assert_eq!(saved["require_explicit_destination"], true, "{prefix}");
+
+        assert_posting_pipeline_is_validated_against_the_registry(&app, &token, &uri).await;
+        assert_put_resets_acceptance_settings(&app, &token, &uri).await;
+        assert_invalid_acceptance_payloads_are_rejected(&app, &token, &uri).await;
+    }
+}
+
+async fn assert_posting_pipeline_is_validated_against_the_registry(
+    app: &axum::Router,
+    token: &str,
+    uri: &str,
+) {
+    let initial = response_json(call(app, "GET", uri, Some(token), None).await).await;
+    assert_eq!(initial["posting_pipeline"], "default-posting-pipeline");
+    // Registered but unable to deliver posts (no roster resolution), declared
+    // (not executable), unknown, and non-string names are all refused.
+    for invalid in [
+        r#"{"posting_pipeline":"virgin"}"#,
+        r#"{"posting_pipeline":"default-owner-pipeline"}"#,
+        r#"{"posting_pipeline":"no-such-pipeline"}"#,
+        r#"{"posting_pipeline":7}"#,
+    ] {
+        assert_eq!(
+            call(app, "PATCH", uri, Some(token), Some(invalid))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "{invalid}"
+        );
+    }
+    assert_eq!(
+        call(
+            app,
+            "PATCH",
+            uri,
+            Some(token),
+            Some(r#"{"posting_pipeline":"default-posting-pipeline"}"#)
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+}
+
+async fn assert_put_resets_acceptance_settings(app: &axum::Router, token: &str, uri: &str) {
+    assert_eq!(
+        call(
+            app,
+            "PUT",
+            uri,
+            Some(token),
+            Some(r#"{"description":"reset"}"#)
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    let reset = response_json(call(app, "GET", uri, Some(token), None).await).await;
+    assert_eq!(reset["acceptable_aliases"], serde_json::json!([]), "{uri}");
+    assert_eq!(
+        reset["hold_these_nonmembers"],
+        serde_json::json!([]),
+        "{uri}"
+    );
+}
+
+async fn assert_invalid_acceptance_payloads_are_rejected(
+    app: &axum::Router,
+    token: &str,
+    uri: &str,
+) {
+    for invalid in [
+        r#"{"acceptable_aliases":"not-a-list"}"#,
+        r#"{"acceptable_aliases":["^("]}"#,
+        r#"{"administrivia":"yes"}"#,
+        r#"{"moderator_password":7}"#,
+    ] {
+        assert_eq!(
+            call(app, "PATCH", uri, Some(token), Some(invalid))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "{uri} {invalid}"
+        );
+    }
 }
 
 async fn assert_mutable_list_config_attributes_roundtrip(app: &axum::Router, token: &str) {
@@ -2430,55 +2888,134 @@ async fn scoped_tokens_filter_global_surfaces_forbid_cross_writes_and_preserve_l
     assert_eq!(fixture.first.id.as_str(), "one.first.example");
 }
 
+/// Pipelines are projected from the live handler registry with their real
+/// handler order; the owner pipeline is declared until its handlers exist.
 async fn assert_phase_one_catalogs(app: &axum::Router, token: &str) {
-    let cases: [(&str, &[&str]); 2] = [
-        (
-            "/api/v1/system/pipelines",
-            &[
-                "default-posting-pipeline",
-                "virgin",
-                "default-owner-pipeline",
-            ],
-        ),
-        (
-            "/api/v1/system/chains",
-            &[
-                "default-posting-chain",
-                "default-owner-chain",
-                "accept",
-                "hold",
-                "reject",
-                "discard",
-                "moderation",
-                "header-match",
-                "dmarc-mitigation",
-            ],
-        ),
-    ];
-    for (path, expected) in cases {
-        let body = response_json(call(app, "GET", path, Some(token), None).await).await;
-        let entries = body["items"].as_array().unwrap();
-        assert_eq!(
-            entries
-                .iter()
-                .map(|entry| entry["name"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            expected
-        );
-        for entry in entries {
-            assert_eq!(entry["phase"], "phase1");
-            assert_eq!(entry["executable"], false);
-            assert_eq!(entry["status"], "catalog_only");
-            assert!(entry.get("handlers").is_none());
-            assert!(entry.get("rules").is_none());
-        }
+    let body =
+        response_json(call(app, "GET", "/api/v1/system/pipelines", Some(token), None).await).await;
+    let entries = body["items"].as_array().unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "default-posting-pipeline",
+            "virgin",
+            "default-owner-pipeline",
+        ]
+    );
+    let posting = &entries[0];
+    assert_eq!(posting["executable"], true);
+    assert_eq!(posting["status"], "engine");
+    assert_eq!(
+        posting["handlers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|handler| handler.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "member-recipients",
+            "cleanse",
+            "cleanse-dkim",
+            "cook-headers",
+            "subject-prefix",
+            "rfc-2369",
+            "to-archive",
+            "to-digest",
+            "dmarc",
+            "to-outgoing",
+        ]
+    );
+    assert_eq!(entries[1]["executable"], true, "virgin");
+    assert_eq!(
+        entries[2]["executable"], false,
+        "owner pipeline is declared"
+    );
+    assert_eq!(entries[2]["status"], "declared");
+}
+
+/// Chains are projected from the live engine registry, so this asserts the real
+/// link order rather than a hand-kept name list.
+async fn assert_chain_projection_matches_the_engine(app: &axum::Router, token: &str) {
+    let body =
+        response_json(call(app, "GET", "/api/v1/system/chains", Some(token), None).await).await;
+    let entries = body["items"].as_array().unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "default-posting-chain",
+            "default-owner-chain",
+            "accept",
+            "hold",
+            "reject",
+            "discard",
+            "moderation",
+            "header-match",
+            "dmarc-mitigation",
+        ]
+    );
+    let by_name = |name: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["name"] == name)
+            .unwrap_or_else(|| panic!("chain {name} missing"))
+    };
+
+    let posting = by_name("default-posting-chain");
+    assert_eq!(posting["executable"], true);
+    assert_eq!(posting["status"], "engine");
+    assert_eq!(
+        posting["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "no-senders",
+            "approved",
+            "emergency",
+            "loop",
+            "banned-address",
+            "member-moderation",
+            "nonmember-moderation",
+            "administrivia",
+            "implicit-dest",
+            "max-recipients",
+            "max-size",
+            "no-subject",
+            "suspicious-header",
+            "any",
+            "truth",
+            "truth",
+        ]
+    );
+
+    for name in ["accept", "hold", "reject", "discard"] {
+        assert_eq!(by_name(name)["status"], "terminal", "{name}");
+        assert_eq!(by_name(name)["executable"], true, "{name}");
     }
+    assert_eq!(by_name("moderation")["status"], "moderation");
+    assert_eq!(by_name("header-match")["status"], "header-match");
+    assert_eq!(by_name("header-match")["executable"], true);
+
+    // Declared but not yet wired: must not claim to be executable.
+    let declared = by_name("dmarc-mitigation");
+    assert_eq!(declared["status"], "declared");
+    assert_eq!(declared["executable"], false);
+    assert!(declared["rules"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn anti_stub_catalogs_collections_and_resource_projections_are_behavioral() {
     let (app, token, user_id) = setup(&["admin"]).await;
     assert_phase_one_catalogs(&app, &token).await;
+    assert_chain_projection_matches_the_engine(&app, &token).await;
 
     let addresses = response_json(
         call(
@@ -2749,4 +3286,172 @@ async fn member_find_supports_exact_and_substring_with_scope_and_filters() {
     )
     .await;
     assert_eq!(compat_form["total_size"], 1);
+}
+
+#[tokio::test]
+async fn bounded_shared_identity_writes_require_unbound_tokens() {
+    let f = scoped_fixture().await;
+    subscribe_scoped_user(&f.db, f.second.id.clone(), "visible@first.example").await;
+    let member =
+        f.db.members()
+            .find("visible@first.example")
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|m| m.list_id == f.first.id)
+            .unwrap();
+    let global =
+        f.db.tokens()
+            .create(f.visible_user.id, "global", &["users:write"], None)
+            .await
+            .unwrap();
+    for prefix in ["/api/v1", "/3.1"] {
+        for token in [&f.list_token.token, &f.domain_token.token] {
+            for path in [
+                format!("/users/{}", f.visible_user.id),
+                "/addresses/visible@first.example".into(),
+            ] {
+                assert_eq!(
+                    call(&f.app, "GET", &format!("{prefix}{path}"), Some(token), None)
+                        .await
+                        .status(),
+                    StatusCode::OK
+                );
+            }
+            for (method, path, body) in [
+                (
+                    "PATCH",
+                    format!("/users/{}", f.visible_user.id),
+                    Some(r#"{"display_name":"changed"}"#),
+                ),
+                (
+                    "PATCH",
+                    format!("/users/{}/preferences", f.visible_user.id),
+                    Some(r#"{"preferred_language":"vi"}"#),
+                ),
+                (
+                    "PATCH",
+                    "/addresses/visible@first.example/preferences".into(),
+                    Some(r#"{"preferred_language":"vi"}"#),
+                ),
+                (
+                    "DELETE",
+                    "/addresses/visible@first.example/user".into(),
+                    None,
+                ),
+                (
+                    "POST",
+                    "/addresses/visible@first.example/user".into(),
+                    Some(format!(r#"{{"user_id":"{}"}}"#, f.visible_user.id)).as_deref(),
+                ),
+            ] {
+                assert_eq!(
+                    call(
+                        &f.app,
+                        method,
+                        &format!("{prefix}{path}"),
+                        Some(token),
+                        body
+                    )
+                    .await
+                    .status(),
+                    StatusCode::FORBIDDEN,
+                    "{method} {path}"
+                );
+            }
+            assert!(
+                call(
+                    &f.app,
+                    "PATCH",
+                    &format!("{prefix}/members/{}/preferences", member.id),
+                    Some(token),
+                    Some(r#"{"preferred_language":"vi"}"#)
+                )
+                .await
+                .status()
+                .is_success()
+            );
+        }
+        assert!(
+            call(
+                &f.app,
+                "PATCH",
+                &format!("{prefix}/users/{}/preferences", f.visible_user.id),
+                Some(&global.token),
+                Some(r#"{"preferred_language":"vi"}"#)
+            )
+            .await
+            .status()
+            .is_success()
+        );
+    }
+}
+
+#[tokio::test]
+async fn legacy_bounded_admin_cannot_mutate_global_identity() {
+    let f = scoped_fixture().await;
+    sqlx::query("UPDATE api_tokens SET scopes='admin' WHERE id=$1")
+        .bind(f.list_token.id.to_string())
+        .execute(f.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        call(
+            &f.app,
+            "PATCH",
+            &format!("/api/v1/users/{}", f.visible_user.id),
+            Some(&f.list_token.token),
+            Some(r#"{"display_name":"changed"}"#)
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(&f.app, "POST", "/api/v1/users", Some(&f.list_token.token),
+            Some(r#"{"display_name":"New","email":"new@example.com","password":"Orbit!Cobalt7-River$Quartz","server_owner":false}"#))
+            .await.status(),
+        StatusCode::FORBIDDEN
+    );
+    let admin =
+        f.db.tokens()
+            .create(f.visible_user.id, "admin", &["admin"], None)
+            .await
+            .unwrap();
+    assert_eq!(
+        call(
+            &f.app,
+            "PATCH",
+            &format!("/api/v1/users/{}", f.visible_user.id),
+            Some(&admin.token),
+            Some(r#"{"display_name":"changed"}"#)
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn historical_member_user_id_does_not_grant_scoped_identity_access() {
+    let f = scoped_fixture().await;
+    // Simulate historical drift left by older versions, not current ownership.
+    sqlx::query("UPDATE members SET user_id=$1 WHERE list_id=$2")
+        .bind(f.secret_user.id.to_string())
+        .bind(f.first.id.to_string())
+        .execute(f.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        call(
+            &f.app,
+            "GET",
+            &format!("/api/v1/users/{}", f.secret_user.id),
+            Some(&f.list_token.token),
+            None
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
 }

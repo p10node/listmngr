@@ -9,12 +9,14 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+listmngr-archive = { path = "../archive", version = "0.1.0" }
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
 dashmap.workspace = true
 http.workspace = true
 ipnet.workspace = true
+listmngr-web = { path = "../web", version = "0.1.0" }
 listmngr-core = { path = "../core", version = "0.1.0" }
 listmngr-db = { path = "../db", version = "0.1.0" }
 listmngr-mail = { path = "../mail", version = "0.1.0" }
