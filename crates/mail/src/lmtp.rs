@@ -32,6 +32,29 @@ impl RecipientOutcome {
     }
 }
 
+/// Typed RCPT rejection; dependency failures must never become permanent bounces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecipientRejection {
+    Permanent(String),
+    Temporary(String),
+}
+
+impl RecipientRejection {
+    #[must_use]
+    pub const fn code(&self) -> u16 {
+        match self {
+            Self::Permanent(_) => 550,
+            Self::Temporary(_) => 451,
+        }
+    }
+    #[must_use]
+    pub fn detail(&self) -> &str {
+        match self {
+            Self::Permanent(detail) | Self::Temporary(detail) => detail,
+        }
+    }
+}
+
 /// Caller-supplied policy and durable-intake hooks for one LMTP session.
 ///
 /// Implementations must keep `deliver` fast: policy evaluation and delivery
@@ -48,9 +71,24 @@ pub trait LmtpHandler: Send {
         &mut self,
         address: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
+    /// Typed validation hook. Legacy handlers retain permanent string rejections.
+    fn validate_recipient(
+        &mut self,
+        address: &str,
+    ) -> impl Future<Output = Result<(), RecipientRejection>> + Send {
+        async move {
+            self.accept_recipient(address)
+                .await
+                .map_err(RecipientRejection::Permanent)
+        }
+    }
     /// Durably store the exact message bytes for every previously accepted
     /// recipient of this transaction, returning one outcome per recipient in
     /// the same order. Must complete (or fail) before any 250 is sent.
+    /// The future may be dropped on timeout: stage all successful recipients
+    /// and their audits in a single transaction, never commit per recipient.
+    /// Cancellation before COMMIT must roll back the batch. Cancellation while
+    /// COMMIT is in flight can still leave an all-or-none ambiguous outcome.
     fn deliver(
         &mut self,
         mail_from: Option<&str>,
@@ -312,13 +350,13 @@ async fn handle_rcpt<W: AsyncWrite + Unpin, H: LmtpHandler>(
     };
     match parse_path(rest) {
         Some(Path::Address(address)) => {
-            match tokio::time::timeout(timeout, handler.accept_recipient(&address)).await {
+            match tokio::time::timeout(timeout, handler.validate_recipient(&address)).await {
                 Ok(Ok(())) => {
                     session.recipients.push(address);
                     session.state = State::RcptTo;
                     reply(writer, timeout, 250, &["ok"]).await
                 }
-                Ok(Err(reason)) => reply(writer, timeout, 550, &[&reason]).await,
+                Ok(Err(reason)) => reply(writer, timeout, reason.code(), &[reason.detail()]).await,
                 // The hook did not finish within the deadline: we genuinely
                 // do not know whether the recipient is valid, so this fails
                 // closed (never added to the transaction) with a transient
