@@ -1,0 +1,23 @@
+# Documentation-only fragment. Merge into your existing configuration after review.
+# No real relay, credentials, keys, database or inbound activation is supplied here.
+[mta]
+enabled = false # change only after local mail-role and MTA acceptance
+smtp_relay = "192.0.2.25:25" # replace with numeric relay IP:port; IPv6 uses [IP]:port
+smtp_tls = "required"
+smtp_tls_server_name = "relay.example.invalid" # replace with certificate DNS SAN
+# If omitted, server identity is the numeric relay IP (certificate needs matching IP SAN).
+# Public CA roots are bundled. Optional PEM CA certificates ADD private-relay trust:
+# smtp_tls_ca_file = "/etc/listmngr/relay-ca.pem"
+# Use a read-only, administrator-controlled, service-readable CA file; restart on rotation.
+command_timeout_secs = 30
+# Optional AUTH PLAIN, REQUIRED TLS only. Both absent means no authentication.
+# FAKE/DISPOSABLE EXAMPLES ONLY — do not deploy these credentials:
+# smtp_auth_username = "FAKE-EXAMPLE-RELAY-USER"
+# smtp_auth_password = "FAKE-EXAMPLE-NOT-A-REAL-PASSWORD"
+# Recommended instead of inline password (never configure both):
+# smtp_auth_password_file = "/run/secrets/listmngr-smtp-password"
+# Env alternative: LISTMNGR__MTA__SMTP_AUTH_PASSWORD_FILE=/run/secrets/listmngr-smtp-password
+# Private regular file (0600), no symlink; admin-controlled parent directory.
+# 1..255 UTF-8 bytes per credential, no controls; file permits one final LF/CRLF.
+# Restart after rotation. AUTH PLAIN must be advertised after TLS; 235 is required.
+# No LOGIN/XOAUTH2, opportunistic/implicit TLS or LMTP TLS in this slice.

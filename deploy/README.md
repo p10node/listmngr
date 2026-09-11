@@ -37,9 +37,40 @@ sudo systemctl enable --now listmngr.service
 
 The syscall filter uses systemd's `@system-service` allowlist. Verify it on the target Linux distribution; if a legitimate syscall is blocked, document the exact denial and narrowly amend the allowlist rather than removing hardening.
 
+## REQUIRED outbound STARTTLS configuration
+
+See [`starttls.example.toml`](starttls.example.toml) for a deliberately non-live
+configuration fragment. Set `smtp_relay` to a numeric `IP:port` (IPv6 `[IP]:port`)
+and `smtp_tls = "required"`. Set `smtp_tls_server_name` to the relay certificate's
+DNS identity; if omitted, its SAN must match the relay IP. This field does not
+change routing or EHLO. Public CA roots are built into the binary, including in
+the scratch image; system CA bundles and OS keychains are not automatically used.
+
+For a private relay, mount a PEM CA certificate bundle read-only and point
+`smtp_tls_ca_file` at its path **inside the container** (for example a read-only
+bind at `/etc/listmngr/relay-ca.pem`, readable by UID 1000). On systemd, place it
+under `/etc/listmngr/`, readable by the service account but writable only by the
+administrator. This is public CA material, never a relay private key. It adds
+trusted roots rather than disabling verification or replacing public roots.
+Restart after CA rotation; rebuild to update bundled public roots. No change to
+read-only/non-root/capability/systemd hardening is necessary for this fragment.
+
+Environment equivalents are `LISTMNGR__MTA__SMTP_TLS=required`,
+`LISTMNGR__MTA__SMTP_TLS_SERVER_NAME` and `LISTMNGR__MTA__SMTP_TLS_CA_FILE`; explicitly
+pass them to the process/container (Compose does not forward arbitrary variables).
+Do not enable this against a relay that requires AUTH; AUTH and implicit TLS are
+not implemented. Required mode never falls back; failures remain queue retries
+without mailbox bounce events. LMTP remains plaintext and must stay isolated.
+This is locally fixture-tested, not deployed Compose/systemd/MTA acceptance.
+
 ## MTA integration boundary
 
-Postfix/Exim remains responsible for internet SMTP. The committed snippets document the planned hand-off, but all LMTP directives are disabled because the current Phase 0/1 binary does not listen on port 8024 and does not deliver mail. Enabling the snippets now would route mail into a dead endpoint.
+Postfix/Exim remains responsible for internet SMTP. The current opt-in runtime
+has an LMTP listener and bounded mail delivery, but the snippets remain disabled
+because whole-MTA, bounce and release acceptance are not complete. `listmngr
+aliases regen` now publishes explicit Postfix regexp map generations; see
+[the map-generation runbook](../docs/POSTFIX_MAPS.md). It does not activate the
+mail role or reload an MTA. Exim map generation remains unimplemented.
 
 Before Phase 2 activation, operators must verify all of the following:
 

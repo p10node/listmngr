@@ -1,19 +1,27 @@
-# Phase 0 deployment documentation. DO NOT enable before Phase 2 LMTP acceptance.
-# listmngr currently has no LMTP listener; enabling these directives would defer
-# valid mail to a dead endpoint.
+# Experimental deployment documentation. DO NOT enable before MTA acceptance.
+# The opt-in LMTP runtime exists, but full mail delivery/bounce acceptance does
+# not. Generate an explicit map generation with `listmngr aliases regen` first.
+# See docs/POSTFIX_MAPS.md for limits, permissions and operator-owned activation.
 #
-# Planned Phase 2 shape (review domains/map paths before activation):
-# relay_domains = hash:/var/lib/listmngr/postfix/domains
-# transport_maps = hash:/var/lib/listmngr/postfix/transport
-# local_recipient_maps = hash:/var/lib/listmngr/postfix/virtual
-# listmngr_destination_recipient_limit = 1
+# Dedicated relay-domain MTA example only; replace GENERATION with the exact
+# generation-UUID printed by the CLI. Never overwrite a shared MTA's settings.
+# List domains must not also be in mydestination or virtual domain classes.
+# relay_domains = regexp:/var/lib/listmngr/postfix/GENERATION/domains.regexp
+# transport_maps = regexp:/var/lib/listmngr/postfix/GENERATION/transport.regexp
+# relay_recipient_maps = regexp:/var/lib/listmngr/postfix/GENERATION/recipients.regexp
+# smtpd_reject_unlisted_recipient = yes
+# smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+# recipient_delimiter =
+# lmtp_destination_recipient_limit = 1
 #
 # Example generated transport row:
-# example.org  lmtp:[127.0.0.1]:8024
+# /^list@example\.org$/ lmtp:[127.0.0.1]:8024
 #
 # Activation gate:
-#   postmap /var/lib/listmngr/postfix/{domains,transport,virtual}
+#   postconf -m  # must include regexp; do NOT compile these as hash maps
 #   postfix check
-#   postmap -q example.org hash:/var/lib/listmngr/postfix/domains
-#   postmap -q list@example.org hash:/var/lib/listmngr/postfix/virtual
-# Then reload Postfix only after Phase 2 end-to-end acceptance.
+#   postmap -q example.org regexp:/var/lib/listmngr/postfix/GENERATION/domains.regexp
+#   postmap -q list@example.org regexp:/var/lib/listmngr/postfix/GENERATION/recipients.regexp
+# Also query unknown recipients and ensure NOT FOUND, not catch-all acceptance.
+# Postmap lookup is not daemon delivery evidence. Reload only after separately
+# authorized MTA end-to-end acceptance and after granting the MTA read access.
