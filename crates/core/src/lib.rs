@@ -2,6 +2,8 @@
 
 //! Shared configuration and Phase 0-1 domain model.
 
+pub mod dsn_issuance;
+
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -47,6 +49,47 @@ impl From<figment::Error> for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Remote SMTP command that produced a permanent reply; not a mailbox verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SmtpFailureStage {
+    Ehlo,
+    MailFrom,
+    Rcpt,
+    DataStart,
+    DataFinal,
+}
+
+impl SmtpFailureStage {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ehlo => "ehlo",
+            Self::MailFrom => "mail_from",
+            Self::Rcpt => "rcpt",
+            Self::DataStart => "data_start",
+            Self::DataFinal => "data_final",
+        }
+    }
+}
+
+/// Exact remote reply metadata, supplied by the SMTP consumer, never parsed from diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmtpFailure {
+    pub stage: SmtpFailureStage,
+    pub code: u16,
+}
+
+/// Persisted inbound command; token case is significant.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EmailCommand {
+    Join,
+    Leave,
+    Confirm(String),
+    Help,
+}
 
 macro_rules! uuid_id {
     ($name:ident) => {
@@ -377,7 +420,28 @@ impl Address {
     }
 }
 
+/// Bounded DMARC rewriting only; no DNS policy evaluation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DmarcMitigateAction {
+    #[default]
+    NoMitigation,
+    MungeFrom,
+}
+
+/// Coupled delivery mitigation settings; serialized as flat compatibility keys.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(default)]
+pub struct DmarcSettings {
+    #[serde(rename = "dmarc_mitigate_action")]
+    pub action: DmarcMitigateAction,
+    #[serde(rename = "dmarc_mitigate_unconditionally")]
+    pub unconditional: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+// Independent persisted configuration switches, not mutually exclusive states.
+#[allow(clippy::struct_excessive_bools)]
 pub struct MailingList {
     pub id: ListId,
     pub display_name: String,
@@ -387,6 +451,38 @@ pub struct MailingList {
     pub advertised: bool,
     pub preferred_language: String,
     pub anonymous_list: bool,
+    /// Send a private built-in notice only when a Member subscription is added.
+    #[serde(default)]
+    pub send_welcome_message: bool,
+    /// Send a private built-in notice only on actual Member removal.
+    #[serde(default)]
+    pub send_goodbye_message: bool,
+    #[serde(default)]
+    pub process_bounces: bool,
+    #[serde(default = "default_owner_disable_notice")]
+    #[schema(default = true)]
+    pub bounce_notify_owner_on_disable: bool,
+    #[serde(default)]
+    #[schema(default = false)]
+    pub bounce_notify_owner_on_bounce_increment: bool,
+    #[serde(default = "default_bounce_warnings")]
+    #[schema(minimum = 0, maximum = 100, default = 3)]
+    pub bounce_you_are_disabled_warnings: u32,
+    #[serde(default = "default_bounce_stale_days")]
+    #[schema(minimum = 0, maximum = 36500, default = 7)]
+    pub bounce_you_are_disabled_warnings_interval: u32,
+    #[serde(default = "default_owner_disable_notice")]
+    #[schema(default = true)]
+    pub bounce_notify_owner_on_removal: bool,
+    /// Stale interval in days (1..=3650).
+    #[serde(default = "default_bounce_stale_days")]
+    #[schema(minimum = 1, maximum = 3650, default = 7)]
+    pub bounce_info_stale_after: u32,
+    #[serde(default = "default_bounce_threshold")]
+    #[schema(exclusive_minimum = 0, maximum = 1_000_000, default = 5)]
+    pub bounce_score_threshold: f64,
+    #[serde(flatten)]
+    pub dmarc: DmarcSettings,
     pub created_at: DateTime<Utc>,
     pub last_post_at: Option<DateTime<Utc>>,
     pub post_id: i64,
@@ -394,9 +490,75 @@ pub struct MailingList {
     pub next_digest_number: i64,
     pub digest_last_sent_at: Option<DateTime<Utc>>,
     pub emergency: bool,
+    /// Maximum original post size in KiB; zero disables this per-list limit.
+    #[serde(default)]
+    pub max_message_size: u32,
+    /// Hold at or above this visible To/Cc mailbox count; zero disables the check.
+    #[serde(default)]
+    pub max_num_recipients: u32,
     pub archive_policy: ArchivePolicy,
     pub archive_rendering_mode: ArchiveRenderingMode,
     pub style_name: String,
+    #[serde(default)]
+    pub default_member_action: Option<ModerationAction>,
+    #[serde(default)]
+    pub default_nonmember_action: Option<ModerationAction>,
+    /// Hold short posts that look like email commands.
+    #[serde(default = "default_true")]
+    #[schema(default = true)]
+    pub administrivia: bool,
+    /// Hold posts whose visible To/Cc names neither the list nor an alias.
+    #[serde(default = "default_true")]
+    #[schema(default = true)]
+    pub require_explicit_destination: bool,
+    /// Exact addresses or `^`-anchored regexes that count as explicit destinations.
+    #[serde(default)]
+    pub acceptable_aliases: Vec<String>,
+    /// Legacy nonmember action lists; exact addresses or `^`-anchored regexes.
+    #[serde(default)]
+    pub accept_these_nonmembers: Vec<String>,
+    #[serde(default)]
+    pub hold_these_nonmembers: Vec<String>,
+    #[serde(default)]
+    pub reject_these_nonmembers: Vec<String>,
+    #[serde(default)]
+    pub discard_these_nonmembers: Vec<String>,
+    /// Name of the handler pipeline an accepted post runs.
+    #[serde(default = "default_posting_pipeline")]
+    #[schema(default = "default-posting-pipeline")]
+    pub posting_pipeline: String,
+    /// Tell the poster when their post is held for moderation.
+    #[serde(default = "default_true")]
+    #[schema(default = true)]
+    pub respond_to_post_requests: bool,
+    /// Tell owners and moderators immediately when a post is held.
+    #[serde(default = "default_true")]
+    #[schema(default = true)]
+    pub admin_immed_notify: bool,
+}
+
+fn default_posting_pipeline() -> String {
+    "default-posting-pipeline".into()
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+const fn default_bounce_warnings() -> u32 {
+    3
+}
+
+const fn default_owner_disable_notice() -> bool {
+    true
+}
+
+const fn default_bounce_threshold() -> f64 {
+    5.0
+}
+
+const fn default_bounce_stale_days() -> u32 {
+    7
 }
 
 impl MailingList {
@@ -411,6 +573,17 @@ impl MailingList {
             advertised: true,
             preferred_language: "en".into(),
             anonymous_list: false,
+            send_welcome_message: false,
+            send_goodbye_message: false,
+            process_bounces: false,
+            bounce_notify_owner_on_disable: true,
+            bounce_notify_owner_on_bounce_increment: false,
+            bounce_you_are_disabled_warnings: 3,
+            bounce_you_are_disabled_warnings_interval: 7,
+            bounce_notify_owner_on_removal: true,
+            bounce_info_stale_after: 7,
+            bounce_score_threshold: 5.0,
+            dmarc: DmarcSettings::default(),
             created_at: Utc::now(),
             last_post_at: None,
             post_id: 1,
@@ -418,9 +591,23 @@ impl MailingList {
             next_digest_number: 1,
             digest_last_sent_at: None,
             emergency: false,
+            max_message_size: 0,
+            max_num_recipients: 0,
             archive_policy: ArchivePolicy::Public,
             archive_rendering_mode: ArchiveRenderingMode::Text,
             style_name: "legacy-default".into(),
+            default_member_action: None,
+            default_nonmember_action: None,
+            administrivia: true,
+            require_explicit_destination: true,
+            acceptable_aliases: Vec::new(),
+            accept_these_nonmembers: Vec::new(),
+            hold_these_nonmembers: Vec::new(),
+            reject_these_nonmembers: Vec::new(),
+            discard_these_nonmembers: Vec::new(),
+            posting_pipeline: default_posting_pipeline(),
+            respond_to_post_requests: true,
+            admin_immed_notify: true,
         }
     }
 
@@ -441,6 +628,12 @@ pub struct Member {
     pub moderation_action: Option<ModerationAction>,
     pub display_name: String,
     pub preferences_id: PreferencesId,
+    #[serde(default)]
+    #[schema(read_only)]
+    pub bounce_score: f64,
+    #[serde(default)]
+    #[schema(read_only)]
+    pub last_bounce_received: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -462,6 +655,8 @@ impl ListStyle for BuiltinStyle {
         match self.name {
             "legacy-announce" => {
                 list.subject_prefix = format!("[{}] ", list.id.list_name());
+                list.default_member_action = Some(ModerationAction::Hold);
+                list.default_nonmember_action = Some(ModerationAction::Hold);
             }
             "private-default" => {
                 list.advertised = false;
@@ -498,6 +693,7 @@ pub struct Config {
     pub api: ApiConfig,
     pub security: SecurityConfig,
     pub mailman: MailmanConfig,
+    pub antispam: AntispamConfig,
     pub archive: ArchiveConfig,
     pub runners: RunnerConfig,
     pub observability: ObservabilityConfig,
@@ -543,7 +739,8 @@ impl Config {
         }
         let mut config: Self = figment
             .merge(Env::prefixed("LISTMNGR__").split("__"))
-            .extract()?;
+            .extract()
+            .map_err(|_| Error::Validation("invalid configuration (values redacted)".into()))?;
         if let Some(secret_file) = &config.database.url_file {
             #[cfg(unix)]
             {
@@ -566,17 +763,65 @@ impl Config {
             }
             value.clone_into(&mut config.database.url);
         }
+        for (index, check) in config.antispam.header_checks.iter().enumerate() {
+            let header = check.header.trim();
+            if header.is_empty() || !header.bytes().all(|b| b.is_ascii_graphic() && b != b':') {
+                return Err(Error::Validation(format!(
+                    "antispam.header_checks[{index}].header must be a single ASCII field name"
+                )));
+            }
+            if check.pattern.is_empty()
+                || regex::RegexBuilder::new(&check.pattern)
+                    .case_insensitive(true)
+                    .size_limit(1 << 20)
+                    .build()
+                    .is_err()
+            {
+                return Err(Error::Validation(format!(
+                    "antispam.header_checks[{index}].pattern is not a valid regular expression"
+                )));
+            }
+        }
+        if !matches!(
+            config.antispam.jump_chain.as_str(),
+            "accept" | "hold" | "reject" | "discard"
+        ) {
+            return Err(Error::Validation(
+                "antispam.jump_chain must be one of accept, hold, reject, discard".into(),
+            ));
+        }
         validate_rate_limit("login", &config.security.rate_limit.login)?;
         validate_rate_limit("subscribe", &config.security.rate_limit.subscribe)?;
         validate_rate_limit("api", &config.security.rate_limit.api)?;
         if let Some(spec) = &config.security.rate_limit.api_pre_auth {
             validate_rate_limit("api_pre_auth", spec)?;
         }
-        if config.mta.enabled && config.mta.smtp_tls != "plaintext_trusted_relay" {
+        if config.mta.enabled
+            && !matches!(
+                config.mta.smtp_tls.as_str(),
+                "plaintext_trusted_relay" | "required"
+            )
+        {
             return Err(Error::Validation(
-                "mta.smtp_tls must be \"plaintext_trusted_relay\" (the only implemented mode) to enable mta.enabled; TLS is not implemented and will not be silently downgraded".into(),
+                "mta.smtp_tls must be \"plaintext_trusted_relay\" or \"required\"; unsupported modes never downgrade".into(),
             ));
         }
+        if !(1..=86_400).contains(&config.mta.bounce_maintenance_interval_secs) {
+            return Err(Error::Validation(
+                "mta.bounce_maintenance_interval_secs must be 1..86400".into(),
+            ));
+        }
+        if !(1..=1000).contains(&config.mta.bounce_maintenance_batch_size) {
+            return Err(Error::Validation(
+                "mta.bounce_maintenance_batch_size must be 1..1000".into(),
+            ));
+        }
+        if config.mta.bounce_maintenance_enabled && !config.mta.enabled {
+            return Err(Error::Validation(
+                "mta.bounce_maintenance_enabled requires mta.enabled".into(),
+            ));
+        }
+        config.mta.smtp_auth_credentials()?;
         Ok(config)
     }
 
@@ -635,20 +880,74 @@ config_struct!(MessageStoreConfig {
     backend: String = "fs".into(),
     path: String = "data/messages".into()
 });
-// `enabled` is the master opt-in switch for the whole mail role (LMTP +
-// processing + outbound); the safe default is off. `smtp_tls` only accepts
-// `"plaintext_trusted_relay"` when `enabled` is true: that is the sole
-// implemented mode (explicit, unencrypted, local/trusted relay only). Any
-// other value is a request for a guarantee (opportunistic/required TLS) this
-// runtime cannot provide; `Config::load` fails closed instead of silently
-// sending in plaintext.
+// `enabled` is the opt-in switch for LMTP + processing + outbound (default off).
+// Enabled roles admit only explicit trusted plaintext or verified required STARTTLS.
+// CA file and server identity are validated when constructing the runtime mail role;
+// disabled web-only configs retain the unsupported opportunistic default without sending.
+/// Operator-controlled identity and file reference, never private key bytes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DkimSigningConfig {
+    pub domain: String,
+    pub selector: String,
+    pub private_key_file: PathBuf,
+}
+
+/// SMTP credential input; never exposes its value through Debug or serialization.
+#[derive(Clone, Deserialize)]
+#[serde(transparent)]
+pub struct SmtpAuthSecret(String);
+impl SmtpAuthSecret {
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+impl From<String> for SmtpAuthSecret {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+impl From<&str> for SmtpAuthSecret {
+    fn from(value: &str) -> Self {
+        Self(value.into())
+    }
+}
+impl fmt::Debug for SmtpAuthSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[REDACTED]")
+    }
+}
+impl Serialize for SmtpAuthSecret {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str("[REDACTED]")
+    }
+}
+
 config_struct!(MtaConfig {
     enabled: bool = false,
+    bounce_maintenance_enabled: bool = false,
+    bounce_maintenance_interval_secs: u32 = 60,
+    bounce_maintenance_batch_size: u32 = 100,
+    dkim_signing: Vec<DkimSigningConfig> = Vec::new(),
     local_hostname: String = "listmngr.invalid".into(),
     incoming: String = "none".into(),
     lmtp_listen: String = "127.0.0.1:8024".into(),
     smtp_relay: String = "127.0.0.1:25".into(),
+    smtp_single_recipient: bool = false,
+    dsn_issuance_enabled: bool = false,
+    dsn_key_file: Option<String> = None,
+    dsn_key_id: String = String::new(),
+    dsn_ttl_secs: u32 = 604_800,
     smtp_tls: String = "opportunistic".into(),
+    smtp_tls_server_name: Option<String> = None,
+    smtp_tls_ca_file: Option<String> = None,
+    smtp_auth_username: Option<SmtpAuthSecret> = None,
+    smtp_auth_password: Option<SmtpAuthSecret> = None,
+    smtp_auth_password_file: Option<PathBuf> = None,
     max_recipients: u32 = 500,
     max_message_bytes: u32 = 10_485_760,
     command_timeout_secs: u32 = 30,
@@ -656,6 +955,70 @@ config_struct!(MtaConfig {
     verp_delimiter: String = "+".into(),
     verp_format: String = "{bounces}+{local}={domain}".into()
 });
+impl MtaConfig {
+    /// Validate bounded AUTH PLAIN inputs, reading a private regular password file if set.
+    /// File bytes are exact except for one optional terminal LF/CRLF. No whitespace trimming.
+    /// # Errors
+    /// Rejects incomplete credentials, controls, values over 255 UTF-8 bytes, insecure
+    /// files and any authentication without REQUIRED TLS, even when the MTA is disabled.
+    pub fn smtp_auth_credentials(&self) -> Result<Option<(SmtpAuthSecret, SmtpAuthSecret)>> {
+        use std::io::Read as _;
+        let invalid = || {
+            Error::Validation("invalid SMTP AUTH credentials or password file; both bounded credentials and required TLS are mandatory".into())
+        };
+        let mut password = self.smtp_auth_password.clone();
+        if let Some(path) = &self.smtp_auth_password_file {
+            if password.is_some() {
+                return Err(invalid());
+            }
+            let mut options = std::fs::OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+            }
+            let file = options.open(path).map_err(|_| invalid())?;
+            let metadata = file.metadata().map_err(|_| invalid())?;
+            if !metadata.is_file() {
+                return Err(invalid());
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                if metadata.permissions().mode() & 0o077 != 0 {
+                    return Err(invalid());
+                }
+            }
+            let mut value = String::new();
+            file.take(258)
+                .read_to_string(&mut value)
+                .map_err(|_| invalid())?;
+            if value.ends_with('\n') {
+                value.pop();
+                if value.ends_with('\r') {
+                    value.pop();
+                }
+            }
+            password = Some(value.into());
+        }
+        match (&self.smtp_auth_username, password) {
+            (None, None) => Ok(None),
+            (Some(user), Some(password))
+                if self.smtp_tls == "required"
+                    && [user.expose(), password.expose()].iter().all(|value| {
+                        !value.is_empty()
+                            && value.len() <= 255
+                            && !value.chars().any(char::is_control)
+                    }) =>
+            {
+                Ok(Some((user.clone(), password)))
+            }
+            _ => Err(invalid()),
+        }
+    }
+}
+
 config_struct!(WebConfig { listen: String = "127.0.0.1:8000".into(), trusted_proxies: Vec<IpNet> = vec!["127.0.0.1/32".parse().expect("valid network")], session_idle: String = "12h".into(), session_absolute: String = "7d".into() });
 config_struct!(ApiConfig { listen: String = "127.0.0.1:8001".into(), compat_basic_auth: bool = false, compat_basic_auth_allow: Vec<IpNet> = vec!["127.0.0.1/32".parse().expect("valid network")] });
 config_struct!(Argon2Config {
@@ -675,6 +1038,16 @@ config_struct!(MailmanConfig {
     default_nonmember_action: ModerationAction = ModerationAction::Hold,
     noreply_address: String = "noreply".into(),
     site_owner_notify: bool = true
+});
+config_struct!(HeaderCheck {
+    header: String = String::new(),
+    pattern: String = String::new()
+});
+// Site-wide header rules, evaluated by the `suspicious-header` posting rule,
+// and the default chain for per-list header rules that name none.
+config_struct!(AntispamConfig {
+    header_checks: Vec<HeaderCheck> = Vec::new(),
+    jump_chain: String = "hold".into()
 });
 config_struct!(ArchiveConfig {
     enabled: bool = true,
