@@ -4,19 +4,61 @@
 //! `listmngr_pipeline::handlers`; this module supplies the handlers that need
 //! MIME and header surgery, and [`cook_for`], the single entry point every
 //! consumer uses to obtain its copy of an accepted post.
-use crate::{Error, Result, cook, facts, munge};
-use listmngr_core::{DmarcMitigateAction, MailingList};
-pub use listmngr_pipeline::handlers::Target;
+use crate::{Error, Result, cook, facts, mime_delete, munge};
+use listmngr_core::{DmarcMitigateAction, FilterAction, MailingList};
 use listmngr_pipeline::handlers::{
-    Handler, HandlerError, HandlerRegistry, MsgData, PipelineContext, Working, builtin_pipelines,
-    fan_out_handlers,
+    Handler, HandlerError, HandlerRegistry, MsgData, PipelineContext, PipelineError, Working,
+    builtin_pipelines, fan_out_handlers,
 };
+pub use listmngr_pipeline::handlers::{Refusal, Target};
 use std::sync::OnceLock;
 
 fn refuse(handler: &'static str, error: &Error) -> HandlerError {
     HandlerError {
         handler,
         reason: error.to_string(),
+        refusal: Refusal::Shunt,
+    }
+}
+
+/// Mailman's `mime-delete`: the list's content filter.
+///
+/// Runs first so every consumer (archive, digest, subscribers) sees the same
+/// filtered message, and ends the pipeline with the list's `filter_action`
+/// when nothing deliverable remains.
+#[derive(Debug)]
+pub struct MimeDelete;
+
+impl Handler for MimeDelete {
+    fn name(&self) -> &'static str {
+        "mime-delete"
+    }
+    fn process(
+        &self,
+        message: &mut Working<'_>,
+        ctx: &PipelineContext<'_>,
+        _data: &mut MsgData,
+    ) -> std::result::Result<(), HandlerError> {
+        let settings = &ctx.list.alter_messages;
+        match mime_delete::apply(&message.raw, settings)
+            .map_err(|error| refuse(self.name(), &error))?
+        {
+            mime_delete::Verdict::Unchanged => {}
+            mime_delete::Verdict::Changed(bytes) => message.raw = bytes,
+            mime_delete::Verdict::Disposed(reason) => {
+                return Err(HandlerError {
+                    handler: self.name(),
+                    reason,
+                    refusal: match settings.filter_action {
+                        FilterAction::Discard => Refusal::Discard,
+                        FilterAction::Reject => Refusal::Reject,
+                        FilterAction::Forward => Refusal::Forward,
+                        FilterAction::Preserve => Refusal::Preserve,
+                    },
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -195,6 +237,7 @@ impl Handler for Dmarc {
 #[must_use]
 pub fn mail_handlers() -> Vec<Box<dyn Handler>> {
     vec![
+        Box::new(MimeDelete),
         Box::new(Cleanse),
         Box::new(CleanseDkim),
         Box::new(CookHeaders),
@@ -224,12 +267,32 @@ pub fn builtin_registry() -> &'static HandlerRegistry {
     })
 }
 
+/// A pipeline refusal as the callers see it: a handler that ended the
+/// pipeline with a disposition becomes [`Error::Refused`]; everything else
+/// (unknown pipeline, missing snapshot, unsafe content) is
+/// [`Error::UnsafeHeaderContent`], which callers shunt.
+fn pipeline_error(error: PipelineError) -> Error {
+    match error {
+        PipelineError::Handler(HandlerError {
+            handler,
+            reason,
+            refusal,
+        }) if refusal != Refusal::Shunt => Error::Refused {
+            handler,
+            reason,
+            refusal,
+        },
+        _ => Error::UnsafeHeaderContent,
+    }
+}
+
 /// Run the list's posting pipeline for one consumer and return that
 /// consumer's copy of the message.
 /// # Errors
-/// Returns [`Error::UnsafeHeaderContent`] for any pipeline refusal: an unknown
-/// pipeline, a missing snapshot handler, or a handler that rejected the
-/// message. Callers shunt rather than deliver.
+/// Returns [`Error::Refused`] when a handler ended the pipeline with a
+/// disposition, and [`Error::UnsafeHeaderContent`] for any other refusal: an
+/// unknown pipeline, a missing snapshot handler, or a handler that could not
+/// process the message. Callers shunt the latter rather than deliver.
 pub fn cook_for(target: Target, raw: &[u8], list: &MailingList, identity: &str) -> Result<Vec<u8>> {
     let (bytes, _) = builtin_registry()
         .run(
@@ -241,14 +304,15 @@ pub fn cook_for(target: Target, raw: &[u8], list: &MailingList, identity: &str) 
                 target,
             },
         )
-        .map_err(|_| Error::UnsafeHeaderContent)?;
+        .map_err(pipeline_error)?;
     Ok(bytes)
 }
 
 /// Run the list's posting pipeline in planning mode and return what the `in`
 /// runner must do with the accepted post.
 /// # Errors
-/// Returns [`Error::UnsafeHeaderContent`] for any pipeline refusal.
+/// Returns [`Error::Refused`] when a handler ended the pipeline with a
+/// disposition, else [`Error::UnsafeHeaderContent`] for any other refusal.
 pub fn plan(raw: &[u8], list: &MailingList, identity: &str) -> Result<MsgData> {
     let (_, data) = builtin_registry()
         .run(
@@ -260,6 +324,6 @@ pub fn plan(raw: &[u8], list: &MailingList, identity: &str) -> Result<MsgData> {
                 target: Target::Plan,
             },
         )
-        .map_err(|_| Error::UnsafeHeaderContent)?;
+        .map_err(pipeline_error)?;
     Ok(data)
 }

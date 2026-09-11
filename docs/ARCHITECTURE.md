@@ -153,6 +153,35 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-MIME-DELETE — bounded acceptance verified
+
+`crates/mail/src/mime_delete.rs` is the content filter. It parses the stored
+message once and builds a tree whose nodes are the original byte spans
+(`mail-parser` part offsets: header block with its blank line, leaf body
+without the closing boundary), so pruning a part is dropping a node and
+serializing copies survivors verbatim inside regenerated multipart framing.
+The steps and the disposal reasons mirror `mailman/handlers/mime_delete.py`
+in order: outer type, outer extension, recursive `filter_parts`, alternative
+collapse (`reset_payload` for an outer alternative: message headers kept,
+content headers taken from the first alternative), HTML to text, and the
+`X-Content-Filtered-By` marker. `crates/mail/src/html_text.rs` is the
+built-in replacement for Mailman's `lynx -dump`: a small tag scanner that
+never allocates more than a few times the input and never runs a process.
+
+The handler is the first entry of `default-posting-pipeline`, so the `in`
+runner's planning pass and every consumer's cook see the same filtered bytes.
+`HandlerError` now carries a `Refusal` (`Shunt`, `Discard`, `Reject`,
+`Forward`, `Preserve`); `plan`/`cook_for` surface a non-shunt refusal as
+`listmngr_mail::Error::Refused` and the runner hands it to
+`ModerationRepo::refuse`, which acks (or, for a preservable `preserve`,
+shunts) the inbound job, records the `post.*` audit event and enqueues the
+rejection or forward notice in the same lease-fenced transaction. The
+forward notice is the first generated message with an attachment, built by
+`notices::serialize_with_message` (`multipart/mixed`, text part plus the
+unmodified original as `message/rfc822`, boundary derived from the generated
+`Message-ID`). The chain's `reject`/`discard` dispositions reuse the same
+path, so both now audit and a chain rejection notifies the author.
+
 ## P2-LIST-SETTINGS — bounded acceptance verified
 
 `MailingList` carries Mailman's Alter Messages and Member Policy groups as

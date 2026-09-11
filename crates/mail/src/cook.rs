@@ -33,7 +33,7 @@ fn is_safe_header_name(name: &str) -> bool {
     !name.is_empty() && name.bytes().all(|b| (33..=126).contains(&b) && b != b':')
 }
 
-fn newline_style(header_block: &[u8]) -> &'static [u8] {
+pub fn newline_style(header_block: &[u8]) -> &'static [u8] {
     if header_block.contains(&b'\r') {
         b"\r\n"
     } else {
@@ -182,7 +182,7 @@ fn is_control_header(name: &str) -> bool {
 
 /// Remove whole fields (including every folded continuation) whose lowercased
 /// name satisfies `drop`, never touching MIME bytes.
-fn strip_fields(header_block: &[u8], drop: impl Fn(&str) -> bool) -> Vec<u8> {
+pub fn strip_fields(header_block: &[u8], drop: impl Fn(&str) -> bool) -> Vec<u8> {
     let mut output = Vec::with_capacity(header_block.len());
     let mut keep = false;
     for line in header_block.split_inclusive(|b| *b == b'\n') {

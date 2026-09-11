@@ -830,6 +830,61 @@ pub(crate) async fn enqueue_hold_notices(
     Ok(())
 }
 
+/// Mailman's content-filter `forward` notice: the moderators (the owners
+/// when the list has none, so the only copy is never lost) receive a short
+/// explanation with the unfiltered original attached as `message/rfc822`.
+pub(crate) async fn enqueue_content_filter_forward(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    list: &ListId,
+    message_id: crate::mail_queue::MessageId,
+    now_ms: i64,
+) -> Result<()> {
+    let snapshot = crate::notices::list_snapshot(tx, list).await?;
+    let original: Vec<u8> = sqlx::query_scalar("SELECT b.raw FROM messages m JOIN message_blobs b ON b.store_key=m.store_key WHERE m.id=$1")
+        .bind(message_id.0.to_string()).fetch_one(&mut **tx).await.map_err(db_error)?;
+    let mut recipients: Vec<String> = sqlx::query_scalar("SELECT a.original_email FROM addresses a WHERE EXISTS (SELECT 1 FROM members m WHERE m.address_id=a.id AND m.list_id=$1 AND m.role='moderator') ORDER BY a.email")
+        .bind(list.as_str()).fetch_all(&mut **tx).await.map_err(db_error)?;
+    if recipients.is_empty() {
+        recipients = sqlx::query_scalar("SELECT a.original_email FROM addresses a WHERE EXISTS (SELECT 1 FROM members m WHERE m.address_id=a.id AND m.list_id=$1 AND m.role='owner') ORDER BY a.email")
+            .bind(list.as_str()).fetch_all(&mut **tx).await.map_err(db_error)?;
+    }
+    let date = chrono::DateTime::from_timestamp_millis(now_ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc2822();
+    let host = list.mail_host().to_owned();
+    let from = list.owner_address();
+    for email in &recipients {
+        if listmngr_mail::owner::points_to_list(email, list) {
+            continue;
+        }
+        let language =
+            crate::notices::recipient_language(tx, &snapshot, email, db.default_language()).await?;
+        let subject = listmngr_i18n::message(&language, "notice-content-filter-subject", &[]);
+        let body = listmngr_i18n::message(
+            &language,
+            "content-filter-forward-body",
+            &[("display_name", &snapshot.display_name)],
+        );
+        let id = Uuid::now_v7().to_string();
+        let raw = crate::notices::serialize_with_message(
+            &crate::notices::Envelope {
+                from: &from,
+                to: email,
+                reply_to: None,
+                subject: &subject,
+                message_id_local: &id,
+                mail_host: &host,
+                date: &date,
+            },
+            &body,
+            &original,
+        )?;
+        enqueue_notice(tx, list, email, &id, raw, now_ms).await?;
+    }
+    Ok(())
+}
+
 /// One templated notice to enqueue: who receives it, which template renders
 /// the body, and which catalog message (with arguments) is its subject.
 struct Notice<'a> {

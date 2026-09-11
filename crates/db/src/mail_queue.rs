@@ -725,7 +725,7 @@ pub(crate) const fn queue_name(queue: Queue) -> &'static str {
 /// handoff.
 /// # Errors
 /// Returns stale-lease conflict or database errors.
-async fn transition_leased_job(
+pub(crate) async fn transition_leased_job(
     tx: &mut Transaction<'_, Any>,
     lease: &Lease,
     now_ms: i64,
