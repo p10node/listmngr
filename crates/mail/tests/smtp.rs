@@ -110,7 +110,7 @@ async fn permanent_rcpt_failure_does_not_block_other_recipients() {
     .unwrap();
     assert!(matches!(
         outcome.results[0],
-        RecipientStatus::PermanentFailure(_)
+        RecipientStatus::RemotePermanentFailure { .. }
     ));
     assert_eq!(outcome.results[1], RecipientStatus::Sent);
     relay.await.unwrap();
@@ -140,7 +140,7 @@ async fn all_recipients_rejected_skips_data_entirely() {
     .unwrap();
     assert!(matches!(
         outcome.results[0],
-        RecipientStatus::PermanentFailure(_)
+        RecipientStatus::RemotePermanentFailure { .. }
     ));
     relay.await.unwrap();
 }
@@ -490,7 +490,10 @@ async fn a_permanent_rcpt_failure_survives_a_later_recipients_connection_loss() 
     .await
     .unwrap();
     assert!(
-        matches!(outcome.results[0], RecipientStatus::PermanentFailure(_)),
+        matches!(
+            outcome.results[0],
+            RecipientStatus::RemotePermanentFailure { .. }
+        ),
         "recipient A's known 550 must survive B's later connection loss, got {:?}",
         outcome.results[0]
     );
@@ -525,7 +528,10 @@ async fn data_start_554_is_a_permanent_failure_not_transient() {
     .await
     .unwrap();
     assert!(
-        matches!(outcome.results[0], RecipientStatus::PermanentFailure(_)),
+        matches!(
+            outcome.results[0],
+            RecipientStatus::RemotePermanentFailure { .. }
+        ),
         "got {:?}",
         outcome.results[0]
     );

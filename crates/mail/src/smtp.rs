@@ -1,12 +1,15 @@
-//! A minimal, honest plaintext SMTP client for one relay connection.
+//! One-shot SMTP transactions over explicit trusted plaintext or verified REQUIRED STARTTLS.
 //!
-//! No STARTTLS/AUTH is implemented; callers must only use this for an
-//! explicitly configured local/trusted relay (see `mta.smtp_tls` in
-//! `listmngr-core`), never to deliver over an untrusted network path. Plain
+//! The runner uses `send_secure`; `send` is the explicit plaintext library entry point.
+//! Optional AUTH PLAIN requires verified REQUIRED TLS; no opportunistic or implicit TLS.
 //! SMTP cannot guarantee exactly-once delivery: a `250` after `DATA` means
 //! the relay accepted responsibility, not that a mailbox received the mail.
+mod auth;
+mod tls;
+use listmngr_core::{SmtpFailure, SmtpFailureStage};
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::time::Duration;
+pub use tls::{AuthenticationPolicy, TransportSecurity, send_secure, send_secure_with_envid};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::Instant;
 
@@ -25,8 +28,13 @@ pub enum RecipientStatus {
     /// A 4xx response, or a connection failure before anything message-specific
     /// was sent; safe to retry later with backoff.
     TransientFailure(String),
-    /// A 5xx response; must not be retried.
+    /// Local validation or legacy failure without remote metadata; must not be retried.
     PermanentFailure(String),
+    /// A typed remote 5xx, unlike local validation or legacy string failures.
+    RemotePermanentFailure {
+        failure: listmngr_core::SmtpFailure,
+        detail: String,
+    },
     /// The connection was lost after the full message was already written to
     /// the relay but before its final reply was read: the relay may or may
     /// not have accepted the message. Retrying risks a duplicate; collapsing
@@ -49,6 +57,7 @@ pub struct SendOutcome {
 struct Response {
     code: u16,
     text: String,
+    extensions: Vec<String>,
 }
 
 /// A value used inside one SMTP command line (hostname, envelope address)
@@ -169,6 +178,7 @@ async fn read_response<R: AsyncBufRead + Unpin>(
     Ok(Response {
         code: first_code.expect("at least one line is always parsed"),
         text: lines.join("; "),
+        extensions: lines.into_iter().skip(1).collect(),
     })
 }
 
@@ -227,9 +237,12 @@ fn all_transient(text: &str, count: usize) -> SendOutcome {
     }
 }
 
-const fn status_for(code: u16, text: String) -> RecipientStatus {
+const fn status_for(stage: SmtpFailureStage, code: u16, text: String) -> RecipientStatus {
     if code / 100 == 5 {
-        RecipientStatus::PermanentFailure(text)
+        RecipientStatus::RemotePermanentFailure {
+            failure: SmtpFailure { stage, code },
+            detail: text,
+        }
     } else {
         RecipientStatus::TransientFailure(text)
     }
@@ -297,38 +310,67 @@ fn finish(results: Vec<Option<RecipientStatus>>) -> SendOutcome {
 /// for unsafe content. Returns `Err(())` once `results` is fully resolved and
 /// the caller must stop (already written into `results`); `Ok(())` means at
 /// least one recipient is still pending and `DATA` should proceed.
+#[allow(clippy::too_many_arguments)]
 async fn negotiate<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
     writer: &mut W,
     reader: &mut R,
     timeout: Duration,
-    config: &SmtpClientConfig,
+    config: Option<&SmtpClientConfig>,
     mail_from: Option<&str>,
     recipients: &[String],
     results: &mut [Option<RecipientStatus>],
+    dsn: Option<(&str, bool)>,
 ) -> Result<(), ()> {
-    let Ok(ehlo) = command(
+    let mut supports_dsn = dsn.is_some_and(|(_, supported)| supported);
+    if let Some(config) = config {
+        let Ok(ehlo) = command(
+            writer,
+            reader,
+            timeout,
+            &format!("EHLO {}", config.local_hostname),
+        )
+        .await
+        else {
+            resolve_pending(results, &connection_lost(LossPhase::BeforeData));
+            return Err(());
+        };
+        if !is_stage_success(Stage::Ehlo, ehlo.code) {
+            resolve_pending(
+                results,
+                &status_for(SmtpFailureStage::Ehlo, ehlo.code, ehlo.text),
+            );
+            return Err(());
+        }
+        supports_dsn = ehlo
+            .extensions
+            .iter()
+            .any(|line| line.eq_ignore_ascii_case("DSN"));
+    }
+    if dsn.is_some() && !supports_dsn {
+        resolve_pending(
+            results,
+            &RecipientStatus::TransientFailure("SMTP DSN capability required".into()),
+        );
+        return Err(());
+    }
+    let from = mail_from.unwrap_or("");
+    let parameter = dsn.map_or_else(String::new, |(envid, _)| format!(" ENVID={envid}"));
+    let Ok(mail) = command(
         writer,
         reader,
         timeout,
-        &format!("EHLO {}", config.local_hostname),
+        &format!("MAIL FROM:<{from}>{parameter}"),
     )
     .await
     else {
         resolve_pending(results, &connection_lost(LossPhase::BeforeData));
         return Err(());
     };
-    if !is_stage_success(Stage::Ehlo, ehlo.code) {
-        resolve_pending(results, &status_for(ehlo.code, ehlo.text));
-        return Err(());
-    }
-
-    let from = mail_from.unwrap_or("");
-    let Ok(mail) = command(writer, reader, timeout, &format!("MAIL FROM:<{from}>")).await else {
-        resolve_pending(results, &connection_lost(LossPhase::BeforeData));
-        return Err(());
-    };
     if !is_stage_success(Stage::MailFrom, mail.code) {
-        resolve_pending(results, &status_for(mail.code, mail.text));
+        resolve_pending(
+            results,
+            &status_for(SmtpFailureStage::MailFrom, mail.code, mail.text),
+        );
         return Err(());
     }
 
@@ -347,7 +389,7 @@ async fn negotiate<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
         results[index] = if is_stage_success(Stage::Rcpt, rcpt.code) {
             None
         } else {
-            Some(status_for(rcpt.code, rcpt.text))
+            Some(status_for(SmtpFailureStage::Rcpt, rcpt.code, rcpt.text))
         };
     }
 
@@ -359,14 +401,16 @@ async fn negotiate<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_transaction<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
     writer: &mut W,
     reader: &mut R,
     timeout: Duration,
-    config: &SmtpClientConfig,
+    config: Option<&SmtpClientConfig>,
     mail_from: Option<&str>,
     recipients: &[String],
     data: &[u8],
+    dsn: Option<(&str, bool)>,
 ) -> SendOutcome {
     let mut results: Vec<Option<RecipientStatus>> = vec![None; recipients.len()];
     if negotiate(
@@ -377,6 +421,7 @@ async fn run_transaction<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
         mail_from,
         recipients,
         &mut results,
+        dsn,
     )
     .await
     .is_err()
@@ -389,7 +434,14 @@ async fn run_transaction<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
         return finish(results);
     };
     if data_start.code != 354 {
-        resolve_pending(&mut results, &status_for(data_start.code, data_start.text));
+        resolve_pending(
+            &mut results,
+            &status_for(
+                SmtpFailureStage::DataStart,
+                data_start.code,
+                data_start.text,
+            ),
+        );
         return finish(results);
     }
 
@@ -414,7 +466,7 @@ async fn run_transaction<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
 
     let final_status = match read_response(reader, timeout).await {
         Ok(response) if response.code == 250 => RecipientStatus::Sent,
-        Ok(response) => status_for(response.code, response.text),
+        Ok(response) => status_for(SmtpFailureStage::DataFinal, response.code, response.text),
         Err(_) => connection_lost(LossPhase::AfterData),
     };
     resolve_pending(&mut results, &final_status);
@@ -439,6 +491,39 @@ pub async fn send<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
+    send_with_envid(stream, config, mail_from, recipients, data, None).await
+}
+
+fn validate_envid(
+    envid: Option<&str>,
+    sender: Option<&str>,
+    recipients: &[String],
+) -> IoResult<()> {
+    if envid.is_some_and(|v| {
+        v.is_empty()
+            || v.len() > 100
+            || !v
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+            || sender.is_none()
+            || recipients.len() != 1
+    }) {
+        return Err(IoError::new(
+            ErrorKind::InvalidInput,
+            "invalid singleton DSN envelope",
+        ));
+    }
+    Ok(())
+}
+async fn send_with_envid<S: AsyncRead + AsyncWrite + Unpin + Send>(
+    stream: S,
+    config: &SmtpClientConfig,
+    mail_from: Option<&str>,
+    recipients: &[String],
+    data: &[u8],
+    envid: Option<&str>,
+) -> IoResult<SendOutcome> {
+    validate_envid(envid, mail_from, recipients)?;
     if !is_safe_smtp_text(&config.local_hostname) {
         return Err(IoError::new(
             ErrorKind::InvalidInput,
@@ -462,10 +547,11 @@ where
         &mut writer,
         &mut reader,
         timeout,
-        config,
+        Some(config),
         mail_from,
         recipients,
         data,
+        envid.map(|v| (v, false)),
     )
     .await)
 }

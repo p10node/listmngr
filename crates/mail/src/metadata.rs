@@ -52,6 +52,14 @@ pub const MAX_HEADER_LINE_BYTES: usize = 998;
 /// # Errors
 /// Rejects missing/duplicate IDs, malformed headers and exceeded byte bounds.
 pub fn parse_message_id(raw: &[u8]) -> Result<String> {
+    parse_optional_message_id(raw)?.ok_or(Error::InvalidMessageId)
+}
+
+/// Validate the bounded header block, returning `None` only for an absent ID.
+/// This does not authorize delivery or relax malformed/duplicate-ID rejection.
+/// # Errors
+/// Rejects malformed headers, invalid IDs and exceeded header byte bounds.
+pub fn parse_optional_message_id(raw: &[u8]) -> Result<Option<String>> {
     let mut value = None::<String>;
     let mut collecting = false;
     let mut have_field = false;
@@ -109,12 +117,14 @@ pub fn parse_message_id(raw: &[u8]) -> Result<String> {
     if !ended || consumed > MAX_HEADER_BYTES {
         return Err(Error::InvalidMessageId);
     }
-    let value = value.ok_or(Error::InvalidMessageId)?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
     let id = value
         .trim_matches([' ', '\t'])
         .strip_prefix('<')
         .and_then(|v| v.strip_suffix('>'))
         .ok_or(Error::InvalidMessageId)?;
     validate_id(id)?;
-    Ok(id.into())
+    Ok(Some(id.into()))
 }
