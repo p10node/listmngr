@@ -67,9 +67,36 @@ pub enum PrepareError {
 struct Prepared {
     cooked: Vec<u8>,
     mail_from: String,
-    /// The list, when this is a subscriber copy of a personalized list:
-    /// every recipient then gets their own transaction and headers.
-    personalized: Option<listmngr_core::MailingList>,
+    /// Set when every recipient gets their own transaction: a personalized
+    /// list, or a VERP delivery of an ordinary one.
+    per_recipient: Option<PerRecipient>,
+}
+
+/// Why and how a delivery is split per recipient.
+#[derive(Debug)]
+struct PerRecipient {
+    list: listmngr_core::MailingList,
+    /// Mailman's `personalize`: `$user_*` decoration and, for `full`, the
+    /// `To:` rewrite. `None` keeps the shared (already decorated) bytes.
+    personalization: Option<Personalization>,
+    /// Per-recipient VERP envelope senders.
+    verp: bool,
+}
+
+/// The unexpanded decoration templates, resolved once per delivery and
+/// expanded per recipient.
+#[derive(Debug)]
+struct Personalization {
+    mode: listmngr_core::Personalization,
+    header: String,
+    footer: String,
+}
+
+/// One recipient's transaction: its bytes and envelope sender.
+#[derive(Debug)]
+struct RecipientCopy {
+    bytes: Vec<u8>,
+    mail_from: Option<String>,
 }
 
 /// Fail closed: invalid context/cooking is shunted; dependency failure retries.
@@ -79,7 +106,7 @@ pub async fn prepare(
     context: &str,
     delivery_id: uuid::Uuid,
 ) -> Result<(Vec<u8>, String), PrepareError> {
-    let prepared = prepare_post(db, raw, context, delivery_id, false).await?;
+    let prepared = prepare_post(db, raw, context, delivery_id, false, None).await?;
     Ok((prepared.cooked, prepared.mail_from))
 }
 
@@ -89,6 +116,7 @@ async fn prepare_post(
     context: &str,
     delivery_id: uuid::Uuid,
     individual: bool,
+    verp: Option<VerpPolicy>,
 ) -> Result<Prepared, PrepareError> {
     let context: serde_json::Value =
         serde_json::from_str(context).map_err(|_| PrepareError::Invalid)?;
@@ -116,31 +144,75 @@ async fn prepare_post(
         return Ok(Prepared {
             cooked,
             mail_from: list_id.bounces_address(),
-            personalized: None,
+            per_recipient: None,
         });
     }
     // Mailman decorates at delivery: the archive and digest copies were
-    // taken above, only subscribers see the list header and footer.
-    let decorated = decorate_for_delivery(db, &list, &cooked).await?;
-    let personalized =
-        (list.alter_messages.personalize != listmngr_core::Personalization::None).then_some(list);
+    // taken above, only subscribers see the list header and footer. A
+    // personalized list expands the templates per recipient instead.
+    let (header, footer) = decoration_templates(db, &list).await?;
+    let mode = list.alter_messages.personalize;
+    let personalized = mode != listmngr_core::Personalization::None;
+    let verp = verp.is_some_and(|verp| verp.applies(&list, personalized));
+    if !personalized {
+        let placeholders = listmngr_mail::templates::list_placeholders(&list);
+        let decorated = listmngr_mail::decorate::decorate(
+            &cooked,
+            &listmngr_mail::templates::expand(&header, &placeholders),
+            &listmngr_mail::templates::expand(&footer, &placeholders),
+        )
+        .map_err(|_| PrepareError::Invalid)?;
+        return Ok(Prepared {
+            cooked: decorated,
+            mail_from: list_id.bounces_address(),
+            per_recipient: verp.then_some(PerRecipient {
+                list,
+                personalization: None,
+                verp: true,
+            }),
+        });
+    }
     Ok(Prepared {
-        cooked: decorated,
+        cooked,
         mail_from: list_id.bounces_address(),
-        personalized,
+        per_recipient: Some(PerRecipient {
+            list,
+            personalization: Some(Personalization {
+                mode,
+                header,
+                footer,
+            }),
+            verp,
+        }),
     })
 }
 
-/// Expand and add the list's `list:member:regular:header`/`footer`.
+/// The `[mta]` VERP policy as the out runner applies it.
+#[derive(Debug, Clone, Copy)]
+pub struct VerpPolicy {
+    pub personalized_deliveries: bool,
+    pub delivery_interval: u32,
+}
+
+impl VerpPolicy {
+    /// Mailman: personalized copies are VERP'd when
+    /// `verp_personalized_deliveries`; every `verp_delivery_interval`th post
+    /// of any list is VERP'd.
+    fn applies(self, list: &listmngr_core::MailingList, personalized: bool) -> bool {
+        (personalized && self.personalized_deliveries)
+            || (self.delivery_interval > 0
+                && list.post_id.rem_euclid(i64::from(self.delivery_interval)) == 0)
+    }
+}
+
+/// The list's `list:member:regular:header`/`footer` templates, unexpanded.
 /// Template resolution needs the database; a broken template already fell
 /// back inside the repository, so only a lost connection is a dependency
 /// failure here.
-async fn decorate_for_delivery(
+async fn decoration_templates(
     db: &Database,
     list: &listmngr_core::MailingList,
-    cooked: &[u8],
-) -> Result<Vec<u8>, PrepareError> {
-    let placeholders = listmngr_mail::templates::list_placeholders(list);
+) -> Result<(String, String), PrepareError> {
     let mut texts = Vec::with_capacity(2);
     for name in ["list:member:regular:header", "list:member:regular:footer"] {
         let resolved = db
@@ -148,13 +220,11 @@ async fn decorate_for_delivery(
             .resolve(name, list, &list.preferred_language)
             .await
             .map_err(|_| PrepareError::Dependency)?;
-        texts.push(listmngr_mail::templates::expand(
-            &resolved.body,
-            &placeholders,
-        ));
+        texts.push(resolved.body);
     }
-    listmngr_mail::decorate::decorate(cooked, &texts[0], &texts[1])
-        .map_err(|_| PrepareError::Invalid)
+    let footer = texts.pop().unwrap_or_default();
+    let header = texts.pop().unwrap_or_default();
+    Ok((header, footer))
 }
 
 /// The subscriber copy of a post: the pipeline up to `to-outgoing`, then
@@ -168,27 +238,27 @@ pub async fn prepare_individual(
     context: &str,
     delivery_id: uuid::Uuid,
 ) -> Result<(Vec<u8>, String), PrepareError> {
-    let prepared = prepare_post(db, raw, context, delivery_id, true).await?;
+    let prepared = prepare_post(db, raw, context, delivery_id, true, None).await?;
     Ok((prepared.cooked, prepared.mail_from))
 }
 
-/// The signed bytes of a delivery: one shared copy, or — for a personalized
-/// list — one copy per pending recipient. A failure has already transitioned
-/// the job when this returns `None`.
+/// The signed bytes of a delivery: one shared copy, or one copy per pending
+/// recipient. A failure has already transitioned the job when this returns
+/// `None`.
 async fn signed_copies(
     db: &Database,
     role: &MailRoleConfig,
     lease: &Lease,
     prepared: Prepared,
     pending: &[String],
-) -> Option<(Vec<u8>, String, Option<Vec<Vec<u8>>>)> {
+) -> Option<(Vec<u8>, String, Option<Vec<RecipientCopy>>)> {
     let Prepared {
         cooked,
         mail_from,
-        personalized,
+        per_recipient,
     } = prepared;
-    if let Some(list) = &personalized {
-        let copies = personalized_copies(db, role, list, &cooked, pending).await;
+    if let Some(split) = &per_recipient {
+        let copies = recipient_copies(db, role, split, &cooked, pending).await;
         let copies = local_delivery_result(db, lease, copies).await?;
         return Some((cooked, mail_from, Some(copies)));
     }
@@ -197,59 +267,109 @@ async fn signed_copies(
     Some((signed, mail_from, None))
 }
 
-/// One personalized, signed copy per pending recipient, in order.
-async fn personalized_copies(
+/// One signed copy per pending recipient, in order, with its envelope sender.
+async fn recipient_copies(
     db: &Database,
     role: &MailRoleConfig,
-    list: &listmngr_core::MailingList,
+    split: &PerRecipient,
     cooked: &[u8],
     pending: &[String],
-) -> Result<Vec<Vec<u8>>, PrepareError> {
+) -> Result<Vec<RecipientCopy>, PrepareError> {
+    let list = &split.list;
+    let one_click_signer = match db.base_url() {
+        Some(_) if split.personalization.is_some() => Some(
+            db.one_click()
+                .signer()
+                .await
+                .map_err(|error| lookup_error(&error))?,
+        ),
+        _ => None,
+    };
+    let now_secs = chrono::Utc::now().timestamp();
     let mut copies = Vec::with_capacity(pending.len());
     for recipient in pending {
-        let copy = personalize_for(db, list, cooked, recipient).await?;
+        let mut bytes = cooked.to_vec();
+        if let Some(personalization) = &split.personalization {
+            let member = db
+                .delivery()
+                .recipient(list, recipient)
+                .await
+                .map_err(|error| lookup_error(&error))?;
+            bytes = personalize_for(
+                list,
+                personalization,
+                &bytes,
+                recipient,
+                member.as_ref(),
+                one_click_signer.as_ref().zip(db.base_url()),
+                now_secs,
+            )?;
+        }
         let signed = if role.dkim.is_empty() {
-            copy
+            bytes
         } else {
             role.dkim
-                .sign(list.id.mail_host(), copy)
+                .sign(list.id.mail_host(), bytes)
                 .map_err(|_| PrepareError::Invalid)?
         };
-        copies.push(signed);
+        let mail_from = if split.verp {
+            listmngr_core::verp::encode(&role.verp_format, &list.id, recipient)
+        } else {
+            None
+        };
+        copies.push(RecipientCopy {
+            bytes: signed,
+            mail_from,
+        });
     }
     Ok(copies)
 }
 
-/// The recipient's own copy of a personalized delivery: the RFC 8058
-/// one-click unsubscribe pair when the site has a base URL and the
-/// recipient is a member. (Further personalization — VERP, `$user_*`
-/// placeholders, `To:` rewriting — belongs to the personalize work package.)
-async fn personalize_for(
-    db: &Database,
+/// Mailman's personalized copy: decoration expanded with the member's
+/// `$user_*` placeholders, the `To:` rewrite for `full`, and the RFC 8058
+/// one-click pair when the site has a base URL and the recipient is a
+/// member.
+fn personalize_for(
     list: &listmngr_core::MailingList,
+    personalization: &Personalization,
     cooked: &[u8],
     recipient: &str,
+    member: Option<&listmngr_db::delivery::DeliveryRecipient>,
+    one_click: Option<(&listmngr_core::one_click::Signer, &str)>,
+    now_secs: i64,
 ) -> Result<Vec<u8>, PrepareError> {
-    let Some(base_url) = db.base_url() else {
-        return Ok(cooked.to_vec());
-    };
-    let url = db
-        .one_click()
-        .url_for(
+    use listmngr_mail::personalize;
+    let profile = member.map_or_else(
+        || personalize::Recipient {
+            email: recipient.to_owned(),
+            delivered_to: recipient.to_owned(),
+            display_name: String::new(),
+            language: list.preferred_language.clone(),
+        },
+        |member| member.profile.clone(),
+    );
+    let placeholders = personalize::placeholders(list, &profile);
+    let mut bytes = listmngr_mail::decorate::decorate(
+        cooked,
+        &listmngr_mail::templates::expand(&personalization.header, &placeholders),
+        &listmngr_mail::templates::expand(&personalization.footer, &placeholders),
+    )
+    .map_err(|_| PrepareError::Invalid)?;
+    if personalization.mode == listmngr_core::Personalization::Full {
+        bytes = personalize::rewrite_to(&bytes, &profile).map_err(|_| PrepareError::Invalid)?;
+    }
+    if let (Some(member), Some((signer, base_url))) = (member, one_click) {
+        let url = listmngr_db::one_click::OneClickRepo::url_for_member(
+            signer,
             base_url,
             &list.id,
-            recipient,
-            chrono::Utc::now().timestamp(),
-        )
-        .await
-        .map_err(|error| lookup_error(&error))?;
-    url.map_or_else(
-        || Ok(cooked.to_vec()),
-        |url| {
-            listmngr_mail::personalize::one_click_unsubscribe(cooked, list, &url)
-                .map_err(|_| PrepareError::Invalid)
-        },
-    )
+            member.member_id,
+            now_secs,
+        );
+        bytes = personalize::one_click_unsubscribe(&bytes, list, &url)
+            .map_err(|_| PrepareError::Invalid)?;
+    }
+    Ok(bytes)
 }
 
 /// The bytes and envelope sender of a delivery, for tests of the projection.
@@ -260,13 +380,15 @@ async fn prepare_delivery(
     raw: &[u8],
     context: &str,
 ) -> Option<(Vec<u8>, String)> {
-    prepare_delivery_full(db, lease, raw, context)
+    let role = MailRoleConfig::from_core(&listmngr_core::Config::default()).expect("default role");
+    prepare_delivery_full(db, &role, lease, raw, context)
         .await
         .map(|prepared| (prepared.cooked, prepared.mail_from))
 }
 
 async fn prepare_delivery_full(
     db: &Database,
+    role: &MailRoleConfig,
     lease: &Lease,
     raw: &[u8],
     context: &str,
@@ -274,7 +396,7 @@ async fn prepare_delivery_full(
     let unpersonalized = |cooked: Vec<u8>, mail_from: String| Prepared {
         cooked,
         mail_from,
-        personalized: None,
+        per_recipient: None,
     };
     let result = async {
         if db
@@ -313,7 +435,18 @@ async fn prepare_delivery_full(
                 .map_err(|_| PrepareError::Dependency)?;
             Ok(unpersonalized(raw.to_vec(), list.bounces_address()))
         } else {
-            prepare_post(db, raw, context, lease.job.id.0, true).await
+            prepare_post(
+                db,
+                raw,
+                context,
+                lease.job.id.0,
+                true,
+                Some(VerpPolicy {
+                    personalized_deliveries: role.verp_personalized_deliveries,
+                    delivery_interval: role.verp_delivery_interval,
+                }),
+            )
+            .await
         }
     }
     .await;
@@ -384,7 +517,8 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
             return;
         }
     };
-    let Some(prepared) = prepare_delivery_full(db, &lease, &message.raw, &message.context).await
+    let Some(prepared) =
+        prepare_delivery_full(db, role, &lease, &message.raw, &message.context).await
     else {
         return;
     };
@@ -457,7 +591,7 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
         &pending,
         &cooked,
         &envids,
-        variants.as_deref().map(<[Vec<u8>]>::as_ref),
+        variants.as_deref(),
     )
     .await;
     finish_delivery(db, &lease, &pending, &results).await;
@@ -476,8 +610,9 @@ async fn send_transactions(
 ) -> Vec<RecipientStatus> {
     send_transactions_with_envid(stream, role, sender, pending, cooked, &[], None).await
 }
-/// `variants`, when given, holds one message per pending recipient (in
-/// order) and forces one transaction per recipient.
+/// `variants`, when given, holds one copy per pending recipient (in order)
+/// and forces one transaction per recipient; a copy's own envelope sender
+/// (VERP) overrides `sender`.
 async fn send_transactions_with_envid(
     stream: tokio::net::TcpStream,
     role: &MailRoleConfig,
@@ -485,7 +620,7 @@ async fn send_transactions_with_envid(
     pending: &[String],
     cooked: &[u8],
     envids: &[String],
-    variants: Option<&[Vec<u8>]>,
+    variants: Option<&[RecipientCopy]>,
 ) -> Vec<RecipientStatus> {
     let config = SmtpClientConfig {
         local_hostname: role.local_hostname.clone(),
@@ -517,14 +652,14 @@ async fn send_transactions_with_envid(
             ]);
             continue;
         };
-        let bytes = variants
-            .and_then(|copies| copies.get(index))
-            .map_or(cooked, Vec::as_slice);
+        let copy = variants.and_then(|copies| copies.get(index));
+        let bytes = copy.map_or(cooked, |copy| copy.bytes.as_slice());
+        let transaction_sender = copy.and_then(|copy| copy.mail_from.as_deref()).or(sender);
         match send_secure_with_envid(
             stream,
             &config,
             &role.smtp_tls,
-            sender,
+            transaction_sender,
             recipients,
             bytes,
             envids.get(index).map(String::as_str),

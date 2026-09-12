@@ -50,6 +50,13 @@ pub struct MailRoleConfig {
     pub smtp_relay: SocketAddr,
     /// Separate SMTP sessions per recipient for non-null list envelopes only.
     pub smtp_single_recipient: bool,
+    /// `[mta] verp_format` and `verp_delimiter`, validated at load.
+    pub verp_format: String,
+    pub verp_delimiter: String,
+    /// `[mta] verp_personalized_deliveries`.
+    pub verp_personalized_deliveries: bool,
+    /// `[mta] verp_delivery_interval`; zero never.
+    pub verp_delivery_interval: u32,
     pub dsn_issuer: Option<listmngr_core::dsn_issuance::Issuer>,
     pub smtp_tls: listmngr_mail::smtp::TransportSecurity,
     pub max_recipients: usize,
@@ -95,6 +102,10 @@ impl MailRoleConfig {
             lmtp_listen,
             smtp_relay,
             smtp_single_recipient: config.mta.smtp_single_recipient,
+            verp_format: config.mta.verp_format.clone(),
+            verp_delimiter: config.mta.verp_delimiter.clone(),
+            verp_personalized_deliveries: config.mta.verp_personalized_deliveries,
+            verp_delivery_interval: config.mta.verp_delivery_interval,
             dsn_issuer: listmngr_core::dsn_issuance::Issuer::load(&config.mta)?,
             smtp_tls: listmngr_mail::smtp::TransportSecurity::from_mta(&config.mta)?,
             max_recipients: config.mta.max_recipients as usize,
@@ -117,6 +128,7 @@ impl MailRoleConfig {
             max_recipients: self.max_recipients,
             command_timeout: self.command_timeout,
             in_max_attempts: self.in_max_attempts,
+            verp_delimiter: self.verp_delimiter.clone(),
         }
     }
 }

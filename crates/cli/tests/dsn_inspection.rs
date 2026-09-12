@@ -163,6 +163,7 @@ fn inspect_dsn_is_explicit_untrusted_and_read_only() {
             max_recipients: 4,
             command_timeout: Duration::from_secs(3),
             in_max_attempts: 3,
+            verp_delimiter: "+".into(),
         };
         let recipients: Vec<String> = vec!["list-bounces@example.invalid".into()];
         intake.validate_recipient(&recipients[0]).await.unwrap();

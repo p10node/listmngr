@@ -347,6 +347,8 @@ max_sessions_per_connection = 0
 postfix_map_dir = "data/postfix"
 verp_delimiter = "+"
 verp_format = "{bounces}+{local}={domain}"
+verp_personalized_deliveries = false # personalized copies get per-recipient VERP envelopes
+verp_delivery_interval = 0           # every Nth post is delivered per recipient with VERP; 0 never
 
 [web]
 listen = "127.0.0.1:8000"

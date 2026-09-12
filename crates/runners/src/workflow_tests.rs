@@ -151,6 +151,7 @@ async fn help_reply_reaches_command_bot_and_sends_confirmation_not_owner_mail() 
         max_recipients: 10,
         command_timeout: Duration::from_secs(2),
         in_max_attempts: 5,
+        verp_delimiter: "+".into(),
     };
     let sink = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mut role = MailRoleConfig::from_core(&tests::plaintext_config()).unwrap();
@@ -299,6 +300,7 @@ async fn email_confirmation_receipts_complete_join_and_leave_at_smtp() {
         max_recipients: 10,
         command_timeout: Duration::from_secs(2),
         in_max_attempts: 5,
+        verp_delimiter: "+".into(),
     };
     let now = chrono::Utc::now().timestamp_millis();
     for (action, time, count, word) in [

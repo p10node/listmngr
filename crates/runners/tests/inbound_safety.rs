@@ -228,6 +228,7 @@ fn handler(db: Database) -> InboundHandler {
         max_recipients: 10,
         command_timeout: Duration::from_secs(2),
         in_max_attempts: 3,
+        verp_delimiter: "+".into(),
     }
 }
 

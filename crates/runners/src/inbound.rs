@@ -45,12 +45,43 @@ pub struct InboundHandler {
     pub max_recipients: usize,
     pub command_timeout: Duration,
     pub in_max_attempts: i64,
+    /// `[mta] verp_delimiter`: `list-bounces<delimiter>local=domain` names
+    /// the recipient a bounce concerns.
+    pub verp_delimiter: String,
+}
+
+/// Where an inbound recipient address routes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Target {
+    list: ListId,
+    command: Option<&'static str>,
+    /// The recipient a VERP bounce address encodes.
+    verp_recipient: Option<String>,
 }
 
 fn split_recipient(address: &str) -> Option<(String, String)> {
     let (local, domain) = address.rsplit_once('@')?;
     let domain = listmngr_core::normalize_domain(domain).ok()?;
     Some((local.to_ascii_lowercase(), domain))
+}
+
+/// The stored context of one queued submission.
+fn submission_context(
+    list_id: &ListId,
+    mail_from: Option<&str>,
+    hash: &str,
+    verp_recipient: Option<String>,
+) -> serde_json::Value {
+    let mut context = json!({
+        "version": 1,
+        "list_id": list_id.to_string(),
+        "envelope_sender": mail_from,
+        "message_id_hash": hash,
+    });
+    if let Some(recipient) = verp_recipient {
+        context["verp_recipient"] = json!(recipient);
+    }
+    context
 }
 
 fn invalid_metadata() -> RecipientOutcome {
@@ -82,12 +113,10 @@ fn parse_command(route: &str, data: &[u8]) -> Option<EmailCommand> {
 }
 
 impl InboundHandler {
-    async fn delivery_target(
-        &self,
-        recipient: &str,
-    ) -> Result<(ListId, Option<&'static str>), RecipientRejection> {
-        // Ordinary recipients were admitted during RCPT. Only suffix routing
-        // needs disambiguation from an exactly-named posting address.
+    async fn delivery_target(&self, recipient: &str) -> Result<Target, RecipientRejection> {
+        // Ordinary recipients were admitted during RCPT. Only suffix and
+        // VERP routing need disambiguation from an exactly-named posting
+        // address.
         let Some((local, domain)) = split_recipient(recipient) else {
             return Err(RecipientRejection::Permanent(
                 "malformed recipient address".into(),
@@ -96,12 +125,17 @@ impl InboundHandler {
         if RESERVED_SUFFIXES
             .iter()
             .any(|suffix| local.ends_with(suffix))
+            || local.contains(&self.verp_delimiter)
         {
             self.target(recipient).await
         } else {
             format!("{local}.{domain}")
                 .parse::<ListId>()
-                .map(|id| (id, None))
+                .map(|id| Target {
+                    list: id,
+                    command: None,
+                    verp_recipient: None,
+                })
                 .map_err(|_| RecipientRejection::Permanent("malformed recipient address".into()))
         }
     }
@@ -116,10 +150,7 @@ impl InboundHandler {
         }
     }
 
-    async fn target(
-        &self,
-        address: &str,
-    ) -> Result<(ListId, Option<&'static str>), RecipientRejection> {
+    async fn target(&self, address: &str) -> Result<Target, RecipientRejection> {
         let Some((local, domain)) = split_recipient(address) else {
             return Err(RecipientRejection::Permanent(
                 "malformed recipient address".into(),
@@ -128,7 +159,25 @@ impl InboundHandler {
         if let Ok(id) = format!("{local}.{domain}").parse::<ListId>()
             && self.list_exists(&id).await?
         {
-            return Ok((id, None));
+            return Ok(Target {
+                list: id,
+                command: None,
+                verp_recipient: None,
+            });
+        }
+        // A VERP bounce address: the list's bounces address with the
+        // recipient encoded after the delimiter.
+        if let Some((bounces, recipient)) =
+            listmngr_core::verp::decode(&local, &self.verp_delimiter)
+            && let Some(base) = bounces.strip_suffix("-bounces")
+            && let Ok(id) = format!("{base}.{domain}").parse::<ListId>()
+            && self.list_exists(&id).await?
+        {
+            return Ok(Target {
+                list: id,
+                command: Some("bounces"),
+                verp_recipient: Some(recipient),
+            });
         }
         for suffix in RESERVED_SUFFIXES {
             let Some(base) = local.strip_suffix(suffix) else {
@@ -141,7 +190,11 @@ impl InboundHandler {
                     .iter()
                     .find(|(supported, _)| Some(*supported) == suffix.strip_prefix('-'))
                 {
-                    return Ok((id, Some(command)));
+                    return Ok(Target {
+                        list: id,
+                        command: Some(command),
+                        verp_recipient: None,
+                    });
                 }
                 return Err(RecipientRejection::Permanent(format!(
                     "list command address ({suffix}) is not implemented by this runtime"
@@ -192,7 +245,11 @@ impl LmtpHandler for InboundHandler {
         let mut queued_indices = Vec::with_capacity(recipients.len());
         for recipient in recipients {
             let target = self.delivery_target(recipient).await;
-            let (list_id, command) = match target {
+            let Target {
+                list: list_id,
+                command,
+                verp_recipient,
+            } = match target {
                 Ok(target) => target,
                 Err(error) => {
                     outcomes.push(RecipientOutcome {
@@ -230,12 +287,7 @@ impl LmtpHandler for InboundHandler {
                 });
                 continue;
             }
-            let mut context = json!({
-                "version": 1,
-                "list_id": list_id.to_string(),
-                "envelope_sender": mail_from,
-                "message_id_hash": hash,
-            });
+            let mut context = submission_context(&list_id, mail_from, &hash, verp_recipient);
             if command == Some("owner") {
                 context["owner_route"] = json!(true);
             } else if let Some(command) = command.filter(|_| !bounce) {

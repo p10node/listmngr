@@ -4,6 +4,7 @@
 
 pub mod dsn_issuance;
 pub mod one_click;
+pub mod verp;
 
 use std::{
     fmt,
@@ -958,6 +959,7 @@ impl Config {
             ));
         }
         config.mta.smtp_auth_credentials()?;
+        verp::validate(&config.mta.verp_format, &config.mta.verp_delimiter)?;
         Ok(config)
     }
 
@@ -1089,7 +1091,13 @@ config_struct!(MtaConfig {
     command_timeout_secs: u32 = 30,
     postfix_map_dir: String = "data/postfix".into(),
     verp_delimiter: String = "+".into(),
-    verp_format: String = "{bounces}+{local}={domain}".into()
+    verp_format: String = "{bounces}+{local}={domain}".into(),
+    // Mailman's `verp_personalized_deliveries`: personalized copies use a
+    // per-recipient VERP envelope sender.
+    verp_personalized_deliveries: bool = false,
+    // Mailman's `verp_delivery_interval`: every Nth post of a list is
+    // delivered one recipient per transaction with VERP senders; 0 never.
+    verp_delivery_interval: u32 = 0
 });
 impl MtaConfig {
     /// Validate bounded AUTH PLAIN inputs, reading a private regular password file if set.

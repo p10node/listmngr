@@ -153,6 +153,29 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-PERSONALIZE-VERP — bounded acceptance verified
+
+`prepare_post` now decides how a subscriber delivery is split. It resolves
+the decoration templates once (`decoration_templates`) and, for a
+non-personalized list, expands and applies them immediately as before; for
+a personalized list it returns the undecorated bytes with a `PerRecipient`
+plan carrying the list, the unexpanded templates and the `personalize`
+mode. `recipient_copies` then builds each recipient's copy: the member
+profile from `DeliveryRepo::recipient`, `personalize::placeholders` for the
+`$user_*` values, `decorate`, the `To:` rewrite for `full`, the one-click
+pair, a DKIM signature, and — when the VERP policy applies — the envelope
+sender from `listmngr_core::verp::encode`. `send_transactions_with_envid`
+takes a copy's own `MAIL FROM` over the shared one, so VERP and
+`smtp_single_recipient` compose with the existing ENVID fencing.
+
+The `VerpPolicy` mirrors Mailman: `verp_personalized_deliveries` and
+`verp_delivery_interval` (on the list's `post_id`, which `after-delivery`
+bumps at acceptance). Intake decodes `list-bounces<delim>local=domain`
+before the reserved-suffix scan and records `verp_recipient` in the queued
+context; the bounce runner (C3) will prefer it over detector output. The
+Postfix map generator emits one regexp per list for these addresses so the
+MTA needs no `recipient_delimiter` (the snippet leaves it empty on purpose).
+
 ## P2-ONE-CLICK-UNSUBSCRIBE — bounded acceptance verified
 
 The out runner now has a per-recipient path. `prepare_delivery_full`
