@@ -1,6 +1,6 @@
 # Deployment artifacts
 
-These artifacts cover Phase 0 deployment bootstrapping. They do **not** claim a Phase 2 mail path.
+These artifacts cover deployment bootstrapping: the web/API service, PostgreSQL and a Postfix front MTA. Verified in containers against fixture maps; a deployed end-to-end mail acceptance remains the operator's gate.
 
 ## Docker Compose
 
@@ -15,6 +15,10 @@ curl --fail --show-error http://127.0.0.1:8000/healthz
 curl --fail --show-error http://127.0.0.1:8000/readyz
 docker compose --env-file .env -f deploy/docker-compose.yml down
 ```
+
+With the example `.env`, Postfix listens on `127.0.0.1:2525`; set
+`POSTFIX_SMTP_LISTEN=0.0.0.0:25` and `LISTMNGR_MAIL_HOSTNAME` for a real
+deployment.
 
 Compose interpolates one `POSTGRES_PASSWORD` into both PostgreSQL and the application URL. The committed example is not a production secret. Use URL-escaped password characters or provide a complete protected URL through another deployment mechanism.
 
@@ -63,21 +67,41 @@ not implemented. Required mode never falls back; failures remain queue retries
 without mailbox bounce events. LMTP remains plaintext and must stay isolated.
 This is locally fixture-tested, not deployed Compose/systemd/MTA acceptance.
 
-## MTA integration boundary
+## MTA integration
 
-Postfix/Exim remains responsible for internet SMTP. The current opt-in runtime
-has an LMTP listener and bounded mail delivery, but the snippets remain disabled
-because whole-MTA, bounce and release acceptance are not complete. `listmngr
-aliases regen` now publishes explicit Postfix regexp map generations; see
-[the map-generation runbook](../docs/POSTFIX_MAPS.md). It does not activate the
-mail role or reload an MTA. Exim map generation remains unimplemented.
+Postfix/Exim remains responsible for internet SMTP; listmngr speaks LMTP in and
+SMTP out. Compose now runs a Postfix front MTA (`deploy/postfix/Dockerfile`,
+`deploy/postfix/main.cf`, `deploy/postfix/entrypoint.sh`) next to listmngr:
 
-Before Phase 2 activation, operators must verify all of the following:
+- listmngr runs with the mail role on (`LISTMNGR__MTA__ENABLED=true`), LMTP on
+  the private network only, `incoming = postfix` and `map_directory =
+  /var/lib/listmngr/mta` on the shared `mta-maps` volume, and Postfix as its
+  `plaintext_trusted_relay` at the static address `172.28.0.25:25`.
+- Postfix mounts the volume read-only, waits for the first generation, accepts
+  mail for the list domains only (`relay_domains`, `relay_recipient_maps`,
+  `transport_maps` on `current/`), hands it to `lmtp:[172.28.0.10]:8024`, relays
+  from `mynetworks` (the Compose subnet) and reloads when `current` changes.
+- `LISTMNGR_MAIL_HOSTNAME` is the hostname Postfix announces and listmngr's
+  `local_hostname`; `POSTFIX_SMTP_LISTEN` binds port 25 (`0.0.0.0:25` for a
+  real deployment, a loopback port for trials); `POSTFIX_RELAYHOST` names an
+  optional smart host, otherwise Postfix delivers to MX directly. Postfix is the
+  only service that keeps capabilities (the minimum `master` needs to bind port
+  25 and switch to the `postfix` user); it is not read-only because of its spool.
 
-1. `listmngr` has a tested LMTP listener on `127.0.0.1:8024` (or a deliberately secured private address).
-2. Recipient/domain maps are generated atomically and refreshed with the MTA-specific command.
-3. Unknown recipients fail closed without creating a backscatter/open-relay path.
-4. End-to-end tests prove accepted, held, rejected, and delivered messages.
-5. Firewall/MAC policy permits only the intended MTA-to-LMTP flow.
+Verify the shipped configurations without a deployment:
 
-`deploy/postfix/main.cf` and `deploy/exim/listmngr.conf` contain commented Phase 2 examples and activation checks. Compose intentionally omits an MTA until that acceptance exists.
+```sh
+scripts/check-mta-configs.sh   # Docker: Postfix RCPT matrix and Exim `-bt` matrix on fixture maps
+```
+
+Before exposing port 25, operators must still verify:
+
+1. DNS (MX, SPF for the announced hostname, DKIM signing keys) for every list domain.
+2. Unknown recipients fail closed (the script's matrix) and relaying is refused from outside `mynetworks`.
+3. End-to-end acceptance on the deployment host: accepted, held, rejected and delivered messages, restart during delivery.
+4. Firewall/MAC policy permits only the intended MTA-to-LMTP flow; LMTP is plaintext.
+
+`deploy/exim/listmngr.conf` is the equivalent Exim 4 router/transport set for a
+host-installed Exim reading `[mta] incoming = "exim"` maps; see
+[the MTA map runbook](../docs/POSTFIX_MAPS.md). Bounce processing and full
+Mailman replacement acceptance remain open.

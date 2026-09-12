@@ -391,6 +391,12 @@ impl Fixture {
         ));
         env.push(("LISTMNGR__MTA__LOCAL_HOSTNAME".into(), "e2e.invalid".into()));
         env.push(("LISTMNGR__MTA__COMMAND_TIMEOUT_SECS".into(), "5".into()));
+        // The server publishes Postfix maps at startup and after list changes.
+        env.push(("LISTMNGR__MTA__INCOMING".into(), "postfix".into()));
+        env.push((
+            "LISTMNGR__MTA__MAP_DIRECTORY".into(),
+            dir.path().join("mta").display().to_string(),
+        ));
         env.push(("RUST_LOG".into(), "warn".into()));
 
         run_cli(dir.path(), &env, &["migrate"], None);
@@ -554,6 +560,16 @@ impl Drop for Fixture {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn member_delivery_reaches_enabled_member_and_excludes_disabled_member() {
     let fixture = Fixture::start().await;
+    // Startup published the MTA maps for the list created before it ran.
+    let transport =
+        std::fs::read_to_string(fixture.dir.path().join("mta/current/transport.regexp")).unwrap();
+    assert!(
+        transport.contains(&format!(
+            "/^dev@e2e\\.example\\.invalid$/ lmtp:[127.0.0.1]:{}\n",
+            fixture.lmtp_port
+        )),
+        "{transport}"
+    );
     let sender = fixture.add_member("sender@e2e.example.invalid");
     let _ = sender;
     let enabled = fixture.add_member("enabled@e2e.example.invalid");

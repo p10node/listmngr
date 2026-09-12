@@ -28,6 +28,7 @@ pub mod html_text;
 pub mod list_headers;
 pub mod lmtp;
 pub mod mime_delete;
+pub mod mta;
 pub mod owner;
 pub mod personalize;
 pub mod reply_to;

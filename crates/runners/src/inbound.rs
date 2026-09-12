@@ -21,21 +21,7 @@ const RESERVED_SUFFIXES: &[&str] = &[
     "-confirm",
 ];
 
-/// Supported sub-address routes (without the leading hyphen), including owner
-/// forwarding and the untrusted bounce inbox.
-///
-/// Map producers share this contract; token-bearing plus extensions remain
-/// unsupported. The historical constant name is retained.
-pub const COMMAND_SUFFIXES: &[(&str, &str)] = &[
-    ("owner", "owner"),
-    ("bounces", "bounces"),
-    ("join", "join"),
-    ("subscribe", "join"),
-    ("leave", "leave"),
-    ("unsubscribe", "leave"),
-    ("confirm", "confirm"),
-    ("request", "request"),
-];
+pub use listmngr_mail::mta::COMMAND_SUFFIXES;
 
 #[derive(Debug, Clone)]
 pub struct InboundHandler {

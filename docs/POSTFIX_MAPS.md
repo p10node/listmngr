@@ -1,133 +1,146 @@
-# Explicit Postfix map generations
+# MTA map generations (Postfix and Exim)
 
-`listmngr aliases regen --output DIRECTORY [--lmtp-target IP:PORT]` generates
-Postfix lookup data from the current list identity snapshot. This is an
-experimental deployment building block, **not permission to activate live mail**
-and not full Phase 2/Mailman acceptance.
+listmngr does what Mailman's `IMailTransportAgentAliases` does: it writes the
+lookup data a front MTA needs to accept mail for list addresses and hand it
+to LMTP. `[mta] incoming` selects the MTA, and maps are published
+
+- at server startup,
+- after every list creation or removal (REST, CLI), and
+- on demand with `listmngr aliases regen`.
+
+Each publication is an immutable `generation-<uuid7>` directory under
+`[mta] map_directory`; the `current` symlink (relative, so another mount of
+the directory resolves it) is switched to it afterwards, and generations
+beyond `map_generations_kept` are pruned, oldest first. An MTA therefore never
+reads a partial map, and a failed publish leaves the selected generation in
+place.
+
+## Configuration
+
+```toml
+[mta]
+incoming = "postfix"                 # none | postfix | exim
+map_directory = "data/mta"           # generations and the `current` symlink
+lmtp_map_target = "127.0.0.1:8024"   # host:port as the MTA reaches LMTP; defaults to lmtp_listen
+transport_file_type = "regex"        # Postfix: regex (read directly) | hash (compiled by postmap)
+postmap_command = "/usr/sbin/postmap"
+map_permissions = "group"            # owner (0700/0600) | group (0750/0640) | world (0755/0644)
+map_generations_kept = 5
+```
+
+`lmtp_map_target` accepts an IP literal or a DNS name (a Compose service
+name, for instance); wildcard, multicast and scoped addresses and port zero
+are rejected, and a wildcard `lmtp_listen` needs an explicit target. Hidden
+list identities are in the maps, so the default grants read access to the
+service account's group only: add the MTA user to it (the Compose Postfix
+image does this with a `listmngr` group of GID 1000) or choose `world`
+deliberately.
 
 ## Generate and inspect
 
-Use your existing protected application configuration and an already migrated
-database. The command does not migrate, change business records, start workers,
-run `postmap`, alter Postfix configuration, or reload any service.
-
 ```sh
 listmngr --config /etc/listmngr/listmngr.toml aliases regen \
-  --output /var/lib/listmngr/postfix \
-  --lmtp-target 127.0.0.1:8024
+  [--output DIRECTORY] [--lmtp-target HOST:PORT] [--mta postfix|exim]
 ```
 
-Stdout is one absolute `generation-UUID` directory path containing:
+Stdout is the absolute generation directory. Flags override the
+configuration; with `incoming = "none"` the command writes Postfix maps. The
+command reads lists with one SELECT and performs no business or audit write,
+no migration, no MTA configuration change and no reload.
 
-- `domains.regexp`: only domains that currently contain lists.
-- `recipients.regexp`: exact supported recipient addresses, including hidden lists.
-- `transport.regexp`: the same exact addresses mapped to `lmtp:[IP]:PORT`.
+### Postfix, `transport_file_type = "regex"`
 
-These are **regexp** maps, not `hash` databases or virtual-address rewrites.
-Do not compile them with `postmap FILE`. Query with `postmap -q KEY regexp:FILE`.
-Regexps are anchored and dots escaped; Postfix's default case-insensitive matching
-is retained. No wildcard recipient/domain, subdomain, or plus-extension rule is
-emitted. Regexp lookup is linear; large-site performance is not certified.
+- `domains.regexp`: domains that currently contain lists → `OK`.
+- `recipients.regexp`: every exact posting and command address (`-join`,
+  `-subscribe`, `-leave`, `-unsubscribe`, `-request`, `-confirm`, `-owner`,
+  `-bounces`) plus one VERP pattern per list
+  (`list-bounces\+[^@=]+=[^@=]+@host`) → `OK`.
+- `transport.regexp`: the same keys → `lmtp:[HOST]:PORT`.
 
-The destination defaults to `mta.lmtp_listen`. Specify `--lmtp-target` when the
-listener binds a wildcard or Postfix connects from a different network namespace.
-IPv4 and IPv6 socket literals are supported; wildcard/multicast addresses, port
-zero and scoped IPv6 destinations are rejected. A syntactically valid target is
-not a connectivity check. LMTP is plaintext and must remain behind the trusted MTA
-on loopback or a deliberately secured private network.
+Regexps are anchored, dots escaped, case-insensitive by Postfix default. No
+wildcard domain, subdomain or other plus extension is emitted. Do not
+`postmap` these files; query them with `postmap -q KEY regexp:FILE`. Postfix
+reads a regexp table when a daemon opens it, so run `postfix reload` (the
+Compose entrypoint does) after selecting a new generation. Regexp lookup is
+linear; large-site performance is not certified.
+
+### Postfix, `transport_file_type = "hash"`
+
+Mailman's file names and rows: `postfix_domains` (`example.org example.org`)
+and `postfix_lmtp` (`list@example.org lmtp:[HOST]:PORT`, one row per exact
+address, no VERP rows), each compiled by `postmap_command` into `.db` inside
+the staging directory before the generation is published; a failing `postmap`
+publishes nothing. Use `hash:` tables with `recipient_delimiter = +` so
+Postfix strips the VERP extension before the lookup, exactly as Mailman
+documents. Alpine's Postfix ships without `hash` support (`lmdb` instead);
+the Compose image therefore uses `regex`.
+
+### Exim
+
+- `exim_domains`: one domain per line (`lsearch`).
+- `exim_recipients`: one exact address per line (`lsearch`).
+
+`deploy/exim/listmngr.conf` carries the `listmngr_lists` manualroute router
+(`local_part_suffix = +*`, optional; the condition accepts a suffix only on a
+`-bounces` local part in the `+local=domain` shape), a `listmngr_unknown`
+router that fails every other address in a list domain with
+`no such list address`, and the `listmngr_lmtp` transport
+(`protocol = lmtp`, `rcpt_include_affixes`). Add the domains file to
+`domainlist relay_to_domains` so the default RCPT ACL verifies recipients
+through these routers.
 
 ## Supported addresses and fail-closed limits
 
-For each list, the generator includes its exact posting address plus `-join`,
-`-subscribe`, `-leave`, `-unsubscribe`, `-request`, bare `-confirm`, `-owner`,
-and bare `-bounces`.
-The generator and LMTP dispatcher share the command-suffix table. An exact list
-named, for example, `team-join` still takes precedence over the `team` join command
-at the dispatcher; deduplication does not change this rule.
-
-The runtime does **not** implement `-bounces+VERP` or `-confirm+TOKEN`
-commands, so the generator does not claim those addresses. An actual list with
-a reserved suffix still has its ordinary exact posting address. Alias domains
-are not emitted: the current LMTP lookup does not resolve them. Command parsing,
-sender checks and subscription policy can still reject a message at DATA after
-an address matches; matching is not a promise of message acceptance. `-owner`
-uses experimental administrative forwarding to owners and moderators, not
-subscriber posting. Automatic/list traffic is refused and empty/unsafe rosters
-are shunted. Existing generations must be explicitly regenerated and reviewed
-to include the new route; no map activation/reload occurs automatically.
-
-Bare `-bounces` now retains null-sender/automatic reports in a durable, untrusted
-inbox; `queue ls --queue bounces` and `queue show ID --raw` permit explicit
-operator inspection. It does not forward, score or disable anyone; no automatic
-consumer/cleanup is implemented. Regenerate and review maps explicitly to add
-this route; do not activate a deployment as part of these fixture checks.
-
-**Bounce processing remains a release blocker.** Outbound list mail has a
-receiving inbox but no authenticated VERP/DSN processing pipeline. This map generator
-must not be represented as a ready-to-cut-over replacement for a live Mailman
-installation.
+The generator and the LMTP dispatcher share the command-suffix table. An exact
+list named `team-join` still takes precedence over the `team` join command at
+the dispatcher; the maps contain the address once either way. A `-confirm+TOKEN`
+extension is not a runtime address and is not advertised. Alias domains are not
+emitted. Matching is not a promise of acceptance: sender checks and policy can
+still refuse at DATA.
 
 ## Publication and regeneration
 
-The operator must own and protect DIRECTORY and its parent path. All maps come
-from one list SELECT, are sorted/deduplicated, written into a private staging
-directory, and individually synced. The staging directory is synced, renamed to
-a fresh generation on the same filesystem, and its parent synced before success.
-No currently published generation is overwritten. Failed database reads publish
-nothing; filesystem failure does not replace an old generation. A crash may
-leave a hidden `.staging-*` directory, or a complete unselected generation. No
-automatic activation or crash-cleanup process is implied.
+Maps are rendered from one list SELECT, sorted and deduplicated, written into a
+private staging directory (each file synced, permissions applied), the staging
+directory synced, renamed to a fresh generation on the same filesystem, the
+`current` link swapped through a temporary link and rename, the parent synced,
+then old generations pruned. Failed database reads publish nothing; filesystem
+failure never replaces or unselects a published generation. A crash may leave a
+hidden `.staging-*` directory. The durability guarantee assumes the output
+directory and its ancestors already exist durably; the CLI can create a missing
+tree but does not sync every new ancestor.
 
-The durability guarantee assumes the output directory and its ancestors already
-exist durably. The CLI can create a missing directory tree, but does not sync
-every newly created ancestor entry. A power loss can therefore lose that new
-tree even after successful generation. Provision and durably establish the
-protected output root separately when crash durability is required. No
-power-loss test has been performed; directory rename atomicity and full-tree
-crash durability are different guarantees.
-
-Generation directories initially have private permissions (0700 on Unix), since
-hidden list identities are sensitive. Explicitly grant the local Postfix account
-only the traverse/read access it requires; do not make these files public or
-serve the directory over HTTP. Keep old generations for controlled rollback.
-Automatic garbage collection and automatic regeneration after REST/CLI list
-mutations are not implemented. Rerun after creating/removing lists and inspect the
-new generation before selecting it.
+After a REST or CLI list change, a failed regeneration is logged (or printed to
+stderr) and the list change stands; rerun `aliases regen`. At server startup an
+unwritable map directory is a startup failure.
 
 ## Reviewed activation boundary
 
-`deploy/postfix/main.cf` is a commented example, not an enabled configuration.
-For a **dedicated relay-domain MTA**, reviewed configuration must point
-`relay_domains`, `relay_recipient_maps`, and `transport_maps` at the three files
-inside the **same explicit generation path**. `local_recipient_maps` is not the
-recipient guard for relay domains. Preserve unknown-recipient checks, reject
-unauthorized relay, and keep list domains out of `mydestination` and virtual
-mailbox/alias domain classes. Disable recipient-delimiter fallback for this
-bounded runtime; it does not accept arbitrary plus extensions.
+`deploy/postfix/main.cf` is the configuration of the Compose Postfix image
+(`deploy/postfix/Dockerfile`): relay-domain MTA, no local delivery,
+`relay_domains` / `relay_recipient_maps` / `transport_maps` on
+`/var/lib/listmngr/mta/current/`, `recipient_delimiter` empty, relay only from
+`mynetworks`. On a shared MTA copy those lines only; keep list domains out of
+`mydestination` and the virtual domain classes. Selecting a generation and
+reloading are operator actions outside Compose.
 
-Do not replace unrelated settings on a shared MTA with the example. Chroot paths,
-file permissions, IPv6 availability, firewall/MAC policy and reload semantics
-must be checked on the deployment host. Selecting a new generation is a separate
-operator action: no atomic multi-process Postfix reload or zero-stale-map window
-is claimed by atomic file publication. List removal after generation may leave a
-stale MTA map until refreshed; the LMTP lookup still rejects the removed list.
+Before any authorized cutover, run the held/delivery/restart/unknown-recipient
+and bounce acceptance against a disposable real MTA deployment plus the release
+security gates.
 
-Before any authorized cutover, run the full held/delivery/restart/unknown-recipient
-and bounce acceptance against a disposable actual MTA deployment, plus release
-security/backend gates. The source still lacks full transport authentication,
-bounces, notices and other required product behaviors.
-
-## Reproducible non-delivery checks
+## Reproducible checks
 
 ```sh
+cargo test --locked -p listmngr-mail --test mta_maps
 cargo test --locked -p listmngr --test aliases
-POSTMAP_BIN=/usr/sbin/postmap cargo test --locked -p listmngr --test aliases \
-  real_postfix_lookup_agrees_with_runtime_recipient_validation -- --exact --ignored
+POSTMAP_BIN=/usr/sbin/postmap cargo test --locked -p listmngr --test aliases -- --ignored
+scripts/check-mta-configs.sh   # Docker: Postfix image RCPT matrix, Exim `-bt` matrix
 ```
 
-The second test requires an explicitly selected installed Postfix `postmap`.
-It creates its own Postfix configuration and SQLite database, generates maps
-through the real binary, then compares actual map lookup with the production
-LMTP recipient handler. It does not start an SMTP/LMTP listener or Postfix daemon,
-send email, read deployment credentials, or modify system configuration.
-This proves lookup compatibility, **not SMTP-to-LMTP delivery or IPv6 connectivity**.
+The ignored tests need an explicitly selected installed `postmap`; they create
+their own Postfix configuration and SQLite database and query (or compile and
+query) fixture maps, without a daemon, mail or deployment credentials.
+`scripts/check-mta-configs.sh` builds the Postfix image, runs it against a
+fixture generation and checks a RCPT matrix from inside and outside
+`mynetworks`, then routes the same matrix through the shipped Exim routers with
+`exim -bt` in an Alpine container. Neither delivers to LMTP.

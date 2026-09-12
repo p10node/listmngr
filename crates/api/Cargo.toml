@@ -35,4 +35,5 @@ uuid.workspace = true
 [dev-dependencies]
 oas3 = "0.22.0"
 prometheus-parse = "0.2.5"
+tempfile = "=3.27.0"
 tower.workspace = true

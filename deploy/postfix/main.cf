@@ -1,31 +1,40 @@
-# Experimental deployment documentation. DO NOT enable before MTA acceptance.
-# The opt-in LMTP runtime exists, but full mail delivery/bounce acceptance does
-# not. Generate an explicit map generation with `listmngr aliases regen` first.
-# See docs/POSTFIX_MAPS.md for limits, permissions and operator-owned activation.
-#
-# Dedicated relay-domain MTA example only; replace GENERATION with the exact
-# generation-UUID printed by the CLI. Never overwrite a shared MTA's settings.
-# List domains must not also be in mydestination or virtual domain classes.
-# relay_domains = regexp:/var/lib/listmngr/postfix/GENERATION/domains.regexp
-# transport_maps = regexp:/var/lib/listmngr/postfix/GENERATION/transport.regexp
-# relay_recipient_maps = regexp:/var/lib/listmngr/postfix/GENERATION/recipients.regexp
-# smtpd_reject_unlisted_recipient = yes
-# smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
-# recipient_delimiter =
-# lmtp_destination_recipient_limit = 1
-#
-# Example generated transport rows (the second routes VERP bounces,
-# `list-bounces+local=domain@example.org`, produced when a list is
-# personalized with verp_personalized_deliveries or by verp_delivery_interval;
-# keep recipient_delimiter empty so the full address reaches the maps):
-# /^list@example\.org$/ lmtp:[127.0.0.1]:8024
-# /^list-bounces\+[^@=]+=[^@=]+@example\.org$/ lmtp:[127.0.0.1]:8024
-#
-# Activation gate:
-#   postconf -m  # must include regexp; do NOT compile these as hash maps
-#   postfix check
-#   postmap -q example.org regexp:/var/lib/listmngr/postfix/GENERATION/domains.regexp
-#   postmap -q list@example.org regexp:/var/lib/listmngr/postfix/GENERATION/recipients.regexp
-# Also query unknown recipients and ensure NOT FOUND, not catch-all acceptance.
-# Postmap lookup is not daemon delivery evidence. Reload only after separately
-# authorized MTA end-to-end acceptance and after granting the MTA read access.
+# Front MTA for the Compose deployment (deploy/postfix/Dockerfile). Internet
+# SMTP in for the list domains, LMTP to listmngr, relay out for listmngr.
+# The entrypoint sets myhostname, mynetworks and relayhost from the
+# environment. On a shared MTA copy only the relay/transport lines below and
+# keep list domains out of mydestination and the virtual domain classes.
+compatibility_level = 3.10
+myhostname = lists.example.invalid
+smtpd_banner = $myhostname ESMTP
+inet_interfaces = all
+inet_protocols = all
+maillog_file = /dev/stdout
+
+# No local delivery at all: every accepted recipient is a list address.
+mydestination =
+local_recipient_maps =
+local_transport = error:5.1.1 local delivery is disabled
+alias_maps =
+alias_database =
+
+# listmngr publishes immutable generations under /var/lib/listmngr/mta and
+# switches `current`; the entrypoint reloads Postfix when it changes.
+relay_domains = regexp:/var/lib/listmngr/mta/current/domains.regexp
+relay_recipient_maps = regexp:/var/lib/listmngr/mta/current/recipients.regexp
+transport_maps = regexp:/var/lib/listmngr/mta/current/transport.regexp
+smtpd_reject_unlisted_recipient = yes
+smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+smtpd_recipient_restrictions = reject_non_fqdn_recipient, permit_mynetworks, reject_unauth_destination, reject_unlisted_recipient
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+# The regexp maps match the full VERP address (list-bounces+local=domain);
+# never let Postfix strip an extension first.
+recipient_delimiter =
+# Matches mta.max_message_bytes; the LMTP listener enforces its own limit.
+message_size_limit = 10485760
+
+# Outbound: opportunistic TLS with the public roots; set relayhost through
+# POSTFIX_RELAYHOST for a smart host, otherwise direct MX delivery.
+smtp_tls_security_level = may
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+smtp_tls_loglevel = 1

@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use listmngr_db::{Database, NewList};
+use predicates::prelude::PredicateBooleanExt as _;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -10,6 +11,20 @@ fn command(root: &Path, url: &str) -> Command {
         .current_dir(root)
         .env("LISTMNGR__DATABASE__URL", url);
     command
+}
+
+fn generations(output: &Path) -> usize {
+    std::fs::read_dir(output)
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("generation-")
+        })
+        .count()
 }
 
 fn setup(root: &Path) -> String {
@@ -111,7 +126,12 @@ fn regen_publishes_exact_supported_recipients_in_a_fresh_generation() {
             .any(|line| line.contains('+') && !line.contains("bounces")),
         "plus extensions exist only for VERP bounces"
     );
-    assert_eq!(std::fs::read_dir(&output).unwrap().count(), 1);
+    assert_eq!(generations(&output), 1);
+    assert_eq!(
+        std::fs::read_link(output.join("current")).unwrap(),
+        Path::new(generation.file_name().unwrap()),
+        "`current` selects the new generation"
+    );
 }
 
 #[test]
@@ -211,7 +231,7 @@ fn regeneration_preserves_prior_generations_and_reflects_deletion() {
             .iter()
             .all(|bytes| !String::from_utf8_lossy(bytes).contains("other"))
     );
-    assert_eq!(std::fs::read_dir(&output).unwrap().count(), 3);
+    assert_eq!(generations(&output), 3);
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let db = Database::connect(&url, 1).await.unwrap();
@@ -243,7 +263,115 @@ fn failed_database_or_filesystem_never_replaces_a_published_generation() {
         .code(9);
     assert_eq!(std::fs::read(obstruction).unwrap(), b"must survive");
     assert_eq!(map_bytes(&generation), original);
-    assert_eq!(std::fs::read_dir(output).unwrap().count(), 1);
+    assert_eq!(generations(&output), 1);
+}
+
+#[test]
+fn exim_maps_come_from_the_flag_or_the_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    let url = setup(root.path());
+    let output = root.path().join("maps");
+    let result = command(root.path(), &url)
+        .args(["aliases", "regen", "--mta", "exim", "--output"])
+        .arg(&output)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let generation = std::path::PathBuf::from(String::from_utf8(result).unwrap().trim());
+    assert_eq!(
+        std::fs::read_to_string(generation.join("exim_domains")).unwrap(),
+        "example.invalid\nother.invalid\n"
+    );
+    let recipients = std::fs::read_to_string(generation.join("exim_recipients")).unwrap();
+    assert!(recipients.contains("alpha-owner@example.invalid\n"));
+    assert!(!generation.join("recipients.regexp").exists());
+
+    // `[mta] incoming = "exim"` with `map_directory` needs no flags at all.
+    let configured = root.path().join("configured");
+    let result = command(root.path(), &url)
+        .env("LISTMNGR__MTA__INCOMING", "exim")
+        .env("LISTMNGR__MTA__MAP_DIRECTORY", &configured)
+        .args(["aliases", "regen"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let generation = std::path::PathBuf::from(String::from_utf8(result).unwrap().trim());
+    assert_eq!(
+        generation.parent(),
+        Some(configured.canonicalize().unwrap().as_path())
+    );
+    assert!(generation.join("exim_recipients").exists());
+}
+
+#[test]
+fn list_creation_and_removal_regenerate_the_maps_when_an_mta_is_configured() {
+    let root = tempfile::tempdir().unwrap();
+    let url = setup(root.path());
+    let maps = root.path().join("maps");
+    let configured = |root: &Path| {
+        let mut command = command(root, &url);
+        command
+            .env("LISTMNGR__MTA__INCOMING", "postfix")
+            .env("LISTMNGR__MTA__MAP_DIRECTORY", &maps)
+            .env("LISTMNGR__MTA__LMTP_MAP_TARGET", "listmngr:8024");
+        command
+    };
+    configured(root.path())
+        .args([
+            "lists",
+            "create",
+            "gamma.example.invalid",
+            "--display-name",
+            "Gamma",
+        ])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("MTA maps regenerated"));
+    let current = maps.join("current");
+    let transport = std::fs::read_to_string(current.join("transport.regexp")).unwrap();
+    assert!(transport.contains("/^gamma@example\\.invalid$/ lmtp:[listmngr]:8024\n"));
+    configured(root.path())
+        .args(["lists", "remove", "gamma.example.invalid"])
+        .assert()
+        .success();
+    let transport = std::fs::read_to_string(current.join("transport.regexp")).unwrap();
+    assert!(!transport.contains("gamma"));
+    assert_eq!(generations(&maps), 2);
+
+    // Without an MTA nothing is written, and an unwritable directory does
+    // not undo the list change.
+    command(root.path(), &url)
+        .args([
+            "lists",
+            "create",
+            "delta.example.invalid",
+            "--display-name",
+            "Delta",
+        ])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("MTA maps").not());
+    assert_eq!(generations(&maps), 2);
+    let obstruction = root.path().join("obstruction");
+    std::fs::write(&obstruction, b"not a directory").unwrap();
+    command(root.path(), &url)
+        .env("LISTMNGR__MTA__INCOMING", "postfix")
+        .env("LISTMNGR__MTA__MAP_DIRECTORY", &obstruction)
+        .args(["lists", "remove", "delta.example.invalid"])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "warning: MTA maps not regenerated",
+        ));
+    command(root.path(), &url)
+        .args(["lists", "ls"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("delta").not());
 }
 
 #[test]
@@ -324,4 +452,73 @@ fn real_postfix_lookup_agrees_with_runtime_recipient_validation() {
         }
         db.pool().close().await;
     });
+}
+
+#[test]
+#[ignore = "requires explicit POSTMAP_BIN; compiles and queries only fixture maps, no MTA daemon"]
+fn real_postmap_compiles_hash_maps_that_answer_exact_lookups() {
+    let root = tempfile::tempdir().unwrap();
+    let url = setup(root.path());
+    let postmap = std::env::var_os("POSTMAP_BIN")
+        .expect("set POSTMAP_BIN to the reviewed postmap executable");
+    let config = root.path().join("postfix");
+    std::fs::create_dir(&config).unwrap();
+    let mut config_text = String::from("myhostname = fixture.invalid\n");
+    if cfg!(target_os = "macos") {
+        config_text.push_str("mail_owner = _postfix\nsetgid_group = _postdrop\n");
+    }
+    std::fs::write(config.join("main.cf"), config_text).unwrap();
+    let output = root.path().join("maps");
+    let result = command(root.path(), &url)
+        .env("MAIL_CONFIG", &config)
+        .env("LISTMNGR__MTA__TRANSPORT_FILE_TYPE", "hash")
+        .env("LISTMNGR__MTA__POSTMAP_COMMAND", &postmap)
+        .args(["aliases", "regen", "--output"])
+        .arg(&output)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let generation = std::path::PathBuf::from(String::from_utf8(result).unwrap().trim());
+    assert!(generation.join("postfix_lmtp.db").exists());
+    assert!(generation.join("postfix_domains.db").exists());
+    for (key, file, expected) in [
+        (
+            "alpha@example.invalid",
+            "postfix_lmtp",
+            Some("lmtp:[127.0.0.1]:8024\n"),
+        ),
+        (
+            "alpha-bounces@example.invalid",
+            "postfix_lmtp",
+            Some("lmtp:[127.0.0.1]:8024\n"),
+        ),
+        ("alpha-bounces+x=y@example.invalid", "postfix_lmtp", None),
+        ("missing@example.invalid", "postfix_lmtp", None),
+        (
+            "example.invalid",
+            "postfix_domains",
+            Some("example.invalid\n"),
+        ),
+        ("empty.invalid", "postfix_domains", None),
+    ] {
+        let mut query = Command::new(&postmap);
+        query
+            .env_clear()
+            .current_dir(root.path())
+            .timeout(std::time::Duration::from_secs(10))
+            .arg("-c")
+            .arg(&config)
+            .args(["-q", key])
+            .arg(format!("hash:{}", generation.join(file).display()));
+        match expected {
+            Some(value) => {
+                query.assert().success().stdout(value);
+            }
+            None => {
+                query.assert().code(1).stdout("");
+            }
+        }
+    }
 }
