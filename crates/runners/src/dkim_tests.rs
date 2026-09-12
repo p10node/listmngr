@@ -54,7 +54,7 @@ pub(super) async fn capture(
     let from = format!("MAIL FROM:<{sender}>");
     let rcpt = format!("RCPT TO:<{recipient}>");
     for (prefix, reply) in [
-        ("EHLO", "250 fixture\r\n"),
+        ("EHLO", "250-fixture\r\n250 8BITMIME\r\n"),
         (from.as_str(), "250 ok\r\n"),
         (rcpt.as_str(), "250 ok\r\n"),
         ("DATA", "354 go\r\n"),

@@ -17,7 +17,7 @@ async fn receive_data_with_barrier(
     let mut reader = BufReader::new(reader);
     writer.write_all(b"220 sink\r\n").await.unwrap();
     for (prefix, reply) in [
-        ("EHLO", "250 sink\r\n"),
+        ("EHLO", "250-sink\r\n250 8BITMIME\r\n"),
         ("MAIL", "250 ok\r\n"),
         ("RCPT", "250 ok\r\n"),
         ("DATA", "354 go\r\n"),

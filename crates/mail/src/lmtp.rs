@@ -276,19 +276,90 @@ async fn reply<W: AsyncWrite + Unpin>(
     reply_raw(writer, timeout, code, &borrowed).await
 }
 
-/// Parse a `<...>` path. `None` means malformed input (no `Err` variant needed
-/// since callers only report a fixed 501 reply on failure).
-fn parse_path(rest: &str) -> Option<Path> {
+/// Parse a `<...>` path and return it with whatever follows it (the ESMTP
+/// parameters). `None` means malformed input (no `Err` variant needed since
+/// callers only report a fixed 501 reply on failure).
+fn parse_path(rest: &str) -> Option<(Path, &str)> {
     let rest = rest.trim_start();
     let open = rest.find('<')?;
     let close = rest[open..].find('>').map(|i| open + i)?;
     let inner = &rest[open + 1..close];
-    if inner.is_empty() {
-        Some(Path::Null)
+    let parameters = rest[close + 1..].trim();
+    let path = if inner.is_empty() {
+        Path::Null
     } else if inner.contains(char::is_control) || inner.contains(' ') {
-        None
+        return None;
     } else {
-        Some(Path::Address(inner.to_owned()))
+        Path::Address(inner.to_owned())
+    };
+    Some((path, parameters))
+}
+
+/// Why an ESMTP parameter list was refused. Only the extensions this server
+/// announces in `LHLO` may be used (RFC 1869 §4): anything else is a 555,
+/// never silently ignored, so a client never believes in a service (DSN,
+/// CHUNKING, AUTH) that is not implemented here.
+enum ParameterError {
+    /// 555 5.5.4: syntactically fine, but not an announced extension.
+    Unsupported,
+    /// 501: an announced parameter with an unusable value.
+    Malformed,
+    /// 552 5.3.4: `SIZE=` exceeds the announced maximum, refused now rather
+    /// than after the peer has sent the whole message (RFC 1870 §6.1).
+    TooLarge,
+}
+
+/// Validate `MAIL FROM` parameters: `SIZE=` (RFC 1870) and `BODY=` (RFC
+/// 6152) are the only ones announced.
+fn check_mail_parameters(parameters: &str, max_message_bytes: usize) -> Result<(), ParameterError> {
+    for parameter in parameters.split_ascii_whitespace() {
+        let (keyword, value) = parameter
+            .split_once('=')
+            .ok_or(ParameterError::Unsupported)?;
+        if keyword.eq_ignore_ascii_case("SIZE") {
+            let declared: usize = value.parse().map_err(|_| ParameterError::Malformed)?;
+            if declared > max_message_bytes {
+                return Err(ParameterError::TooLarge);
+            }
+        } else if keyword.eq_ignore_ascii_case("BODY") {
+            // BINARYMIME (RFC 3030) needs CHUNKING, which is not offered.
+            if !value.eq_ignore_ascii_case("7BIT") && !value.eq_ignore_ascii_case("8BITMIME") {
+                return Err(ParameterError::Unsupported);
+            }
+        } else {
+            return Err(ParameterError::Unsupported);
+        }
+    }
+    Ok(())
+}
+
+async fn reply_parameter_error<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    timeout: Duration,
+    error: &ParameterError,
+) -> IoResult<()> {
+    match error {
+        ParameterError::Unsupported => {
+            reply(
+                writer,
+                timeout,
+                555,
+                &["5.5.4 unsupported or unannounced parameter"],
+            )
+            .await
+        }
+        ParameterError::Malformed => {
+            reply(writer, timeout, 501, &["malformed parameter value"]).await
+        }
+        ParameterError::TooLarge => {
+            reply(
+                writer,
+                timeout,
+                552,
+                &["5.3.4 declared message size exceeds the announced maximum"],
+            )
+            .await
+        }
     }
 }
 
@@ -306,6 +377,7 @@ async fn handle_rset<W: AsyncWrite + Unpin>(
 
 async fn handle_mail<W: AsyncWrite + Unpin>(
     session: &mut Session,
+    max_message_bytes: usize,
     writer: &mut W,
     timeout: Duration,
     rest: &str,
@@ -319,9 +391,14 @@ async fn handle_mail<W: AsyncWrite + Unpin>(
     else {
         return reply(writer, timeout, 501, &["malformed MAIL FROM"]).await;
     };
-    let Some(path) = parse_path(rest) else {
+    let Some((path, parameters)) = parse_path(rest) else {
         return reply(writer, timeout, 501, &["malformed reverse-path"]).await;
     };
+    // Parameters are checked before the transaction opens, so a refusal
+    // leaves no half-built transaction behind.
+    if let Err(error) = check_mail_parameters(parameters, max_message_bytes) {
+        return reply_parameter_error(writer, timeout, &error).await;
+    }
     session.mail_from = path;
     session.have_mail_from = true;
     session.recipients.clear();
@@ -349,7 +426,11 @@ async fn handle_rcpt<W: AsyncWrite + Unpin, H: LmtpHandler>(
         return reply(writer, timeout, 501, &["malformed RCPT TO"]).await;
     };
     match parse_path(rest) {
-        Some(Path::Address(address)) => {
+        // No RCPT extension (DSN's NOTIFY/ORCPT included) is announced.
+        Some((_, parameters)) if !parameters.is_empty() => {
+            reply_parameter_error(writer, timeout, &ParameterError::Unsupported).await
+        }
+        Some((Path::Address(address), _)) => {
             match tokio::time::timeout(timeout, handler.validate_recipient(&address)).await {
                 Ok(Ok(())) => {
                     session.recipients.push(address);
@@ -599,7 +680,16 @@ where
                 reply(&mut writer, timeout, 221, &["bye"]).await?;
                 return Ok(());
             }
-            "MAIL" => handle_mail(&mut session, &mut writer, timeout, rest).await?,
+            "MAIL" => {
+                handle_mail(
+                    &mut session,
+                    handler.max_message_bytes(),
+                    &mut writer,
+                    timeout,
+                    rest,
+                )
+                .await?;
+            }
             "RCPT" => handle_rcpt(&mut session, handler, &mut writer, timeout, rest).await?,
             "DATA" => {
                 if handle_data(&mut session, handler, &mut reader, &mut writer, timeout).await?

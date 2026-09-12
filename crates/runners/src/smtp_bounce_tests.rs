@@ -145,7 +145,7 @@ async fn smtp_permanent_failure_records_original_recipient_once() {
         let mut read = BufReader::new(read);
         write.write_all(b"220 fixture\r\n").await.unwrap();
         for (prefix, response) in [
-            ("EHLO", "250 fixture\r\n"),
+            ("EHLO", "250-fixture\r\n250 8BITMIME\r\n"),
             ("MAIL FROM:", "250 ok\r\n"),
             (
                 "RCPT TO:<Mixed@Example.invalid>",

@@ -823,7 +823,7 @@ P2-STORE/P2-QUEUE/P2-CLI/P2-RUNTIME, held, and O2/O3 evidence.
 
 - [ ] Message store (fs, db) + `messages` index + `Message-ID-Hash`
 - [ ] Queue (`queue_jobs`) + claim/backoff/shunt + runner supervisor + graceful shutdown
-- [ ] LMTP server (RFC 2033: LHLO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, PIPELINING, SIZE, 8BITMIME, per-recipient status), sub-address routing, early reject
+- [x] LMTP server (RFC 2033: LHLO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, PIPELINING, SIZE, 8BITMIME, per-recipient status), sub-address routing, early reject
 - [ ] `in` runner + chains + 15 rules (§4.3 trừ news/digests) + header-match chain + DMARC lookup + `munge_from`
 - [ ] Held messages: DB, notices (owner/user), REST held endpoints + actions
 - [ ] Pipeline runner + handlers §4.4 (trừ to-usenet, arc-sign): mime-delete đầy đủ, decorate + placeholders, personalize, VERP

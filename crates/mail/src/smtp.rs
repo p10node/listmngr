@@ -297,6 +297,21 @@ fn resolve_pending(results: &mut [Option<RecipientStatus>], status: &RecipientSt
     }
 }
 
+/// What the caller knows about 8-bit content and the relay's support for it
+/// (RFC 6152). `relay_announced` is only consulted when this negotiation does
+/// not run `EHLO` itself, which happens on the authenticated path.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct EightBit {
+    /// The message contains octets above 0x7F.
+    pub(crate) body: bool,
+    pub(crate) relay_announced: bool,
+}
+
+/// Whether `data` needs the 8BITMIME extension.
+pub(crate) fn is_eight_bit(data: &[u8]) -> bool {
+    data.iter().any(|byte| !byte.is_ascii())
+}
+
 fn finish(results: Vec<Option<RecipientStatus>>) -> SendOutcome {
     SendOutcome {
         results: results
@@ -320,8 +335,10 @@ async fn negotiate<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
     recipients: &[String],
     results: &mut [Option<RecipientStatus>],
     dsn: Option<(&str, bool)>,
+    eight_bit: EightBit,
 ) -> Result<(), ()> {
     let mut supports_dsn = dsn.is_some_and(|(_, supported)| supported);
+    let mut supports_8bitmime = eight_bit.relay_announced;
     if let Some(config) = config {
         let Ok(ehlo) = command(
             writer,
@@ -345,6 +362,23 @@ async fn negotiate<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
             .extensions
             .iter()
             .any(|line| line.eq_ignore_ascii_case("DSN"));
+        supports_8bitmime = ehlo
+            .extensions
+            .iter()
+            .any(|line| line.eq_ignore_ascii_case("8BITMIME"));
+    }
+    // RFC 6152: an 8-bit body may only be handed to a relay that announced
+    // 8BITMIME, and then only with the declaration. Sending it undeclared
+    // would be a protocol violation whose outcome (mangling, rejection) is
+    // the relay's choice, so this fails closed and retries instead.
+    if eight_bit.body && !supports_8bitmime {
+        resolve_pending(
+            results,
+            &RecipientStatus::TransientFailure(
+                "relay does not announce 8BITMIME for an 8-bit message".into(),
+            ),
+        );
+        return Err(());
     }
     if dsn.is_some() && !supports_dsn {
         resolve_pending(
@@ -354,7 +388,10 @@ async fn negotiate<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
         return Err(());
     }
     let from = mail_from.unwrap_or("");
-    let parameter = dsn.map_or_else(String::new, |(envid, _)| format!(" ENVID={envid}"));
+    let mut parameter = dsn.map_or_else(String::new, |(envid, _)| format!(" ENVID={envid}"));
+    if eight_bit.body {
+        parameter.push_str(" BODY=8BITMIME");
+    }
     let Ok(mail) = command(
         writer,
         reader,
@@ -411,6 +448,7 @@ async fn run_transaction<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
     recipients: &[String],
     data: &[u8],
     dsn: Option<(&str, bool)>,
+    eight_bit_relay: bool,
 ) -> SendOutcome {
     let mut results: Vec<Option<RecipientStatus>> = vec![None; recipients.len()];
     if negotiate(
@@ -422,6 +460,10 @@ async fn run_transaction<W: AsyncWrite + Unpin, R: AsyncBufRead + Unpin>(
         recipients,
         &mut results,
         dsn,
+        EightBit {
+            body: is_eight_bit(data),
+            relay_announced: eight_bit_relay,
+        },
     )
     .await
     .is_err()
@@ -552,6 +594,7 @@ async fn send_with_envid<S: AsyncRead + AsyncWrite + Unpin + Send>(
         recipients,
         data,
         envid.map(|v| (v, false)),
+        false,
     )
     .await)
 }

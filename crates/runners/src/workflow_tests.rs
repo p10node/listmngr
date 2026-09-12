@@ -373,7 +373,7 @@ async fn sink_notice(sink: &tokio::net::TcpListener) -> String {
     let mut r = BufReader::new(r);
     w.write_all(b"220 sink\r\n").await.unwrap();
     for (expected, reply) in [
-        ("EHLO", "250 sink\r\n"),
+        ("EHLO", "250-sink\r\n250 8BITMIME\r\n"),
         ("MAIL FROM:<>", "250 ok\r\n"),
         ("RCPT TO:<Exact@example.com>", "250 ok\r\n"),
         ("DATA", "354 go\r\n"),

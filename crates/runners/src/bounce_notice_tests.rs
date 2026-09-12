@@ -79,7 +79,7 @@ async fn peer(sink: &tokio::net::TcpListener, fail: bool) -> String {
     let mut read = BufReader::new(read);
     write.write_all(b"220 fixture\r\n").await.unwrap();
     for (prefix, response) in [
-        ("EHLO", "250 ok\r\n"),
+        ("EHLO", "250-ok\r\n250 8BITMIME\r\n"),
         ("MAIL FROM:<>", "250 ok\r\n"),
         (
             "RCPT TO:<Admin@Example.invalid>",
