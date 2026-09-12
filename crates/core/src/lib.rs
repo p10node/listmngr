@@ -1077,7 +1077,20 @@ config_struct!(MtaConfig {
     retry_max_secs: u32 = 3600,
     max_message_bytes: u32 = 10_485_760,
     command_timeout_secs: u32 = 30,
-    postfix_map_dir: String = "data/postfix".into(),
+    // Mailman's `incoming` MTA: "none", "postfix" or "exim". Lookup maps are
+    // published under `map_directory` as `generation-*` directories behind a
+    // `current` symlink, at startup and after every list creation/removal.
+    map_directory: String = "data/mta".into(),
+    // How the MTA reaches the LMTP listener (`host:port`); defaults to
+    // `lmtp_listen`, which must then be a concrete address.
+    lmtp_map_target: Option<String> = None,
+    // Mailman's `transport_file_type`: "regex" (read directly) or "hash"
+    // (compiled with `postmap_command`).
+    transport_file_type: String = "regex".into(),
+    postmap_command: String = "/usr/sbin/postmap".into(),
+    // Who may read a generation: "owner", "group" or "world".
+    map_permissions: String = "group".into(),
+    map_generations_kept: u32 = 5,
     verp_delimiter: String = "+".into(),
     verp_format: String = "{bounces}+{local}={domain}".into(),
     // Mailman's `verp_personalized_deliveries`: personalized copies use a
@@ -1119,6 +1132,7 @@ impl MtaConfig {
         }
         self.smtp_auth_credentials()?;
         verp::validate(&self.verp_format, &self.verp_delimiter)?;
+        self.validate_maps()?;
         if !(1..=1000).contains(&self.max_recipients_per_transaction) {
             return Err(Error::Validation(
                 "mta.max_recipients_per_transaction must be 1..1000".into(),
@@ -1130,6 +1144,37 @@ impl MtaConfig {
         {
             return Err(Error::Validation(
                 "mta.retry_initial_secs must be 1..3600 and mta.retry_max_secs between it and 86400".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The map-generation vocabulary, whatever `incoming` says, plus the
+    /// LMTP target and retention when maps are written at all.
+    fn validate_maps(&self) -> Result<()> {
+        if !matches!(self.incoming.as_str(), "none" | "postfix" | "exim") {
+            return Err(Error::Validation(
+                "mta.incoming must be \"none\", \"postfix\" or \"exim\"".into(),
+            ));
+        }
+        if !matches!(self.transport_file_type.as_str(), "regex" | "hash") {
+            return Err(Error::Validation(
+                "mta.transport_file_type must be \"regex\" or \"hash\"".into(),
+            ));
+        }
+        if !matches!(self.map_permissions.as_str(), "owner" | "group" | "world") {
+            return Err(Error::Validation(
+                "mta.map_permissions must be \"owner\", \"group\" or \"world\"".into(),
+            ));
+        }
+        if !(1..=100).contains(&self.map_generations_kept) {
+            return Err(Error::Validation(
+                "mta.map_generations_kept must be 1..100".into(),
+            ));
+        }
+        if self.incoming != "none" && self.map_directory.trim().is_empty() {
+            return Err(Error::Validation(
+                "mta.map_directory is required when mta.incoming is set".into(),
             ));
         }
         Ok(())

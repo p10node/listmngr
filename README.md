@@ -677,9 +677,8 @@ verp_personalized_deliveries = true   # personalized copies: list-bounces+member
 verp_delivery_interval = 10           # every 10th post of any list is VERP'd
 ```
 
-Regenerate the Postfix maps afterwards (`listmngr aliases regen`): they
-now route `list-bounces+local=domain@host` to the LMTP intake, which
-records the encoded member on the queued bounce. See `P2-PERSONALIZE-VERP`
+The MTA maps route `list-bounces+local=domain@host` to the LMTP intake,
+which records the encoded member on the queued bounce. See `P2-PERSONALIZE-VERP`
 in `docs/FEATURE_PARITY.md`.
 
 ## One-click unsubscribe (RFC 8058) — bounded acceptance verified
@@ -1218,16 +1217,20 @@ on renewal failure. This removes the short-lease test's dependence on SQLite
 thread scheduling; it is not a guarantee against real scheduler stalls. See
 `P2-LEASE-HEARTBEAT` in `docs/FEATURE_PARITY.md` for evidence and remaining gates.
 
-`listmngr aliases regen --output DIRECTORY [--lmtp-target IP:PORT]` now publishes
-a fresh Postfix regexp-map generation from current lists, including hidden lists.
-It emits only runtime-supported posting/command recipients, never catch-all
-domains or plus extensions; `-owner` and bare `-bounces` are supported. Old generations
-are preserved;
-no database mutation, MTA configuration change or reload is performed. See
-[the Postfix runbook](docs/POSTFIX_MAPS.md) for exact commands, private map
-permissions and the separate activation boundary. Lookup compatibility is tested
-with real Postfix `postmap`; daemon delivery, bounce handling and full Mailman
-replacement acceptance remain open.
+`[mta] incoming = "postfix"` (or `"exim"`) makes listmngr publish the MTA's
+lookup maps the way Mailman does: at startup, after every list creation or
+removal, and on demand with `listmngr aliases regen`. Each run writes an
+immutable `generation-<uuid>` directory under `map_directory`, switches the
+`current` symlink and prunes old generations. Postfix gets anchored `regexp:`
+maps (or Mailman's `hash:` files compiled by `postmap` with
+`transport_file_type = "hash"`), Exim gets `lsearch` files for the routers in
+`deploy/exim/listmngr.conf`. See [the MTA map runbook](docs/POSTFIX_MAPS.md)
+for the formats, permissions and activation boundary. The Compose deployment
+now includes a Postfix front MTA built from `deploy/postfix/Dockerfile` that
+reads the shared map volume, hands list mail to listmngr over LMTP and relays
+its outbound mail; `scripts/check-mta-configs.sh` verifies the shipped Postfix
+and Exim configurations in containers. Daemon delivery through Compose end to
+end, bounce handling and full Mailman replacement acceptance remain open.
 
 List owners now have “List administration” → “List settings” forms for display
 name, description, directory advertising, default member/nonmember posting

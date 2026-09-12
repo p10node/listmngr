@@ -1436,28 +1436,34 @@ exercises real timeout cancellation without expiring the still-valid lease.
 This is compositional scheduler/repository evidence, not a proof of real-time
 scheduling latency or a new PostgreSQL/MTA acceptance run.
 
-## Explicit Postfix map publication
+## MTA map generations
 
-`cli/src/aliases.rs` supplies `aliases regen --output DIRECTORY` with an optional
-concrete `--lmtp-target`. One existing list-repository SELECT supplies all three
-maps, including unadvertised lists. BTree sets deduplicate exact recipients and
-active domains. The map generator and LMTP dispatcher share `COMMAND_SUFFIXES`;
-exact list names still win over suffix routing. Owner routing is supported; bounce and
-plus-token routes and unresolved domain aliases are not advertised.
+`listmngr_mail::mta::MapWriter` is the one producer of MTA lookup data:
+`render` turns list identities into `(file, content)` pairs for Postfix
+(`regexp` rows, or Mailman's `hash` rows) or Exim (`lsearch` lines), and
+`publish` writes them into a private staging directory, applies the
+configured permissions, compiles `hash` maps with `postmap`, renames the
+directory to a `generation-<uuid7>` name, swaps the relative `current`
+symlink and prunes beyond `map_generations_kept`. The generator and the LMTP
+dispatcher share `COMMAND_SUFFIXES` (now defined here and re-exported by the
+runners crate); exact list names still win over suffix routing.
 
-Each output is an anchored POSIX regexp map, not a wildcard-domain transport or
-virtual rewrite. Publication writes/syncs files in a private staging directory,
-syncs it, renames to a new UUID generation on the same filesystem, then syncs the
-parent. Existing generations are never edited. No database/audit write, daemon
-reload, migration, auto-refresh or active-generation pointer is introduced.
-Operators must protect the parent directory and explicitly grant MTA read access.
-This is a snapshot, not a transaction with later list changes or Postfix reload.
+The writer is built from `[mta]` by `MapWriter::from_config` (validated at
+config load by `MtaConfig::validate_maps`) and used from three places:
+`serve` publishes before the HTTP listener is served, REST list creation and
+removal call `refresh_mta_maps` after their transaction commits, and the CLI
+does the same after `lists create/remove` and in `aliases regen`. Map
+publication is a filesystem side effect outside the database transaction, so
+a failure after a committed list change is reported and repaired by rerunning
+`aliases regen`, never rolled back into the list change.
 
-Tests exercise actual CLI publication, prior-generation retention, list deletion,
-input rejection, database/I/O failure, audit non-mutation and actual Postfix
-lookup versus LMTP recipient validation. Postmap uses a fixture-only config and
-does not send mail. No full MTA, PostgreSQL or IPv6-connectivity acceptance is
-inferred. See `POSTFIX_MAPS.md` and acceptance ID `P2-MTA-MAPS`.
+Tests cover rendering for all three formats, `LmtpTarget` parsing, symlink
+switching, permissions and pruning, a stand-in `postmap` and its failure, the
+CLI flags and the regeneration hooks, REST regeneration, startup publication
+in the process-level e2e, and real `postmap` lookups for both Postfix formats
+(ignored, `POSTMAP_BIN`). `scripts/check-mta-configs.sh` runs the shipped
+Postfix image and the Exim routers against fixture generations in containers.
+See `POSTFIX_MAPS.md` and acceptance IDs `P2-MTA-MAPS` and `P2-MTA-INTEGRATION`.
 
 ## Owner browser list settings
 
@@ -2019,10 +2025,20 @@ host client -> 127.0.0.1:8000 -> listmngr (UID 1000, read-only scratch image)
                                       |
                                       +-> postgres:5432 (Compose private network)
 
-internet mail -> Postfix/Exim --[Phase 2 LMTP, currently disabled]--> listmngr
+internet mail -> postfix:25 (172.28.0.25) --LMTP--> listmngr:8024 (172.28.0.10)
+                    ^   reads mta-maps volume (current -> generation-*)
+                    +-- SMTP relay <-- listmngr outbound (plaintext_trusted_relay)
 ```
 
-The Docker builder uses a pinned Alpine Rust image and emits a musl-linked release binary. The final `scratch` image contains the binary and CA roots only, runs as numeric UID/GID 1000, drops capabilities in Compose, and does not need a shell or `curl`. The systemd alternative uses the same non-root trust boundary plus syscall, address-family, kernel, device, home, and filesystem restrictions.
+The Compose Postfix image (`deploy/postfix/Dockerfile`, Alpine with a pinned
+`postfix` package, the `postfix` user in a `listmngr` group of GID 1000) mounts
+the map volume read-only, waits for the first generation, runs `postfix
+start-fg` and reloads itself when `current` changes. Static addresses on the
+Compose network let listmngr name the relay as `mta.smtp_relay` (a socket
+address) and the maps name LMTP without DNS. Port 25 is the only published
+port of that service; LMTP stays unpublished.
+
+The Docker builder uses a pinned Alpine Rust image and emits a musl-linked release binary. The final `scratch` image contains the binary and CA roots only, runs as numeric UID/GID 1000 (which owns `/var/lib/listmngr`, so the map volume mounted there is writable), drops capabilities in Compose, and does not need a shell or `curl`. The systemd alternative uses the same non-root trust boundary plus syscall, address-family, kernel, device, home, and filesystem restrictions.
 
 The builder also pins `musl` and `musl-dev` to `1.2.5-r12`: the Rust base includes a compiler but not the C headers required by `ring` and bundled SQLite. Package tools/headers remain outside the runtime image. The real-client acceptance harness (`scripts/test-mailmanclient.py`) uses a separate loopback process and disposable SQLite database, while `scripts/test-postgres.sh` independently exercises PostgreSQL CRUD, schema, authorization, queue, held, and attempt contracts; see the evidence ledger for which checkpoint passed. CI runs these behavioral probes in addition to Rust and anti-stub gates.
 

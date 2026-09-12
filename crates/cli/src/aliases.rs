@@ -1,26 +1,29 @@
-//! Explicit, non-activating Postfix map publication. Each run publishes a new
-//! generation; operators select all three files from the same generation.
-use anyhow::Result;
+//! Mailman's `mailman aliases`: explicit MTA map publication. Each run
+//! publishes a new generation, switches the `current` symlink to it and
+//! prints the generation directory; it never edits MTA configuration or
+//! reloads a service.
+use anyhow::{Context as _, Result};
 use clap::Subcommand;
-use listmngr_core::{Config, Error};
+use listmngr_core::Config;
 use listmngr_db::Database;
-use std::collections::BTreeSet;
-use std::fmt::Write as _;
-use std::io::Write as _;
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use listmngr_mail::mta::MapWriter;
+use std::path::PathBuf;
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Write exact regexp maps into a fresh generation and print its directory.
-    /// Does not change Postfix configuration, run postmap, or reload a service.
+    /// Publish a fresh map generation and print its directory. Uses `[mta]`
+    /// (`incoming`, `map_directory`, `lmtp_map_target`, `transport_file_type`)
+    /// unless overridden; with `incoming = "none"` Postfix maps are written.
     Regen {
-        /// Operator-owned parent directory for immutable map generations.
+        /// Operator-owned parent directory for map generations.
         #[arg(long)]
-        output: PathBuf,
-        /// Concrete destination as seen by Postfix; defaults to `mta.lmtp_listen`.
+        output: Option<PathBuf>,
+        /// The LMTP destination as the MTA sees it (`host:port`).
         #[arg(long)]
-        lmtp_target: Option<SocketAddr>,
+        lmtp_target: Option<String>,
+        /// Which MTA's format to write: `postfix` or `exim`.
+        #[arg(long)]
+        mta: Option<String>,
     },
 }
 
@@ -28,112 +31,70 @@ pub async fn run(db: &Database, config: &Config, command: Command) -> Result<()>
     let Command::Regen {
         output,
         lmtp_target,
+        mta,
     } = command;
-    let target: SocketAddr = match lmtp_target {
-        Some(target) => target,
-        None => config
-            .mta
-            .lmtp_listen
-            .parse()
-            .map_err(|_| Error::Validation("invalid LMTP map target".into()))?,
-    };
-    if target.port() == 0
-        || target.ip().is_unspecified()
-        || target.ip().is_multicast()
-        || matches!(target, SocketAddr::V6(address) if address.scope_id() != 0)
-    {
-        return Err(
-            Error::Validation("LMTP map target must be a concrete destination".into()).into(),
-        );
+    let mut settings = config.mta.clone();
+    if settings.incoming == "none" {
+        settings.incoming = "postfix".into();
     }
-    // One SELECT supplies the identity snapshot for all three maps, including
-    // unadvertised lists. No business/audit write or migration is performed.
-    let lists = db.lists().list(None).await?;
-    let mut addresses = BTreeSet::new();
-    let mut hosts = BTreeSet::new();
-    let mut verp = BTreeSet::new();
-    for list in lists {
-        hosts.insert(list.id.mail_host().to_owned());
-        addresses.insert(list.id.posting_address());
-        for (suffix, _) in listmngr_runners::COMMAND_SUFFIXES {
-            addresses.insert(list.id.address_with_suffix(suffix));
-        }
-        // VERP bounces: `list-bounces<delimiter>local=domain@host`.
-        verp.insert(format!(
-            "{}-bounces{}[^@=]+=[^@=]+@{}",
-            regexp_escape(list.id.list_name()),
-            regexp_escape(&config.mta.verp_delimiter),
-            regexp_escape(list.id.mail_host())
-        ));
+    if let Some(mta) = mta {
+        settings.incoming = mta;
     }
-    let transport = format!("lmtp:[{}]:{}", target.ip(), target.port());
-    let maps = [
-        ("domains.regexp", render(&hosts, "OK")),
-        (
-            "recipients.regexp",
-            render(&addresses, "OK") + &render_patterns(&verp, "OK"),
-        ),
-        (
-            "transport.regexp",
-            render(&addresses, &transport) + &render_patterns(&verp, &transport),
-        ),
-    ];
-    let generation = publish(&output, &maps)?;
+    if let Some(target) = lmtp_target {
+        settings.lmtp_map_target = Some(target);
+    }
+    let mut writer = MapWriter::from_config(&settings)?.expect("incoming is set");
+    if let Some(output) = output {
+        writer.directory = output;
+    }
+    let generation = regenerate(db, &writer).await?;
     println!("{}", generation.display());
     Ok(())
 }
 
-fn render(keys: &BTreeSet<String>, value: &str) -> String {
-    let mut result = String::new();
-    for key in keys {
-        // ListId permits only ASCII alphanumeric/hyphen list names and DNS
-        // domain labels. The dot is the only regexp metacharacter in these keys.
-        writeln!(result, "/^{}$/ {value}", key.replace('.', "\\.")).expect("String write");
-    }
-    result
+/// Publish the current list identities through `writer`. One SELECT, no
+/// business or audit write.
+pub async fn regenerate(db: &Database, writer: &MapWriter) -> Result<PathBuf> {
+    let lists: Vec<listmngr_core::ListId> = db
+        .lists()
+        .list(None)
+        .await?
+        .into_iter()
+        .map(|list| list.id)
+        .collect();
+    let writer = writer.clone();
+    Ok(tokio::task::spawn_blocking(move || writer.publish(&lists)).await??)
 }
 
-/// Escape the regular-expression metacharacters for a Postfix `regexp:` key.
-fn regexp_escape(text: &str) -> String {
-    text.chars()
-        .flat_map(|c| {
-            if ".^$*+?()[]{}|\\/".contains(c) {
-                vec!['\\', c]
-            } else {
-                vec![c]
-            }
-        })
-        .collect()
+/// Regenerate after a list came or went when `[mta] incoming` names an MTA.
+/// A failure is reported, not fatal: the list change is already committed
+/// and `aliases regen` repairs the maps.
+pub async fn refresh_after_list_change(db: &Database, config: &Config) {
+    let writer = match MapWriter::from_config(&config.mta) {
+        Ok(Some(writer)) => writer,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("warning: MTA maps not regenerated: {error}");
+            return;
+        }
+    };
+    match regenerate(db, &writer).await {
+        Ok(generation) => eprintln!("MTA maps regenerated: {}", generation.display()),
+        Err(error) => {
+            eprintln!("warning: MTA maps not regenerated: {error}; run `listmngr aliases regen`");
+        }
+    }
 }
 
-/// Rows whose keys are already regular expressions.
-fn render_patterns(patterns: &BTreeSet<String>, value: &str) -> String {
-    let mut result = String::new();
-    for pattern in patterns {
-        writeln!(result, "/^{pattern}$/ {value}").expect("String write");
+/// Publish at startup when `[mta] incoming` names an MTA, so a restored
+/// database or a fresh deployment is routable at once. A map directory the
+/// process cannot write is a startup failure.
+pub async fn publish_at_startup(db: &Database, config: &Config) -> Result<()> {
+    if let Some(writer) = MapWriter::from_config(&config.mta)? {
+        let generation = regenerate(db, &writer)
+            .await
+            .context("MTA map generation failed")?;
+        tracing::info!(generation = %generation.display(), "MTA maps published");
     }
-    result
-}
-
-fn publish(output: &Path, maps: &[(&str, String)]) -> Result<PathBuf> {
-    std::fs::create_dir_all(output)?;
-    let output = std::fs::canonicalize(output)?;
-    let staging = tempfile::Builder::new()
-        .prefix(".staging-")
-        .tempdir_in(&output)?;
-    for (name, content) in maps {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(staging.path().join(name))?;
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
-    }
-    // tempfile's default private directory is deliberate: unadvertised list
-    // identities are not made world-readable. Operators grant their MTA access.
-    std::fs::File::open(staging.path())?.sync_all()?;
-    let destination = output.join(format!("generation-{}", uuid::Uuid::now_v7()));
-    std::fs::rename(staging.path(), &destination)?;
-    std::fs::File::open(&output)?.sync_all()?;
-    Ok(destination)
+    Ok(())
 }

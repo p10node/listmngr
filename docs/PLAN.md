@@ -348,7 +348,12 @@ authenticity_checks = false          # SPF/DKIM/DMARC via the system resolver; A
 retry_initial_secs = 10              # transient delivery failures back off 10s, 20s, 40s ... with jitter
 retry_max_secs = 3600
 max_sessions_per_connection = 0
-postfix_map_dir = "data/postfix"
+map_directory = "data/mta"           # generation-* directories + `current` symlink, at startup and after list changes
+lmtp_map_target = "127.0.0.1:8024"   # host:port the MTA uses for LMTP; defaults to lmtp_listen
+transport_file_type = "regex"        # Postfix regex (read directly) | hash (postmap_command)
+postmap_command = "/usr/sbin/postmap"
+map_permissions = "group"            # owner | group | world
+map_generations_kept = 5
 verp_delimiter = "+"
 verp_format = "{bounces}+{local}={domain}"
 verp_personalized_deliveries = false # personalized copies get per-recipient VERP envelopes
@@ -403,8 +408,8 @@ metrics = true
 
 | MTA | Inbound | Maps sinh tự động |
 |---|---|---|
-| Postfix (khuyến nghị) | `transport_maps`, `local_recipient_maps`, `relay_domains` → LMTP `:8024` | `data/postfix/transport`, `virtual`, `domains` + auto `postmap` (hoặc `regex:`/`hash:`), chạy khi tạo/xoá list & `listmngr aliases regen` |
-| Exim 4 | router query REST `/3.1/lists/<addr>` giống Mailman 3 | snippet trong `deploy/exim/` |
+| Postfix (khuyến nghị) | `transport_maps`, `relay_recipient_maps`, `relay_domains` → LMTP `:8024` | `data/mta/current/{domains,recipients,transport}.regexp` (hoặc `hash:` `postfix_domains`/`postfix_lmtp` + `postmap`), chạy khi start, tạo/xoá list & `listmngr aliases regen` |
+| Exim 4 | router `manualroute` + `lsearch` giống Mailman 3 | `data/mta/current/exim_{domains,recipients}` + snippet trong `deploy/exim/` |
 | Built-in SMTP (phase 6, experimental) | listmngr nhận `:25` trực tiếp | không cần map |
 
 Outbound: SMTP relay (Postfix localhost hoặc external có AUTH/STARTTLS/implicit TLS), chunk theo `max_recipients`, `MAIL FROM = list-bounces+VERP@host`, DKIM sign per domain, `List-*` headers.
@@ -825,7 +830,7 @@ P2-STORE/P2-QUEUE/P2-CLI/P2-RUNTIME, held, and O2/O3 evidence.
 - [ ] Templates engine (built-in `mailman:///` bodies port từ Mailman en) + loader DB/file/http
 - [ ] `out` runner: `mail-send`, chunk, TLS, DKIM sign (dkim_keys + CLI `dkim gen/dns`), `retry`, `virgin`, `bad`
 - [ ] RFC 2369/8058 headers + HTTP one-click unsubscribe endpoint (token HMAC)
-- [ ] Postfix map generation + `aliases regen`; docker-compose thêm postfix
+- [x] Postfix/Exim map generation + `aliases regen`; docker-compose thêm postfix
 - [ ] CLI `queue inject/show/unshunt`, `status`
 - [ ] Metrics: queue depth, deliveries, latency
 - Acceptance: e2e test harness = pg + smtp sink (Rust mock hoặc `mailhog`) → gửi qua LMTP → assert N member nhận, headers đúng (List-*, subject prefix, footer, DKIM verify pass với key test), held → accept → delivered; nonmember → hold; ban → reject DSN; max-size → hold; `personalize=full` → N msg riêng với VERP đúng; crash giữa pipeline → job không mất (kill -9 test).

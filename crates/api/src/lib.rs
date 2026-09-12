@@ -608,6 +608,43 @@ pub struct AppState {
     post_auth_rate: Arc<RateLimiter>,
     web_login_rate: Arc<RateLimiter>,
     flavor: ApiFlavor,
+    /// `[mta] incoming`: the map writer regenerated after list changes.
+    mta_maps: Option<Arc<listmngr_mail::mta::MapWriter>>,
+}
+
+/// Mailman regenerates the MTA's maps when a list is created or removed.
+/// The list change is already committed; a failed publish is logged and
+/// `listmngr aliases regen` repairs it.
+async fn refresh_mta_maps(s: &AppState) {
+    let Some(writer) = s.mta_maps.clone() else {
+        return;
+    };
+    match publish_maps(writer, &s.db).await {
+        Ok(generation) => {
+            tracing::info!(generation = %generation.display(), "MTA maps regenerated");
+        }
+        Err(error) => {
+            tracing::warn!(%error, "MTA maps not regenerated; run `listmngr aliases regen`");
+        }
+    }
+}
+
+async fn publish_maps(
+    writer: Arc<listmngr_mail::mta::MapWriter>,
+    db: &Database,
+) -> Result<std::path::PathBuf, String> {
+    let lists: Vec<listmngr_core::ListId> = db
+        .lists()
+        .list(None)
+        .await
+        .map_err(|error| format!("list read failed: {error}"))?
+        .into_iter()
+        .map(|list| list.id)
+        .collect();
+    tokio::task::spawn_blocking(move || writer.publish(&lists))
+        .await
+        .map_err(|error| format!("publish task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -735,6 +772,14 @@ pub fn router(db: Database, config: Config) -> Router {
             .unwrap_or(&config.security.rate_limit.api),
     );
     let post_auth_rate = RateLimiter::from_config(&config.security.rate_limit.api);
+    // `Config::load` validated `[mta]`; a bad value here can only come from
+    // a caller-built config and must not take the API down.
+    let mta_maps = listmngr_mail::mta::MapWriter::from_config(&config.mta)
+        .unwrap_or_else(|error| {
+            tracing::error!(%error, "MTA map generation disabled");
+            None
+        })
+        .map(Arc::new);
     let state = AppState {
         db,
         config,
@@ -742,6 +787,7 @@ pub fn router(db: Database, config: Config) -> Router {
         post_auth_rate: Arc::new(post_auth_rate),
         web_login_rate: Arc::new(RateLimiter::from_config("5/min")),
         flavor: ApiFlavor::V1,
+        mta_maps,
     };
     let mut compat_state = state.clone();
     compat_state.flavor = ApiFlavor::Compat31;
@@ -1659,6 +1705,7 @@ async fn lists_create(
         s.db.lists()
             .create_with_context(new, &audit_context(&auth, addr))
             .await?;
+    refresh_mta_maps(&s).await;
     let value = list_value(s.flavor, &list);
     let response = match s.flavor {
         ApiFlavor::Compat31 => (
@@ -1707,6 +1754,7 @@ async fn lists_delete(
     s.db.lists()
         .delete_with_context(&id, &audit_context(&auth, addr))
         .await?;
+    refresh_mta_maps(&s).await;
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(

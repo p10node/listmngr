@@ -322,7 +322,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
 
         Command::Serve => serve_database(db, config).await?,
         Command::Domains { command } => domains(&db, command).await?,
-        Command::Lists { command } => lists(&db, command).await?,
+        Command::Lists { command } => lists(&db, &config, command).await?,
         Command::Members { command } => members(&db, command).await?,
         Command::User { command } => users(&db, command).await?,
         Command::Token { command } => tokens(&db, command).await?,
@@ -345,6 +345,7 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
         .map_err(|_| listmngr_core::Error::Validation("invalid web.listen".into()))?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address,"HTTP server listening");
+    aliases::publish_at_startup(&db, &config).await?;
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     // The mail role is opt-in (`mta.enabled`, fail-closed-validated at
     // config load) and binds its LMTP socket synchronously here, so a
@@ -414,27 +415,31 @@ async fn domains(db: &Database, command: DomainCommand) -> Result<()> {
     }
     Ok(())
 }
-async fn lists(db: &Database, command: ListCommand) -> Result<()> {
+async fn lists(db: &Database, config: &Config, command: ListCommand) -> Result<()> {
     match command {
         ListCommand::Create {
             list_id,
             display_name,
             style,
-        } => println!(
-            "{}",
-            serde_json::to_string_pretty(
-                &db.lists()
-                    .create(NewList {
-                        list_id,
-                        display_name,
-                        style
-                    })
-                    .await?
-            )?
-        ),
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &db.lists()
+                        .create(NewList {
+                            list_id,
+                            display_name,
+                            style
+                        })
+                        .await?
+                )?
+            );
+            aliases::refresh_after_list_change(db, config).await;
+        }
         ListCommand::Remove { list_id } => {
             db.lists().delete(&list_id).await?;
             println!("removed {list_id}");
+            aliases::refresh_after_list_change(db, config).await;
         }
         ListCommand::Ls => {
             for l in db.lists().list(None).await? {
