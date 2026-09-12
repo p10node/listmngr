@@ -1367,6 +1367,7 @@ fn chain_entry(chain: &listmngr_pipeline::Chain) -> Value {
         ChainKind::Terminal(_) => ("terminal", Vec::new()),
         ChainKind::Moderation => ("moderation", Vec::new()),
         ChainKind::HeaderMatch => ("header-match", Vec::new()),
+        ChainKind::DmarcMitigation => ("dmarc-mitigation", Vec::new()),
         ChainKind::Links(links) if links.is_empty() => ("declared", Vec::new()),
         ChainKind::Links(links) => ("engine", links.iter().map(Link::rule).collect()),
     };

@@ -435,6 +435,10 @@ pub enum DmarcMitigateAction {
     #[default]
     NoMitigation,
     MungeFrom,
+    /// Mailman's `reject`: refuse the post with `dmarc_moderation_notice`.
+    Reject,
+    /// Mailman's `discard`: drop the post silently.
+    Discard,
 }
 
 /// Coupled delivery mitigation settings; serialized as flat compatibility keys.
@@ -1063,6 +1067,10 @@ config_struct!(MtaConfig {
     max_recipients: u32 = 500,
     // Mailman's `max_recipients`: recipients per outgoing SMTP transaction.
     max_recipients_per_transaction: u32 = 500,
+    // `validate-authenticity`: check SPF, DKIM and DMARC on every post with
+    // the system resolver, write `Authentication-Results`, and let
+    // `dmarc_mitigate_action` follow the From domain's published policy.
+    authenticity_checks: bool = false,
     // Transient delivery failures back off exponentially between these
     // bounds (seconds), with jitter.
     retry_initial_secs: u32 = 10,

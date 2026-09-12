@@ -21,6 +21,8 @@ pub enum Disposition {
 
 /// Sender-specific facts, gathered by the `in` runner.
 #[derive(Debug, Clone, Default)]
+// Independent facts, not exclusive states.
+#[allow(clippy::struct_excessive_bools)]
 pub struct SenderChecks {
     pub is_banned: bool,
     /// The inbound `List-Post` header already names this list (a loop).
@@ -30,6 +32,9 @@ pub struct SenderChecks {
     pub is_approved: bool,
     /// A `nonmember` role row exists for this sender, carrying its override.
     pub nonmember_action: Option<ModerationAction>,
+    /// The `From` domain publishes a DMARC policy of `reject` or
+    /// `quarantine` (the runner's `validate-authenticity` verdict).
+    pub dmarc_policy_restrictive: bool,
 }
 
 /// One per-list `header_matches` row, or one site-wide antispam check.
@@ -71,6 +76,14 @@ pub struct ListChecks {
     pub discard_these_nonmembers: Vec<String>,
     /// Per-list `header_matches` rows in position order.
     pub header_matches: Vec<HeaderMatch>,
+    /// `dmarc_mitigate_action`.
+    pub dmarc_action: listmngr_core::DmarcMitigateAction,
+    /// `dmarc_mitigate_unconditionally`: mitigate every post.
+    pub dmarc_unconditional: bool,
+    /// `dmarc_addresses`: exact addresses or `^` regexes always mitigated.
+    pub dmarc_addresses: Vec<String>,
+    /// `dmarc_moderation_notice`: the reason a rejected post carries.
+    pub dmarc_moderation_notice: String,
 }
 
 /// Message-derived facts. Extracted by the runner so the pipeline never parses

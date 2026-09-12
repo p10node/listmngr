@@ -11,7 +11,7 @@ use listmngr_db::Database;
 use listmngr_db::mail_queue::{AcceptEffects, AcknowledgeRequest, ChildJob, Lease, Queue};
 use listmngr_db::moderation::{PostRefusal, Refusal};
 use listmngr_pipeline::handlers::{Effect, FanOut};
-use listmngr_pipeline::{Disposition, decide_posting};
+use listmngr_pipeline::{Disposition, decide_posting_traced};
 use serde_json::Value;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -34,6 +34,10 @@ struct Submission<'a> {
     envelope_sender: Option<&'a str>,
     subject: &'a str,
     raw: &'a [u8],
+    /// The `dmarc-mitigation` rule tagged the post.
+    dmarc_mitigate: bool,
+    /// `validate-authenticity`'s `Authentication-Results` value.
+    authentication_results: Option<&'a str>,
 }
 
 async fn accept_post(
@@ -48,6 +52,8 @@ async fn accept_post(
         envelope_sender,
         subject,
         raw,
+        dmarc_mitigate,
+        authentication_results,
     } = *submission;
     let list = db.lists().get(list_id).await?;
     let data = match listmngr_mail::handlers::plan(raw, &list, &lease.job.message_id.0.to_string())
@@ -83,6 +89,8 @@ async fn accept_post(
         list_id,
         record_post: false,
         acknowledge: None,
+        dmarc_mitigate,
+        authentication_results,
     };
     for effect in &data.effects {
         match effect {
@@ -160,6 +168,32 @@ async fn refuse_by_chain(
         .await
 }
 
+/// Owner mail bypasses the posting chain; an invalid forward is shunted.
+async fn forward_to_owners(
+    db: &Database,
+    role: &MailRoleConfig,
+    lease: &Lease,
+) -> Result<(), listmngr_core::Error> {
+    let result = db
+        .owner_mail()
+        .live()
+        .forward(
+            lease,
+            role.out_max_attempts,
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await;
+    if let Err(listmngr_core::Error::Validation(reason)) = &result {
+        return db
+            .mail_queue()
+            .live()
+            .shunt(lease, chrono::Utc::now().timestamp_millis(), reason)
+            .await
+            .map(|_| ());
+    }
+    result
+}
+
 async fn process_one(
     db: &Database,
     config: &Config,
@@ -169,24 +203,7 @@ async fn process_one(
     let message = db.mail_queue().live().message(lease.job.message_id).await?;
     let context = parsed_context(&message.context);
     if context["owner_route"] == true {
-        let result = db
-            .owner_mail()
-            .live()
-            .forward(
-                lease,
-                role.out_max_attempts,
-                chrono::Utc::now().timestamp_millis(),
-            )
-            .await;
-        if let Err(listmngr_core::Error::Validation(reason)) = &result {
-            return db
-                .mail_queue()
-                .live()
-                .shunt(lease, chrono::Utc::now().timestamp_millis(), reason)
-                .await
-                .map(|_| ());
-        }
-        return result;
+        return forward_to_owners(db, role, lease).await;
     }
     if context.get("subscription_command").is_some() {
         return db
@@ -202,7 +219,7 @@ async fn process_one(
     let envelope_sender = context["envelope_sender"].as_str().map(str::to_owned);
     let subject = listmngr_mail::header_value(&message.raw, "subject").unwrap_or_default();
 
-    let ctx = gather_context(
+    let mut ctx = gather_context(
         db,
         config,
         &list_id,
@@ -210,7 +227,20 @@ async fn process_one(
         &message.raw,
     )
     .await?;
-    match decide_posting(&ctx) {
+    // `validate-authenticity`: SPF/DKIM/DMARC against DNS, before the chain
+    // so `dmarc-mitigation` sees the From domain's policy.
+    let verdict = match &role.authenticity {
+        Some(verifier) => {
+            let client = listmngr_mail::authenticity::received_client(&message.raw);
+            verifier
+                .verify(&message.raw, envelope_sender.as_deref(), client.as_ref())
+                .await
+        }
+        None => listmngr_mail::authenticity::Verdict::default(),
+    };
+    ctx.sender.dmarc_policy_restrictive = verdict.dmarc_policy_restrictive;
+    let outcome = decide_posting_traced(&ctx);
+    match outcome.disposition {
         Disposition::Accept => {
             accept_post(
                 db,
@@ -222,6 +252,11 @@ async fn process_one(
                     envelope_sender: envelope_sender.as_deref(),
                     subject: &subject,
                     raw: &message.raw,
+                    dmarc_mitigate: outcome
+                        .tags
+                        .iter()
+                        .any(|tag| tag == listmngr_pipeline::rules::DMARC_TAG),
+                    authentication_results: verdict.header.as_deref(),
                 },
             )
             .await?;

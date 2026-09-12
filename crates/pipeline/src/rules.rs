@@ -72,6 +72,64 @@ impl Rule for Approved {
     }
 }
 
+/// Mailman's default reason for a post refused by DMARC mitigation.
+pub const DMARC_REJECT_REASON: &str = "You are not allowed to post to this mailing list From: a domain which publishes a DMARC policy of reject or quarantine, and your message has been automatically rejected.  If you think that your messages are being rejected in error, contact the mailing list owner at $listowner.";
+
+/// The `dmarc` tag: the post needs the list's DMARC mitigation.
+pub const DMARC_TAG: &str = "dmarc";
+
+/// Mailman's `dmarc-mitigation`.
+///
+/// When the list mitigates and the `From` domain's policy (or
+/// `dmarc_mitigate_unconditionally`, or `dmarc_addresses`) applies, tag the
+/// post for the `dmarc` handler; hit — and so jump to the
+/// `dmarc-mitigation` chain — only when the action is `reject` or
+/// `discard`.
+#[derive(Debug)]
+pub struct DmarcMitigation;
+
+impl Rule for DmarcMitigation {
+    fn name(&self) -> &'static str {
+        "dmarc-mitigation"
+    }
+    fn check(&self, ctx: &PostingContext, state: &mut EvalState) -> Option<String> {
+        use listmngr_core::DmarcMitigateAction as Action;
+        if ctx.list.dmarc_action == Action::NoMitigation {
+            return None;
+        }
+        let from = ctx.header("from").map(from_address).unwrap_or_default();
+        let applies = ctx.list.dmarc_unconditional
+            || ctx.sender.dmarc_policy_restrictive
+            || (!from.is_empty() && address_list_matches(&ctx.list.dmarc_addresses, &from));
+        if !applies {
+            return None;
+        }
+        if !state.tags.iter().any(|tag| tag == DMARC_TAG) {
+            state.tags.push(DMARC_TAG.to_owned());
+        }
+        match ctx.list.dmarc_action {
+            Action::Reject | Action::Discard => {
+                Some(if ctx.list.dmarc_moderation_notice.trim().is_empty() {
+                    DMARC_REJECT_REASON.to_owned()
+                } else {
+                    ctx.list.dmarc_moderation_notice.clone()
+                })
+            }
+            Action::NoMitigation | Action::MungeFrom => None,
+        }
+    }
+}
+
+/// The address inside a `From` header value: the last `<…>` group, else
+/// the value itself, trimmed.
+fn from_address(value: &str) -> String {
+    let inner = value
+        .rsplit_once('<')
+        .and_then(|(_, rest)| rest.split_once('>'))
+        .map_or(value, |(address, _)| address);
+    inner.trim().to_owned()
+}
+
 /// The sender is banned from this list, globally or per list.
 #[derive(Debug)]
 pub struct BannedAddress;
@@ -363,6 +421,7 @@ impl Rule for Any {
 #[must_use]
 pub fn builtin_rules() -> Vec<Box<dyn Rule>> {
     vec![
+        Box::new(DmarcMitigation),
         Box::new(NoSenders),
         Box::new(Approved),
         Box::new(Emergency),

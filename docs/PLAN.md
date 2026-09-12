@@ -344,6 +344,7 @@ smtp_relay = "127.0.0.1:25"
 smtp_tls = "opportunistic"
 max_recipients = 500
 max_recipients_per_transaction = 500 # Mailman max_recipients: recipients per outgoing SMTP transaction
+authenticity_checks = false          # SPF/DKIM/DMARC via the system resolver; Authentication-Results; conditional DMARC mitigation
 retry_initial_secs = 10              # transient delivery failures back off 10s, 20s, 40s ... with jitter
 retry_max_secs = 3600
 max_sessions_per_connection = 0

@@ -90,6 +90,9 @@ pub enum ChainKind {
     HeaderMatch,
     /// An ordered list of links.
     Links(Vec<Link>),
+    /// Mailman's `dmarc-mitigation` chain: reject or discard by the list's
+    /// `dmarc_mitigate_action` with the reason the rule recorded.
+    DmarcMitigation,
 }
 
 /// A named chain.
@@ -125,6 +128,14 @@ impl Chain {
     }
 
     #[must_use]
+    pub const fn dmarc_mitigation(name: &'static str) -> Self {
+        Self {
+            name,
+            kind: ChainKind::DmarcMitigation,
+        }
+    }
+
+    #[must_use]
     pub const fn links(name: &'static str, links: Vec<Link>) -> Self {
         Self {
             name,
@@ -147,7 +158,10 @@ impl Chain {
     #[must_use]
     pub const fn is_executable(&self) -> bool {
         match &self.kind {
-            ChainKind::Terminal(_) | ChainKind::Moderation | ChainKind::HeaderMatch => true,
+            ChainKind::Terminal(_)
+            | ChainKind::Moderation
+            | ChainKind::HeaderMatch
+            | ChainKind::DmarcMitigation => true,
             ChainKind::Links(links) => !links.is_empty(),
         }
     }
@@ -443,6 +457,15 @@ impl Registry {
                         moderation_disposition(state.moderation_action, &state.reasons);
                     return Ok(Outcome::new(disposition, state));
                 }
+                ChainKind::DmarcMitigation => {
+                    let disposition = match ctx.list.dmarc_action {
+                        listmngr_core::DmarcMitigateAction::Discard => {
+                            Disposition::Discard(joined_reason(&state.reasons))
+                        }
+                        _ => Disposition::Reject(joined_reason(&state.reasons)),
+                    };
+                    return Ok(Outcome::new(disposition, state));
+                }
                 ChainKind::HeaderMatch => header_match_step(ctx, &mut state),
                 ChainKind::Links(links) => match links.get(index) {
                     Some(link) => self.link_step(link, ctx, &mut state)?,
@@ -576,9 +599,9 @@ fn moderation_disposition(action: Option<ModerationAction>, reasons: &[String]) 
 /// The shipped rules and chains.
 ///
 /// The `default-posting-chain` reproduces Mailman 3's built-in chain, minus
-/// the `dmarc-mitigation` and `news-moderation` links whose rules do not exist
-/// yet. `crates/pipeline/tests/policy_characterization.rs` holds the result to
-/// a transcription of that contract over the whole input domain.
+/// the `news-moderation` link whose rule does not exist yet.
+/// `crates/pipeline/tests/policy_characterization.rs` holds the result to a
+/// transcription of that contract over the whole input domain.
 #[must_use]
 pub fn builtin() -> &'static Registry {
     static BUILTIN: OnceLock<Registry> = OnceLock::new();
@@ -590,6 +613,7 @@ pub fn builtin() -> &'static Registry {
         registry.register_chain(Chain::links(
             "default-posting-chain",
             vec![
+                Link::new("dmarc-mitigation", LinkAction::Jump("dmarc-mitigation")),
                 Link::new("no-senders", LinkAction::Jump("discard")),
                 Link::new("approved", LinkAction::Jump("accept")),
                 Link::new("emergency", LinkAction::Jump("hold")),
@@ -623,7 +647,7 @@ pub fn builtin() -> &'static Registry {
         registry.register_chain(Chain::terminal("discard", Terminal::Discard));
         registry.register_chain(Chain::moderation("moderation"));
         registry.register_chain(Chain::header_match("header-match"));
-        registry.register_chain(Chain::links("dmarc-mitigation", Vec::new()));
+        registry.register_chain(Chain::dmarc_mitigation("dmarc-mitigation"));
         registry
     })
 }

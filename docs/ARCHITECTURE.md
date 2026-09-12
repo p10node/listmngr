@@ -153,6 +153,33 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-VALIDATE-AUTHENTICITY — bounded acceptance verified
+
+Authentication needs DNS, so it lives in the `in` runner rather than the
+pure pipeline. `MailRoleConfig::authenticity` holds a
+`listmngr_mail::authenticity::Verifier` (a `mail-auth`
+`MessageAuthenticator` over the system resolver) when
+`[mta] authenticity_checks` is on; `process_one` runs it before the chain,
+feeds `SenderChecks::dmarc_policy_restrictive` from its verdict, and — on
+acceptance — writes the `Authentication-Results` value and the
+`dmarc-mitigation` tag into the stored message context through
+`AcceptEffects`. Consumers read them back into
+`listmngr_mail::handlers::Admission`, so the out runner, the digest copy
+and the archive copy cook with the same facts; `cook_for_site` is the
+no-admission special case tests and planning use. The `Verifier` accepts a
+seeded `TxtCache` implementing `mail-auth`'s `ResolverCache`, which is how
+the tests exercise real DKIM verification of an owned key and the RFC 9989
+tree walk without a network.
+
+The chain now starts with Mailman's `dmarc-mitigation` link. The rule
+reads three list facts and one sender fact, tags `EvalState.tags` with
+`dmarc` for the handler, and jumps to the `DmarcMitigation` chain kind only
+for the terminal actions; `Outcome.tags` carries the tag to the runner.
+Migration `0034` is the first column rebuild: SQLite cannot change a
+`CHECK`, so the two DMARC columns are copied aside, dropped, re-added with
+the wider vocabulary and restored — one statement sequence valid on both
+engines, with the schema snapshot corpus unchanged.
+
 ## P2-DELIVERY-POLICY — bounded acceptance verified
 
 `crates/runners/src/delivery_policy.rs` holds the two decisions the out

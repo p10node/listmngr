@@ -114,6 +114,8 @@ pub async fn gather_context(
             is_loop,
             is_approved: is_approved(db, list_id, raw).await?,
             nonmember_action,
+            // Filled by the runner from the `validate-authenticity` verdict.
+            dmarc_policy_restrictive: false,
         },
         list: ListChecks {
             emergency: list.emergency,
@@ -132,6 +134,10 @@ pub async fn gather_context(
             reject_these_nonmembers: list.reject_these_nonmembers.clone(),
             discard_these_nonmembers: list.discard_these_nonmembers.clone(),
             header_matches: header_matches(db, list_id).await?,
+            dmarc_action: list.dmarc.action,
+            dmarc_unconditional: list.dmarc.unconditional,
+            dmarc_addresses: list.dmarc.dmarc_addresses.clone(),
+            dmarc_moderation_notice: list.dmarc.dmarc_moderation_notice.clone(),
         },
         message,
         site_header_checks: site_header_checks(config),

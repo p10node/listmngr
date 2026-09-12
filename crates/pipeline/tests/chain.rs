@@ -72,11 +72,12 @@ fn builtin_posting_chain_preserves_the_documented_rule_order() {
         panic!("posting chain must be a link chain");
     };
     let names: Vec<&str> = links.iter().map(Link::rule).collect();
-    // Mailman 3's built-in chain, minus the `dmarc-mitigation` and
-    // `news-moderation` links whose rules do not exist yet.
+    // Mailman 3's built-in chain, minus the `news-moderation` link whose
+    // rule does not exist yet.
     assert_eq!(
         names,
         vec![
+            "dmarc-mitigation",
             "no-senders",
             "approved",
             "emergency",
@@ -97,16 +98,21 @@ fn builtin_posting_chain_preserves_the_documented_rule_order() {
     );
     let actions: Vec<LinkAction> = links.iter().map(Link::action).collect();
     assert_eq!(
-        actions[13],
+        actions[0],
+        LinkAction::Jump("dmarc-mitigation"),
+        "a restrictive policy jumps to the DMARC chain"
+    );
+    assert_eq!(
+        actions[14],
         LinkAction::Jump("moderation"),
         "any -> moderation"
     );
     assert_eq!(
-        actions[14],
+        actions[15],
         LinkAction::Detour("header-match"),
         "detour through the list's header rules"
     );
-    assert_eq!(actions[15], LinkAction::Jump("accept"));
+    assert_eq!(actions[16], LinkAction::Jump("accept"));
 }
 
 #[test]
@@ -373,6 +379,7 @@ fn an_accepted_post_records_every_rule_it_passed() {
     assert_eq!(
         outcome.misses,
         vec![
+            "dmarc-mitigation",
             "no-senders",
             "approved",
             "emergency",
