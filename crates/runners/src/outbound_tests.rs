@@ -508,7 +508,7 @@ async fn anonymous_message_id_is_stable_across_retry_preparation() {
     assert_eq!(first, retry);
 }
 
-async fn capture_data(sink: &tokio::net::TcpListener) -> Vec<u8> {
+pub async fn capture_data(sink: &tokio::net::TcpListener) -> Vec<u8> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let (stream, _) = sink.accept().await.unwrap();
     let (reader, mut writer) = stream.into_split();
@@ -628,7 +628,7 @@ use listmngr_db::{
     mail_queue::{ChildJob, JobState, NewMessage},
 };
 
-async fn fixture(
+pub async fn fixture(
     context: &str,
     raw: &[u8],
 ) -> (Database, Lease, MailRoleConfig, tokio::net::TcpListener) {

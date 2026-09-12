@@ -315,6 +315,19 @@ impl LmtpHandler for InboundHandler {
                 };
             }
         }
+        count_lmtp_outcomes(&outcomes);
         outcomes
+    }
+}
+
+/// `listmngr_lmtp_recipients_total` by reply class.
+fn count_lmtp_outcomes(outcomes: &[RecipientOutcome]) {
+    let metrics = listmngr_core::metrics::global();
+    for outcome in outcomes {
+        metrics.lmtp_recipients.inc(match outcome.code {
+            250 => "accepted",
+            451 => "deferred",
+            _ => "rejected",
+        });
     }
 }

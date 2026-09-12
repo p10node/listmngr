@@ -624,6 +624,27 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Mail metrics — bounded acceptance verified
+
+`GET /metrics` (unauthenticated, Prometheus text) now reports the mail path
+next to `listmngr_up`:
+
+| Metric | Kind | Meaning |
+|---|---|---|
+| `listmngr_lmtp_recipients_total{result}` | counter | LMTP `RCPT` outcomes: `accepted`, `rejected`, `deferred` |
+| `listmngr_posts_total{disposition}` | counter | in-runner decisions: `accepted`, `held`, `rejected`, `discarded`, `filtered`, `owner`, `command`, `failed` |
+| `listmngr_delivery_recipients_total{result}` | counter | outgoing recipients: `sent`, `transient`, `permanent`, `ambiguous` |
+| `listmngr_smtp_transactions_total{result}` | counter | relay transactions `completed` (DATA answered) or `failed` before DATA |
+| `listmngr_smtp_transaction_seconds` | histogram | duration of one relay transaction |
+| `listmngr_delivery_latency_seconds` | histogram | LMTP acceptance → relay accepting a recipient |
+| `listmngr_queue_jobs{queue,state}` | gauge | jobs per queue and state (what `queue stats` prints) |
+| `listmngr_queue_shunted_jobs`, `listmngr_queue_oldest_ready_age_seconds` | gauge | shunted jobs; how long the oldest ready job has waited |
+
+Counters and histograms live in the process (the mail role runs inside
+`serve`), so a restart resets them; the queue gauges come from the database
+and are cached for five seconds per process. See `P2-METRICS` in
+`docs/FEATURE_PARITY.md`.
+
 ## Authentication and DMARC mitigation — bounded acceptance verified
 
 Turn on `mta.authenticity_checks` and every post is checked for SPF, DKIM

@@ -15,6 +15,9 @@ mod dsn_issuance_tests;
 #[path = "outbound_durability_tests.rs"]
 mod durability_tests;
 #[cfg(test)]
+#[path = "metrics_tests.rs"]
+mod metrics_tests;
+#[cfg(test)]
 #[path = "owner_tests.rs"]
 mod owner_tests;
 #[cfg(test)]
@@ -25,7 +28,7 @@ mod signing_failure_tests;
 mod smtp_bounce_tests;
 #[cfg(test)]
 #[path = "outbound_tests.rs"]
-mod tests;
+pub mod tests;
 #[cfg(test)]
 #[path = "workflow_tests.rs"]
 mod workflow_tests;
@@ -620,7 +623,32 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
         variants.as_deref(),
     )
     .await;
+    record_delivery_metrics(message.created_at, &results);
     finish_delivery(db, role, &lease, &pending, &results).await;
+}
+
+/// Per-recipient outcomes, and the acceptance-to-relay latency once per
+/// delivery that handed at least one recipient to the relay.
+fn record_delivery_metrics(accepted_at_ms: i64, results: &[RecipientStatus]) {
+    let metrics = listmngr_core::metrics::global();
+    let mut sent = false;
+    for status in results {
+        metrics.recipients.inc(match status {
+            RecipientStatus::Sent => {
+                sent = true;
+                "sent"
+            }
+            RecipientStatus::TransientFailure(_) => "transient",
+            RecipientStatus::RemotePermanentFailure { .. }
+            | RecipientStatus::PermanentFailure(_) => "permanent",
+            RecipientStatus::Ambiguous(_) => "ambiguous",
+        });
+    }
+    if sent {
+        #[allow(clippy::cast_precision_loss)]
+        let latency = (chrono::Utc::now().timestamp_millis() - accepted_at_ms) as f64 / 1000.0;
+        metrics.delivery_latency_seconds.observe(latency);
+    }
 }
 
 // The complete recipient set is durably reserved before any SMTP command.
@@ -687,7 +715,8 @@ async fn send_transactions_with_envid(
             }
             continue;
         };
-        let outcome = match send_secure_with_envid(
+        let started = std::time::Instant::now();
+        let sent = send_secure_with_envid(
             stream,
             &config,
             &role.smtp_tls,
@@ -696,8 +725,15 @@ async fn send_transactions_with_envid(
             bytes,
             envid,
         )
-        .await
-        {
+        .await;
+        let metrics = listmngr_core::metrics::global();
+        metrics
+            .smtp_transaction_seconds
+            .observe(started.elapsed().as_secs_f64());
+        metrics
+            .smtp_transactions
+            .inc(if sent.is_ok() { "completed" } else { "failed" });
+        let outcome = match sent {
             Ok(outcome) => outcome.results,
             // Errors are pre-DATA negotiation failures, not uncertain acceptance.
             Err(_) => vec![
