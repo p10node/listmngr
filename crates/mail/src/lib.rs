@@ -16,9 +16,11 @@ mod munge;
 pub use cook::{cook_headers, cook_individual_post, cook_post, header_body_split};
 pub mod attachments;
 pub mod commands;
+pub mod decorate;
 pub mod digest;
 pub mod dkim;
 pub mod dsn;
+pub mod encoding;
 pub mod facts;
 pub mod handlers;
 pub mod html_text;
@@ -28,6 +30,7 @@ pub mod owner;
 pub mod smtp;
 pub mod templates;
 mod templates_vi;
+pub mod topics;
 pub mod visible_recipients;
 
 /// Mail helper failures. Message contents are never included in diagnostics.

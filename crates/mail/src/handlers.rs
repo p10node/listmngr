@@ -62,6 +62,33 @@ impl Handler for MimeDelete {
     }
 }
 
+/// Mailman's `tagger`: name the list topics a post hits in `X-Topics`.
+#[derive(Debug)]
+pub struct Tagger;
+
+impl Handler for Tagger {
+    fn name(&self) -> &'static str {
+        "tagger"
+    }
+    fn process(
+        &self,
+        message: &mut Working<'_>,
+        ctx: &PipelineContext<'_>,
+        _data: &mut MsgData,
+    ) -> std::result::Result<(), HandlerError> {
+        let hits = crate::topics::hits(&message.raw, ctx.list);
+        if hits.is_empty() {
+            return Ok(());
+        }
+        message.raw = cook::append_headers(
+            &message.raw,
+            &[(crate::topics::TOPICS_HEADER.to_owned(), hits.join(", "))],
+        )
+        .map_err(|error| refuse(self.name(), &error))?;
+        Ok(())
+    }
+}
+
 /// Drop list controls, private recipients and moderator-only fields, and the
 /// `Approved:` posting key wherever it was carried.
 #[derive(Debug)]
@@ -238,6 +265,7 @@ impl Handler for Dmarc {
 pub fn mail_handlers() -> Vec<Box<dyn Handler>> {
     vec![
         Box::new(MimeDelete),
+        Box::new(Tagger),
         Box::new(Cleanse),
         Box::new(CleanseDkim),
         Box::new(CookHeaders),

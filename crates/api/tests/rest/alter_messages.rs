@@ -196,3 +196,71 @@ async fn alter_messages_settings_reject_invalid_values_atomically() {
         );
     }
 }
+
+#[tokio::test]
+async fn topics_are_a_json_only_listmngr_extension_on_the_config_resource() {
+    let (app, token, _) = setup(&["admin"]).await;
+    create_configurable_list(&app, &token).await;
+    for prefix in ["/api/v1", "/3.1"] {
+        let uri = config_uri(prefix);
+        let initial = response_json(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(initial["topics_enabled"], false, "{prefix}");
+        assert_eq!(initial["topics_bodylines_limit"], 5, "{prefix}");
+        assert_eq!(initial["topics"], json!([]), "{prefix}");
+        let patch = json!({
+            "topics_enabled": true,
+            "topics_bodylines_limit": 0,
+            "topics": [{"name": "Rust", "pattern": "cargo", "description": "Rust talk"}]
+        });
+        let saved = call(&app, "PATCH", &uri, Some(&token), Some(&patch.to_string())).await;
+        assert_eq!(saved.status(), StatusCode::OK, "{prefix}");
+        let saved = response_json(saved).await;
+        assert_eq!(saved["topics_enabled"], true);
+        assert_eq!(saved["topics"][0]["name"], "Rust");
+        // Form encoding still reaches the scalar settings.
+        let form = call_form(
+            &app,
+            "PATCH",
+            &uri,
+            &token,
+            "topics_enabled=False&topics_bodylines_limit=-1",
+        )
+        .await;
+        assert_eq!(form.status(), StatusCode::OK, "{prefix}");
+        let form = response_json(form).await;
+        assert_eq!(form["topics_enabled"], false);
+        assert_eq!(form["topics_bodylines_limit"], -1);
+        assert_eq!(
+            form["topics"][0]["name"], "Rust",
+            "untouched by a patch that omits it"
+        );
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                &uri,
+                Some(&token),
+                Some(r#"{"topics":[{"name":"x","pattern":"("}]}"#)
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        // PUT without topics resets them.
+        assert_eq!(
+            call(
+                &app,
+                "PUT",
+                &uri,
+                Some(&token),
+                Some(r#"{"description":"reset"}"#)
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let reset = response_json(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(reset["topics"], json!([]), "{prefix}");
+        assert_eq!(reset["topics_bodylines_limit"], 5, "{prefix}");
+    }
+}

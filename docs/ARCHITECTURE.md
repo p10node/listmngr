@@ -153,6 +153,31 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-HANDLERS-DECORATE — bounded acceptance verified
+
+Decoration happens where Mailman does it: at delivery. `cook_for(Target::Out)`
+still ends at `to-outgoing`; the out runner then resolves the two
+`list:member:regular:*` templates through `TemplateRepo` (so operator
+overrides and the language fallback apply), expands the list placeholders
+(`listmngr_mail::templates::list_placeholders`, now shared with the notice
+producers) and calls `listmngr_mail::decorate::decorate`, which chooses
+between concatenation, splicing and wrapping exactly as
+`mailman/handlers/decorate.py` does but over the stored bytes. Generated
+text parts use `listmngr_mail::encoding::text_body` — `7bit` or
+quoted-printable — the same encoder the HTML conversion of `mime-delete`
+now uses. Archive and digest copies never see the decoration because it is
+applied after their snapshots.
+
+`tagger` splits into a pure matcher in `listmngr_pipeline::topics` (pattern
+compilation shared with the header-match rules, the `scanbody` rule) and a
+message reader in `listmngr_mail::topics`; topics live on the list as a
+validated JSON column. `after-delivery` and `acknowledge` are effect
+handlers like the fan-out ones: they push `Effect::RecordPost` and
+`Effect::Acknowledge`, and the `in` runner hands both to
+`MailQueueRepo::complete_accepted`, which bumps `post_id`/`last_post_at`
+and enqueues `list:user:notice:post` inside the transaction that acknowledges
+the inbound job — one commit for fan-out, counter and receipt.
+
 ## P2-MIME-DELETE — bounded acceptance verified
 
 `crates/mail/src/mime_delete.rs` is the content filter. It parses the stored

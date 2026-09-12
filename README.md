@@ -624,6 +624,30 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## List headers, footers, topics and receipts — bounded acceptance verified
+
+Every subscriber copy carries the list's `list:member:regular:header` and
+`list:member:regular:footer` templates (Mailman's default footer ships
+built in), expanded with `$display_name`, `$listname`, `$short_listname`,
+`$domain` and the other list placeholders and added the way Mailman does:
+concatenated into a plain-text body, spliced into a `multipart/mixed`, or
+wrapped around anything else. Archive and digest copies are never decorated.
+Override the footer per list, domain or site through the template resources:
+
+```sh
+curl -X PUT -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  https://lists.example.com/api/v1/lists/dev.example.com/templates/list:member:regular:footer \
+  -d '{"language":"en","body":"-- \n$display_name -- $listname\nUnsubscribe: $leave_email\n"}'
+```
+
+Topics work as in Mailman: enable `topics_enabled`, define `topics` (each a
+name and a multi-line pattern whose lines are alternatives), and matching
+posts — by `Subject:`, `Keywords:` or the header-like lines opening the body,
+up to `topics_bodylines_limit` — carry `X-Topics`. Accepted posts bump the
+list's `post_id` and `last_post_at`, and members whose `acknowledge_posts`
+preference is on receive `list:user:notice:post` in their language. See
+`P2-HANDLERS-DECORATE` in `docs/FEATURE_PARITY.md`.
+
 ## Content filtering — bounded acceptance verified
 
 Lists filter attachments and rich text the way Mailman does. Turn on

@@ -25,3 +25,6 @@ content-filter-forward-body =
     filtering rules and was prevented from being forwarded on to the list
     membership.  You are receiving the only remaining copy of the discarded
     message.
+
+# Mailman's `acknowledge` handler.
+notice-post-ack-subject = { $display_name } post acknowledgment

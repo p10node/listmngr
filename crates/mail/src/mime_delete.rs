@@ -11,7 +11,7 @@
 //! outer file extension, recursive part filtering, `multipart/alternative`
 //! collapse to the first alternative, HTML to plain text, and the
 //! `X-Content-Filtered-By` marker when anything changed.
-use crate::{Error, Result, cook, html_text};
+use crate::{Error, Result, cook, encoding, html_text};
 use listmngr_core::AlterMessages;
 use mail_parser::{Message, MessageParser, MessagePart, MimeHeaders, PartType};
 
@@ -264,35 +264,6 @@ fn collapse_alternatives(part: &mut Part, changed: &mut bool) {
     *children = replaced;
 }
 
-/// A body of `text` for a generated `text/plain; charset=utf-8` part: 7bit
-/// when ASCII with short lines, otherwise base64 in 76-column lines.
-fn encode_text(text: &str, newline: &[u8]) -> (&'static str, Vec<u8>) {
-    let normalized = text.replace("\r\n", "\n");
-    if normalized.is_ascii() && normalized.lines().all(|line| line.len() <= 998) {
-        let mut out = Vec::with_capacity(normalized.len());
-        for (index, line) in normalized.split('\n').enumerate() {
-            if index > 0 {
-                out.extend_from_slice(newline);
-            }
-            out.extend_from_slice(line.as_bytes());
-        }
-        return ("7bit", out);
-    }
-    let with_crlf = normalized.replace('\n', "\r\n");
-    let encoded = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        with_crlf.as_bytes(),
-    );
-    let mut out = Vec::with_capacity(encoded.len() + encoded.len() / 38);
-    for (index, chunk) in encoded.as_bytes().chunks(76).enumerate() {
-        if index > 0 {
-            out.extend_from_slice(newline);
-        }
-        out.extend_from_slice(chunk);
-    }
-    ("base64", out)
-}
-
 /// Mailman's `to_plaintext`: every `text/html` leaf becomes UTF-8 plain text.
 fn html_to_plaintext(part: &mut Part, changed: &mut bool) {
     if let Body::Multipart { children, .. } = &mut part.body {
@@ -307,7 +278,7 @@ fn html_to_plaintext(part: &mut Part, changed: &mut bool) {
     *changed = true;
     let newline = blank_line(&part.headers);
     let text = html_text::html_to_text(&html);
-    let (encoding, body) = encode_text(&text, newline);
+    let (encoding, body) = encoding::text_body(&text, newline);
     let mut headers = fields(&part.headers, |name| {
         name != "content-type" && name != "content-transfer-encoding"
     });

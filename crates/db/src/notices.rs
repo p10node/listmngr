@@ -28,27 +28,10 @@ pub async fn list_snapshot(tx: &mut Transaction<'_, Any>, id: &ListId) -> Result
     list_from_row(&row)
 }
 
-/// The placeholders every list notice can use (Mailman names).
+/// Mailman's list placeholders, as `listmngr_mail::templates` defines them.
 #[must_use]
 pub fn list_placeholders(list: &MailingList) -> Placeholders {
-    let id = &list.id;
-    Placeholders::new()
-        .set("listname", id.posting_address())
-        .set("fqdn_listname", id.posting_address())
-        .set("list_id", id.to_string())
-        .set("short_listname", id.list_name())
-        .set("list_name", id.list_name())
-        .set("display_name", list.display_name.clone())
-        .set("description", list.description.clone())
-        .set("info", list.info.clone())
-        .set("domain", id.mail_host())
-        .set("list_domain", id.mail_host())
-        .set("request_email", id.request_address())
-        .set("list_requests", id.request_address())
-        .set("owner_email", id.owner_address())
-        .set("bounces_email", id.bounces_address())
-        .set("join_email", id.join_address())
-        .set("leave_email", id.leave_address())
+    listmngr_mail::templates::list_placeholders(list)
 }
 
 /// The language a notice to `email` on `list` should use.

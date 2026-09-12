@@ -255,6 +255,13 @@ pub struct ListConfigResponse {
     /// Where bounces that match no member are forwarded.
     #[schema(default = "administrators")]
     pub forward_unrecognized_bounces_to: listmngr_core::UnrecognizedBounceDisposition,
+    /// Run the topic matcher and add `X-Topics` to matching posts.
+    pub topics_enabled: bool,
+    /// Leading header-like body lines scanned; negative means all, zero none.
+    #[schema(default = 5, minimum = -1, maximum = 10_000)]
+    pub topics_bodylines_limit: i32,
+    /// listmngr extension (Mailman keeps topics out of its REST API).
+    pub topics: Vec<listmngr_core::Topic>,
     pub mail_host: String,
     pub list_name: String,
     pub fqdn_listname: String,
@@ -372,6 +379,11 @@ pub struct ListConfigInput {
     pub dmarc_wrapped_message_text: Option<String>,
     #[schema(default = "administrators")]
     pub forward_unrecognized_bounces_to: Option<listmngr_core::UnrecognizedBounceDisposition>,
+    pub topics_enabled: Option<bool>,
+    #[schema(default = 5, minimum = -1, maximum = 10_000)]
+    pub topics_bodylines_limit: Option<i32>,
+    /// JSON only: a list of `{name, pattern, description}` (listmngr extension).
+    pub topics: Option<Vec<listmngr_core::Topic>>,
 }
 
 #[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
@@ -1809,65 +1821,27 @@ async fn list_config_write(
     normalize_list_config_form(&mut v, &h)?;
     let update = if replace {
         let defaults = listmngr_core::MailingList::new(id.clone(), id.list_name().to_owned());
-        let mut replacement = json!({
-            "display_name": defaults.display_name,
-            "description": defaults.description,
-            "info": defaults.info,
-            "subject_prefix": defaults.subject_prefix,
-            "advertised": defaults.advertised,
-            "preferred_language": defaults.preferred_language,
-            "anonymous_list": defaults.anonymous_list,
-            "send_welcome_message": defaults.send_welcome_message,
-            "send_goodbye_message": defaults.send_goodbye_message,
-            "bounce_you_are_disabled_warnings": defaults.bounce_you_are_disabled_warnings,
-            "bounce_you_are_disabled_warnings_interval": defaults.bounce_you_are_disabled_warnings_interval,
-            "bounce_notify_owner_on_removal": defaults.bounce_notify_owner_on_removal,
-            "process_bounces": defaults.process_bounces,
-            "bounce_notify_owner_on_disable": defaults.bounce_notify_owner_on_disable,
-            "bounce_notify_owner_on_bounce_increment": defaults.bounce_notify_owner_on_bounce_increment,
-            "bounce_info_stale_after": defaults.bounce_info_stale_after,
-            "bounce_score_threshold": defaults.bounce_score_threshold,
-            "dmarc_mitigate_action": defaults.dmarc.action,
-            "dmarc_mitigate_unconditionally": defaults.dmarc.unconditional,
-            "next_digest_number": defaults.next_digest_number,
-            "emergency": defaults.emergency,
-            "max_message_size": defaults.max_message_size,
-            "max_num_recipients": defaults.max_num_recipients,
-            "archive_policy": defaults.archive_policy,
-            "archive_rendering_mode": defaults.archive_rendering_mode,
-            "default_member_action": defaults.default_member_action,
-            "default_nonmember_action": defaults.default_nonmember_action,
-            "administrivia": defaults.administrivia,
-            "require_explicit_destination": defaults.require_explicit_destination,
-            "acceptable_aliases": defaults.acceptable_aliases,
-            "accept_these_nonmembers": defaults.accept_these_nonmembers,
-            "hold_these_nonmembers": defaults.hold_these_nonmembers,
-            "reject_these_nonmembers": defaults.reject_these_nonmembers,
-            "discard_these_nonmembers": defaults.discard_these_nonmembers,
-            "posting_pipeline": defaults.posting_pipeline,
-            "respond_to_post_requests": defaults.respond_to_post_requests,
-            "admin_immed_notify": defaults.admin_immed_notify,
-            "forward_unrecognized_bounces_to": defaults.forward_unrecognized_bounces_to,
-            "dmarc_addresses": defaults.dmarc.dmarc_addresses,
-            "dmarc_moderation_notice": defaults.dmarc.dmarc_moderation_notice,
-            "dmarc_wrapped_message_text": defaults.dmarc.dmarc_wrapped_message_text,
-        });
+        // Every writable setting at its default; the read-only projection
+        // fields are not part of a replacement.
+        let mut replacement = serde_json::to_value(&defaults).expect("serialize");
         let object = replacement
             .as_object_mut()
             .expect("replacement is an object");
-        for settings in [
-            serde_json::to_value(&defaults.alter_messages).expect("serialize"),
-            serde_json::to_value(defaults.member_policy).expect("serialize"),
+        for read_only in [
+            "id",
+            "created_at",
+            "last_post_at",
+            "post_id",
+            "volume",
+            "digest_last_sent_at",
+            "style_name",
         ] {
-            object.extend(settings.as_object().expect("flat settings").clone());
+            object.remove(read_only);
         }
         let supplied = v
             .as_object()
             .ok_or_else(|| ApiError(Error::Validation("list config must be an object".into())))?;
-        replacement
-            .as_object_mut()
-            .expect("replacement is an object")
-            .extend(supplied.clone());
+        object.extend(supplied.clone());
         replacement
     } else {
         v
@@ -1913,6 +1887,7 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
         "allow_list_posts",
         "first_strip_reply_to",
         "include_sender_header",
+        "topics_enabled",
     ] {
         if let Some(Value::String(text)) = value.get(field) {
             let enabled = text
@@ -1959,6 +1934,7 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
         "bounce_you_are_disabled_warnings",
         "bounce_you_are_disabled_warnings_interval",
         "next_digest_number",
+        "topics_bodylines_limit",
     ] {
         if let Some(Value::String(text)) = value.get(field) {
             let number = text

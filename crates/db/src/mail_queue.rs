@@ -1,6 +1,6 @@
 //! Exact-byte database intake and leased queue. All caller times are Unix milliseconds.
 use crate::{Database, db_error};
-use listmngr_core::{Error, Result};
+use listmngr_core::{Error, ListId, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
@@ -95,6 +95,23 @@ pub struct StoredMessage {
     pub created_at: i64,
     pub raw: Vec<u8>,
 }
+/// The pipeline's list-side effects for an accepted post.
+#[derive(Debug, Clone, Copy)]
+pub struct AcceptEffects<'a> {
+    pub list_id: &'a ListId,
+    /// Mailman's `after-delivery`: bump `post_id`, stamp `last_post_at`.
+    pub record_post: bool,
+    /// Mailman's `acknowledge`: the poster's receipt, if they asked for one.
+    pub acknowledge: Option<AcknowledgeRequest<'a>>,
+}
+
+/// Who posted what, for the acknowledgement notice.
+#[derive(Debug, Clone, Copy)]
+pub struct AcknowledgeRequest<'a> {
+    pub sender: &'a str,
+    pub subject: &'a str,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct MailQueueRepo<'a> {
     db: &'a Database,
@@ -304,6 +321,23 @@ impl<'a> MailQueueRepo<'a> {
         children: &[ChildJob],
         plan: Option<&RecipientPlan>,
     ) -> Result<(QueueJob, Vec<QueueJob>)> {
+        self.complete_accepted(lease, now_ms, children, plan, None)
+            .await
+    }
+    /// [`Self::complete_with_plan`] plus the pipeline's list-side effects for
+    /// an accepted post, all in the one transaction that acknowledges the
+    /// inbound job: `after-delivery` bumps `post_id`/`last_post_at` and
+    /// `acknowledge` enqueues the poster's receipt.
+    /// # Errors
+    /// Returns stale lease, invalid producer/plan, or database errors.
+    pub async fn complete_accepted(
+        &self,
+        lease: &Lease,
+        now_ms: i64,
+        children: &[ChildJob],
+        plan: Option<&RecipientPlan>,
+        effects: Option<&AcceptEffects<'_>>,
+    ) -> Result<(QueueJob, Vec<QueueJob>)> {
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
         let now_ms = self.lock_time(&mut tx, lease, now_ms).await?;
         let deadline = Self::locked_deadline(&mut tx, lease).await?;
@@ -325,6 +359,31 @@ impl<'a> MailQueueRepo<'a> {
                 }
             }
             created.push(job);
+        }
+        if let Some(effects) = effects {
+            if effects.record_post {
+                let at = chrono::DateTime::from_timestamp_millis(now_ms)
+                    .ok_or_else(|| Error::Validation("timestamp out of range".into()))?;
+                sqlx::query(
+                    "UPDATE mailing_lists SET post_id=post_id+1,last_post_at=$1 WHERE list_id=$2",
+                )
+                .bind(at.to_rfc3339())
+                .bind(effects.list_id.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(db_error)?;
+            }
+            if let Some(acknowledge) = &effects.acknowledge {
+                crate::workflows::enqueue_post_acknowledgement(
+                    &mut tx,
+                    self.db,
+                    effects.list_id,
+                    acknowledge.sender,
+                    acknowledge.subject,
+                    now_ms,
+                )
+                .await?;
+            }
         }
         self.check_final_deadline(Some(deadline), now_ms)?;
         tx.commit().await.map_err(db_error)?;

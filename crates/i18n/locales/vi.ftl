@@ -28,3 +28,6 @@ content-filter-forward-body =
     Thư đính kèm khớp với quy tắc lọc nội dung của hộp thư chung { $display_name }
     nên không được chuyển tiếp tới các thành viên.  Bạn đang nhận bản sao
     duy nhất còn lại của thư đã bị loại bỏ.
+
+# Mailman's `acknowledge` handler.
+notice-post-ack-subject = Xác nhận đã nhận bài gửi tới { $display_name }

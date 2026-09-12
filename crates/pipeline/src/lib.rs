@@ -12,6 +12,7 @@ pub mod chain;
 pub mod handlers;
 pub mod policy;
 pub mod rules;
+pub mod topics;
 
 pub use chain::{
     Chain, ChainError, ChainKind, EvalState, HeaderRuleHit, Link, LinkAction, Outcome, Registry,

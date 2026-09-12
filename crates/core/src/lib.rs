@@ -510,6 +510,16 @@ impl Default for AlterMessages {
     }
 }
 
+/// One of Mailman's topics: a named pattern whose lines are alternatives,
+/// searched in subjects, keywords and the header-like lines opening a body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Topic {
+    pub name: String,
+    pub pattern: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 /// Mailman's *Member Policy* settings. Serialized as flat compatibility keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(default)]
@@ -636,6 +646,20 @@ pub struct MailingList {
     #[serde(default = "default_unrecognized_bounces")]
     #[schema(default = "administrators")]
     pub forward_unrecognized_bounces_to: UnrecognizedBounceDisposition,
+    /// Run the topic matcher and add `X-Topics` to matching posts.
+    #[serde(default)]
+    pub topics_enabled: bool,
+    /// Body lines scanned for `Subject:`/`Keywords:` pseudo-headers: negative
+    /// scans every leading header-like line, zero scans none.
+    #[serde(default = "default_topics_bodylines_limit")]
+    #[schema(default = 5)]
+    pub topics_bodylines_limit: i32,
+    #[serde(default)]
+    pub topics: Vec<Topic>,
+}
+
+const fn default_topics_bodylines_limit() -> i32 {
+    5
 }
 
 const fn default_unrecognized_bounces() -> UnrecognizedBounceDisposition {
@@ -716,6 +740,9 @@ impl MailingList {
             alter_messages: AlterMessages::default(),
             member_policy: MemberPolicy::default(),
             forward_unrecognized_bounces_to: default_unrecognized_bounces(),
+            topics_enabled: false,
+            topics_bodylines_limit: default_topics_bodylines_limit(),
+            topics: Vec::new(),
         }
     }
 

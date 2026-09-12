@@ -177,10 +177,7 @@ pub fn builtin(name: &str) -> Option<&'static str> {
             "Thư của bạn với tiêu đề\n\
              \n    $subject\n\
              \n\
-             đã được hộp thư chung $display_name nhận thành công.\n\
-             \n\
-             Trang thông tin hộp thư: $listinfo_uri\n\
-             Tùy chọn của bạn: $user_options_uri\n"
+             đã được hộp thư chung $display_name nhận thành công.\n"
         }
         "list:user:notice:probe" => {
             "Đây là thư thăm dò.  Bạn có thể bỏ qua thư này.\n\
