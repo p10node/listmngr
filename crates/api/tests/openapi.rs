@@ -212,18 +212,22 @@ fn live_v1_routes() -> Vec<LiveRoute> {
     let start = API_SOURCE.find("fn phase_one_routes() ").unwrap();
     let end = API_SOURCE[start..].find("\n}\n\nasync fn health").unwrap() + start;
     let mut routes = routes_in(&API_SOURCE[start..end]);
-    // `phase_one_routes` merges the template router; its routes are live too.
-    let templates = include_str!("../src/templates.rs");
-    let start = templates.find("pub fn routes() ").unwrap();
-    let end = templates[start..].find("\n}\n").unwrap() + start;
-    routes.extend(
-        routes_in(&templates[start..end])
-            .into_iter()
-            .map(|route| LiveRoute {
-                handler: format!("templates::{}", route.handler),
-                ..route
-            }),
-    );
+    // `phase_one_routes` merges sub-routers; their routes are live too.
+    for (module, source) in [
+        ("templates", include_str!("../src/templates.rs")),
+        ("requests", include_str!("../src/requests.rs")),
+    ] {
+        let start = source.find("pub fn routes() ").unwrap();
+        let end = source[start..].find("\n}\n").unwrap() + start;
+        routes.extend(
+            routes_in(&source[start..end])
+                .into_iter()
+                .map(|route| LiveRoute {
+                    handler: format!("{module}::{}", route.handler),
+                    ..route
+                }),
+        );
+    }
     routes.sort();
     routes
 }
@@ -297,6 +301,7 @@ fn expected_request_media(handler: &str) -> BTreeSet<&'static str> {
     let (source, handler) = match handler.rsplit_once("::") {
         Some(("bans", name)) => (include_str!("../src/bans.rs"), name),
         Some(("bounces", name)) => (include_str!("../src/bounces.rs"), name),
+        Some(("requests", name)) => (include_str!("../src/requests.rs"), name),
         Some(("templates", name)) => (include_str!("../src/templates.rs"), name),
         Some(_) => panic!("unregistered handler module: {handler}"),
         None => (API_SOURCE, handler),

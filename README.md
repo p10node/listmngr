@@ -650,6 +650,22 @@ Every decision commits with the membership change and the audit event it
 causes. A request waiting for a moderator is never swept by the confirmation
 expiry. See `P3-SUBSCRIPTION-POLICY` in `docs/FEATURE_PARITY.md`.
 
+The same queue is on the REST API in Mailman's shape, on both `/3.1` and
+`/api/v1` (scope `moderation`):
+
+```text
+GET  /lists/{id}/requests[?token_owner=subscriber|moderator&request_type=subscription|unsubscription]
+GET  /lists/{id}/requests/count
+GET  /lists/{id}/requests/{token}
+POST /lists/{id}/requests/{token}    action=accept|reject|discard|defer [&reason=…]
+```
+
+Entries carry `email`, `list_id`, `token` (the request id), `token_owner`,
+`type`, `request_date`, `self_link` and `http_etag`. A moderator may act on a
+request that still waits for the subscriber's confirmation: accepting it
+applies the change and spends the token. See `P3-SUBSCRIPTION-REQUESTS-REST`
+in `docs/FEATURE_PARITY.md`.
+
 ## LMTP size and body parameters — bounded acceptance verified
 
 The LMTP listener now honours the extensions it announces. A front MTA that

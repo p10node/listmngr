@@ -35,7 +35,33 @@ impl SubscriptionAction {
 }
 pub use listmngr_core::EmailCommand;
 
-/// A subscription request waiting for a moderator.
+/// Mailman's `token_owner`: whose move it is on a waiting request.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenOwner {
+    /// The requester still has to confirm the address (a token is out).
+    Subscriber,
+    /// A moderator has to decide.
+    Moderator,
+}
+
+impl TokenOwner {
+    const fn state(self) -> &'static str {
+        match self {
+            Self::Subscriber => "pending_confirmation",
+            Self::Moderator => "pending_moderation",
+        }
+    }
+    fn from_state(state: &str) -> Result<Self> {
+        match state {
+            "pending_confirmation" => Ok(Self::Subscriber),
+            "pending_moderation" => Ok(Self::Moderator),
+            _ => Err(Error::Validation("request is not pending".into())),
+        }
+    }
+}
+
+/// A subscription request that has not been decided.
 #[derive(Clone, Debug, Serialize)]
 pub struct PendingRequest {
     pub id: String,
@@ -43,7 +69,15 @@ pub struct PendingRequest {
     /// The mailbox as the requester wrote it.
     pub email: String,
     pub action: SubscriptionAction,
+    pub token_owner: TokenOwner,
     pub requested_at: i64,
+}
+
+/// Which pending requests to list; `None` means every value.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RequestFilter {
+    pub token_owner: Option<TokenOwner>,
+    pub action: Option<SubscriptionAction>,
 }
 
 /// Mailman's moderator verbs for a held subscription request.
@@ -458,44 +492,56 @@ impl<'a> WorkflowRepo<'a> {
         self.commit_command(tx, lease, now_ms).await
     }
 
-    /// Subscription requests on `list` waiting for a moderator, oldest first.
+    /// Undecided subscription requests on `list`, oldest first, narrowed by
+    /// `filter`.
     /// # Errors
     /// Returns a database error.
-    pub async fn pending(&self, list: &ListId) -> Result<Vec<PendingRequest>> {
-        let rows = sqlx::query("SELECT id,original_email,action,created_at FROM subscription_workflows WHERE list_id=$1 AND state='pending_moderation' ORDER BY created_at,id")
+    pub async fn pending(
+        &self,
+        list: &ListId,
+        filter: RequestFilter,
+    ) -> Result<Vec<PendingRequest>> {
+        let rows = sqlx::query("SELECT id,list_id,original_email,action,state,created_at FROM subscription_workflows WHERE list_id=$1 AND state IN ('pending_confirmation','pending_moderation') AND ($2='' OR state=$2) AND ($3='' OR action=$3) ORDER BY created_at,id")
             .bind(list.as_str())
+            .bind(filter.token_owner.map_or("", TokenOwner::state))
+            .bind(filter.action.map_or("", SubscriptionAction::name))
             .fetch_all(self.db.pool())
             .await
             .map_err(db_error)?;
-        rows.into_iter()
-            .map(|row| {
-                Ok(PendingRequest {
-                    id: row.try_get("id").map_err(db_error)?,
-                    list_id: list.clone(),
-                    email: row.try_get("original_email").map_err(db_error)?,
-                    action: SubscriptionAction::parse(
-                        &row.try_get::<String, _>("action").map_err(db_error)?,
-                    )?,
-                    requested_at: row.try_get("created_at").map_err(db_error)?,
-                })
-            })
-            .collect()
+        rows.iter().map(pending_row).collect()
     }
 
-    /// Apply a moderator's decision to one waiting request. The membership
-    /// change, the notices it produces and the audit event commit together.
+    /// One undecided request by id.
     /// # Errors
-    /// Returns `NotFound` when no request with that id is waiting, and
+    /// Returns `NotFound` when no undecided request has that id.
+    pub async fn get(&self, id: &str) -> Result<PendingRequest> {
+        let row = sqlx::query("SELECT id,list_id,original_email,action,state,created_at FROM subscription_workflows WHERE id=$1 AND state IN ('pending_confirmation','pending_moderation')")
+            .bind(id)
+            .fetch_optional(self.db.pool())
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| Error::NotFound("subscription request".into()))?;
+        pending_row(&row)
+    }
+
+    /// Apply a moderator's decision to one undecided request — whether it
+    /// waits for the moderator or still for the subscriber's confirmation,
+    /// which acceptance then makes unnecessary. The membership change, the
+    /// notices it produces and the audit event commit together; `reason`
+    /// is recorded with the event.
+    /// # Errors
+    /// Returns `NotFound` when no request with that id is undecided, and
     /// database errors.
     pub async fn decide(
         &self,
         id: &str,
         decision: RequestDecision,
+        reason: &str,
         context: &AuditContext,
     ) -> Result<()> {
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
         lock(&mut tx).await?;
-        let row = sqlx::query("SELECT list_id,original_email,email,action FROM subscription_workflows WHERE id=$1 AND state='pending_moderation'")
+        let row = sqlx::query("SELECT list_id,original_email,email,action FROM subscription_workflows WHERE id=$1 AND state IN ('pending_confirmation','pending_moderation')")
             .bind(id)
             .fetch_optional(&mut *tx)
             .await
@@ -536,7 +582,7 @@ impl<'a> WorkflowRepo<'a> {
             decision.audit(),
             "list",
             list.as_str(),
-            serde_json::json!({"workflow_id":id,"action":action.name()}),
+            serde_json::json!({"workflow_id":id,"action":action.name(),"reason":reason}),
         )
         .await?;
         tx.commit().await.map_err(db_error)
@@ -1369,4 +1415,18 @@ async fn enqueue_confirmation(
         now_ms,
     )
     .await
+}
+
+fn pending_row(row: &sqlx::any::AnyRow) -> Result<PendingRequest> {
+    Ok(PendingRequest {
+        id: row.try_get("id").map_err(db_error)?,
+        list_id: row
+            .try_get::<String, _>("list_id")
+            .map_err(db_error)?
+            .parse()?,
+        email: row.try_get("original_email").map_err(db_error)?,
+        action: SubscriptionAction::parse(&row.try_get::<String, _>("action").map_err(db_error)?)?,
+        token_owner: TokenOwner::from_state(&row.try_get::<String, _>("state").map_err(db_error)?)?,
+        requested_at: row.try_get("created_at").map_err(db_error)?,
+    })
 }
