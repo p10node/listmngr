@@ -40,6 +40,7 @@ impl Database {
 fn render_rows(
     mut settings: listmngr_core::MailingList,
     rows: &[sqlx::any::AnyRow],
+    base_url: Option<&str>,
 ) -> Result<Vec<ArchiveMessage>> {
     rows.iter()
         .map(|r| {
@@ -50,7 +51,7 @@ fn render_rows(
             let stored = base64::engine::general_purpose::STANDARD
                 .decode(r.try_get::<String, _>("raw_b64").map_err(db_error)?)
                 .map_err(db_error)?;
-            let raw = publication(&stored, &settings, &hash)?;
+            let raw = publication(&stored, &settings, &hash, base_url)?;
             let parsed = mail_parser::MessageParser::default()
                 .parse(&raw)
                 .ok_or_else(|| Error::Validation("invalid archive MIME".into()))?;
@@ -66,8 +67,20 @@ fn render_rows(
 }
 
 /// The archive copy: the posting pipeline up to `to-archive`.
-fn publication(raw: &[u8], list: &listmngr_core::MailingList, identity: &str) -> Result<Vec<u8>> {
-    listmngr_mail::cook_post(raw, list, identity).map_err(|e| Error::Validation(e.to_string()))
+fn publication(
+    raw: &[u8],
+    list: &listmngr_core::MailingList,
+    identity: &str,
+    base_url: Option<&str>,
+) -> Result<Vec<u8>> {
+    listmngr_mail::handlers::cook_for_site(
+        listmngr_mail::handlers::Target::Archive,
+        raw,
+        list,
+        identity,
+        base_url,
+    )
+    .map_err(|e| Error::Validation(e.to_string()))
 }
 /// Schedule an accepted held post inside its existing disposition transaction.
 pub(crate) async fn schedule_accepted(
@@ -215,7 +228,7 @@ impl<'a> ArchiveRepo<'a> {
    .bind(auth.map_or_else(String::new, |a| a.user_id.to_string()))
    .bind(hash)
    .fetch_all(self.db.pool()).await.map_err(db_error)?;
-        render_rows(settings, &rows)
+        render_rows(settings, &rows, self.db.base_url())
     }
     /// Atomically index and ack an archive lease; replay is idempotent per list/hash.
     /// # Errors
@@ -233,7 +246,7 @@ impl<'a> ArchiveRepo<'a> {
             .parse()?;
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
         let settings = crate::lock_list_for_patch(&mut tx, &list).await?;
-        let raw = publication(&message.raw, &settings, &item.hash)?;
+        let raw = publication(&message.raw, &settings, &item.hash, self.db.base_url())?;
         let parsed = mail_parser::MessageParser::default()
             .parse(&raw)
             .ok_or_else(|| Error::Validation("invalid archive MIME".into()))?;

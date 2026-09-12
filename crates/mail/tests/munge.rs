@@ -37,9 +37,10 @@ fn munge_is_opt_in_attributes_author_and_preserves_body_and_reply() {
         header_value(&default, "From").as_deref(),
         Some("=?UTF-8?B?QW5kcsOp?= <Author@elsewhere.invalid>")
     );
+    // `cook-headers` rewrites `Sender` to the bounces address by default.
     assert_eq!(
         header_value(&default, "Sender").as_deref(),
-        Some("secretary@elsewhere.invalid")
+        Some("dev-bounces@example.invalid")
     );
     assert!(default.ends_with(b"\r\n\r\n\x00\xffbody\r\n.dot"));
     let cooked = cook_post(raw, &enabled(), "stable").unwrap();

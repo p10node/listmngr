@@ -11,6 +11,9 @@
 //! loop history like the delivery and digest copies (it used to record only
 //! the posting address), and the DMARC-munged `From`/`Reply-To` now follow
 //! the `List-*` headers because the `dmarc` handler runs after `rfc-2369`.
+//! The headers the completed `cook-headers`/`rfc-2369` handlers add on top
+//! of the capture (`ADDED_SINCE_CAPTURE`) are ignored here and pinned by
+//! `tests/cook_headers.rs`.
 use listmngr_core::{DmarcMitigateAction, MailingList};
 use listmngr_mail::handlers::{Target, cook_for};
 
@@ -42,12 +45,23 @@ fn message(name: &str) -> Vec<u8> {
     }
 }
 
+/// Headers the completed handlers add that the capture predates.
+const ADDED_SINCE_CAPTURE: &[&str] = &[
+    "sender",
+    "x-mailman-version",
+    "message-id-hash",
+    "x-message-id-hash",
+    "list-help",
+    "list-owner",
+];
+
 /// Sorted `(name, value)` header multiset and the exact body bytes.
 fn shape(cooked: &[u8]) -> (Vec<(String, String)>, Vec<u8>) {
     let (blank, body) = listmngr_mail::header_body_split(cooked).expect("cooked boundary");
     let mut headers: Vec<(String, String)> = listmngr_mail::facts::header_fields(&cooked[..blank])
         .into_iter()
         .map(|(name, value)| (name.to_ascii_lowercase(), value))
+        .filter(|(name, _)| !ADDED_SINCE_CAPTURE.contains(&name.as_str()))
         .collect();
     headers.sort();
     (headers, cooked[body..].to_vec())

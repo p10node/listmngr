@@ -46,7 +46,7 @@ use crate::MailRoleConfig;
 use listmngr_core::ListId;
 use listmngr_db::Database;
 use listmngr_db::mail_queue::{Lease, Queue, RecipientOutcome};
-use listmngr_mail::handlers::{Target, cook_for};
+use listmngr_mail::handlers::{Target, cook_for_site};
 #[cfg(test)]
 use listmngr_mail::smtp::send_secure;
 use listmngr_mail::smtp::{RecipientStatus, SmtpClientConfig, send_secure_with_envid};
@@ -99,7 +99,7 @@ async fn prepare_post(
     } else {
         Target::Digest
     };
-    let cooked = cook_for(target, raw, &list, &delivery_id.to_string())
+    let cooked = cook_for_site(target, raw, &list, &delivery_id.to_string(), db.base_url())
         .map_err(|_| PrepareError::Invalid)?;
     if !individual {
         return Ok((cooked, list_id.bounces_address()));

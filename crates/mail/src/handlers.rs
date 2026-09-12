@@ -131,9 +131,12 @@ impl Handler for CleanseDkim {
     }
 }
 
-/// Anonymous-list identity replacement, `Precedence: list`, and the
-/// `X-BeenThere` loop history (read from the original bytes, since `cleanse`
-/// already removed the inbound markers from the working copy).
+/// Mailman's `cook-headers`.
+///
+/// Anonymous-list identity replacement, the `Sender` rewrite, the `Reply-To`
+/// policy, `X-Mailman-Version`, `Message-ID-Hash`, `Precedence: list`, and
+/// the `X-BeenThere` loop history (read from the original bytes, since
+/// `cleanse` already removed the inbound markers from the working copy).
 #[derive(Debug)]
 pub struct CookHeaders;
 
@@ -153,13 +156,35 @@ impl Handler for CookHeaders {
             message.raw = cook::anonymous_message(&message.raw);
             additions.extend([
                 ("From".into(), list.id.posting_address()),
-                ("Reply-To".into(), list.id.posting_address()),
                 ("To".into(), list.id.posting_address()),
                 (
                     "Message-ID".into(),
                     format!("<{}@{}>", ctx.identity, list.id.mail_host()),
                 ),
             ]);
+        }
+        message.raw = crate::reply_to::apply(&message.raw, list)
+            .map_err(|error| refuse(self.name(), &error))?;
+        if list.alter_messages.include_sender_header {
+            message.raw = cook::strip_named_headers(&message.raw, &["sender"])
+                .map_err(|error| refuse(self.name(), &error))?;
+            additions.push(("Sender".into(), list.id.bounces_address()));
+        }
+        additions.push((
+            "X-Mailman-Version".into(),
+            format!("listmngr {}", env!("CARGO_PKG_VERSION")),
+        ));
+        let message_id = if list.anonymous_list {
+            Some(format!("<{}@{}>", ctx.identity, list.id.mail_host()))
+        } else {
+            crate::header_value(&message.raw, "message-id")
+        };
+        if let Some(hash) = message_id.and_then(|id| crate::message_id_hash(&id).ok()) {
+            message.raw =
+                cook::strip_named_headers(&message.raw, &["message-id-hash", "x-message-id-hash"])
+                    .map_err(|error| refuse(self.name(), &error))?;
+            additions.push(("Message-ID-Hash".into(), hash.clone()));
+            additions.push(("X-Message-ID-Hash".into(), hash));
         }
         additions.push(("Precedence".into(), "list".into()));
         let mut history = facts::loop_markers(message.original);
@@ -197,7 +222,8 @@ impl Handler for SubjectPrefix {
     }
 }
 
-/// RFC 2369 `List-*` headers. `List-Archive` waits on a public archive URL.
+/// Mailman's `rfc-2369`: the `List-*` set, `List-Archive`/`Archived-At`
+/// when the site's base URL is known and the list archives.
 #[derive(Debug)]
 pub struct Rfc2369;
 
@@ -211,19 +237,12 @@ impl Handler for Rfc2369 {
         ctx: &PipelineContext<'_>,
         _data: &mut MsgData,
     ) -> std::result::Result<(), HandlerError> {
-        let id = &ctx.list.id;
-        let additions: Vec<(String, String)> =
-            listmngr_pipeline::list_headers(&listmngr_pipeline::ListHeaderInfo {
-                list_id: id.to_string(),
-                posting_address: id.posting_address(),
-                subscribe_address: id.join_address(),
-                unsubscribe_address: id.leave_address(),
-                archive_url: None,
-            })
-            .into_iter()
-            // `Precedence` belongs to `cook-headers`; this handler is RFC 2369 only.
-            .filter(|(name, _)| name.starts_with("List-"))
-            .collect();
+        // `cleanse` already dropped the inbound `List-*` fields; `Archived-At`
+        // is ours to replace as well.
+        message.raw = cook::strip_named_headers(&message.raw, &["archived-at"])
+            .map_err(|error| refuse(self.name(), &error))?;
+        let message_id = crate::header_value(&message.raw, "message-id");
+        let additions = crate::list_headers::rfc2369(ctx.list, ctx.base_url, message_id.as_deref());
         message.raw = cook::append_headers(&message.raw, &additions)
             .map_err(|error| refuse(self.name(), &error))?;
         Ok(())
@@ -322,6 +341,20 @@ fn pipeline_error(error: PipelineError) -> Error {
 /// unknown pipeline, a missing snapshot handler, or a handler that could not
 /// process the message. Callers shunt the latter rather than deliver.
 pub fn cook_for(target: Target, raw: &[u8], list: &MailingList, identity: &str) -> Result<Vec<u8>> {
+    cook_for_site(target, raw, list, identity, None)
+}
+
+/// [`cook_for`] with the site's public base URL, which enables
+/// `List-Archive` and `Archived-At`.
+/// # Errors
+/// As [`cook_for`].
+pub fn cook_for_site(
+    target: Target,
+    raw: &[u8],
+    list: &MailingList,
+    identity: &str,
+    base_url: Option<&str>,
+) -> Result<Vec<u8>> {
     let (bytes, _) = builtin_registry()
         .run(
             &list.posting_pipeline,
@@ -330,6 +363,7 @@ pub fn cook_for(target: Target, raw: &[u8], list: &MailingList, identity: &str) 
                 list,
                 identity,
                 target,
+                base_url,
             },
         )
         .map_err(pipeline_error)?;
@@ -350,6 +384,7 @@ pub fn plan(raw: &[u8], list: &MailingList, identity: &str) -> Result<MsgData> {
                 list,
                 identity,
                 target: Target::Plan,
+                base_url: None,
             },
         )
         .map_err(pipeline_error)?;

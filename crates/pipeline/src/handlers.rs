@@ -92,6 +92,9 @@ pub struct PipelineContext<'a> {
     /// generated `Message-ID`s on anonymous lists.
     pub identity: &'a str,
     pub target: Target,
+    /// The site's public base URL (`site.base_url`), when the caller knows
+    /// it; drives `List-Archive`/`Archived-At`. `None` omits those headers.
+    pub base_url: Option<&'a str>,
 }
 
 /// What a handler that ends the pipeline asks the caller to do with the post.
