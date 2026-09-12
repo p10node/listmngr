@@ -95,6 +95,17 @@ pub struct StoredMessage {
     pub created_at: i64,
     pub raw: Vec<u8>,
 }
+/// Queue depth as `queue stats` and the status probes report it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueStats {
+    /// `queue → state → jobs`.
+    pub queues: std::collections::BTreeMap<String, std::collections::BTreeMap<String, i64>>,
+    pub shunted: i64,
+    /// Seconds the oldest ready job has waited past its due time; `None`
+    /// when nothing is ready.
+    pub oldest_ready_age_secs: Option<i64>,
+}
+
 /// The pipeline's list-side effects for an accepted post.
 #[derive(Debug, Clone, Copy)]
 pub struct AcceptEffects<'a> {
@@ -388,6 +399,38 @@ impl<'a> MailQueueRepo<'a> {
         self.check_final_deadline(Some(deadline), now_ms)?;
         tx.commit().await.map_err(db_error)?;
         Ok((source, created))
+    }
+    /// Queue depth per queue and state, the shunted total and the oldest
+    /// ready job's age. Metadata only: no message content is read.
+    /// # Errors
+    /// Returns a database error.
+    pub async fn stats(&self, now_ms: i64) -> Result<QueueStats> {
+        let rows = sqlx::query("SELECT queue, state, COUNT(*) AS jobs FROM queue_jobs GROUP BY queue, state ORDER BY queue, state")
+            .fetch_all(self.db.pool()).await.map_err(db_error)?;
+        let mut queues: std::collections::BTreeMap<
+            String,
+            std::collections::BTreeMap<String, i64>,
+        > = std::collections::BTreeMap::new();
+        let mut shunted = 0;
+        for row in rows {
+            let queue: String = row.try_get("queue").map_err(db_error)?;
+            let state: String = row.try_get("state").map_err(db_error)?;
+            let jobs: i64 = row.try_get("jobs").map_err(db_error)?;
+            if state == "shunted" {
+                shunted += jobs;
+            }
+            queues.entry(queue).or_default().insert(state, jobs);
+        }
+        let oldest_ready: Option<i64> =
+            sqlx::query_scalar("SELECT MIN(run_after) FROM queue_jobs WHERE state='ready'")
+                .fetch_one(self.db.pool())
+                .await
+                .map_err(db_error)?;
+        Ok(QueueStats {
+            queues,
+            shunted,
+            oldest_ready_age_secs: oldest_ready.map(|run_after| (now_ms - run_after).max(0) / 1000),
+        })
     }
     /// Recipients still awaiting an outgoing attempt for this job (never
     /// includes recipients already marked `sent`, so a retried job cannot

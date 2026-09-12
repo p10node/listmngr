@@ -15,6 +15,7 @@ mod lifecycle_tests;
 
 mod archive;
 pub mod bounce_maintenance;
+pub mod delivery_policy;
 pub mod digests;
 mod heartbeat;
 mod inbound;
@@ -50,6 +51,11 @@ pub struct MailRoleConfig {
     pub smtp_relay: SocketAddr,
     /// Separate SMTP sessions per recipient for non-null list envelopes only.
     pub smtp_single_recipient: bool,
+    /// `[mta] max_recipients_per_transaction`: recipients per SMTP transaction
+    /// when a delivery is shared (Mailman's `max_recipients`).
+    pub max_recipients_per_transaction: usize,
+    /// `[mta] retry_initial_secs` / `retry_max_secs` as a backoff policy.
+    pub backoff: delivery_policy::Backoff,
     /// `[mta] verp_format` and `verp_delimiter`, validated at load.
     pub verp_format: String,
     pub verp_delimiter: String,
@@ -102,6 +108,11 @@ impl MailRoleConfig {
             lmtp_listen,
             smtp_relay,
             smtp_single_recipient: config.mta.smtp_single_recipient,
+            max_recipients_per_transaction: config.mta.max_recipients_per_transaction as usize,
+            backoff: delivery_policy::Backoff {
+                initial_ms: i64::from(config.mta.retry_initial_secs) * 1000,
+                max_ms: i64::from(config.mta.retry_max_secs) * 1000,
+            },
             verp_format: config.mta.verp_format.clone(),
             verp_delimiter: config.mta.verp_delimiter.clone(),
             verp_personalized_deliveries: config.mta.verp_personalized_deliveries,

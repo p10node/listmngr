@@ -54,7 +54,6 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 const IDLE_POLL: Duration = Duration::from_millis(200);
-const RETRY_BACKOFF_MS: i64 = 10_000;
 
 #[derive(Debug)]
 pub enum PrepareError {
@@ -259,11 +258,16 @@ async fn signed_copies(
     } = prepared;
     if let Some(split) = &per_recipient {
         let copies = recipient_copies(db, role, split, &cooked, pending).await;
-        let copies = local_delivery_result(db, lease, copies).await?;
+        let copies = local_delivery_result(db, role, lease, copies).await?;
         return Some((cooked, mail_from, Some(copies)));
     }
-    let signed =
-        local_delivery_result(db, lease, sign_delivery(db, role, lease, cooked).await).await?;
+    let signed = local_delivery_result(
+        db,
+        role,
+        lease,
+        sign_delivery(db, role, lease, cooked).await,
+    )
+    .await?;
     Some((signed, mail_from, None))
 }
 
@@ -464,7 +468,12 @@ async fn prepare_delivery_full(
                 PrepareError::Dependency => {
                     db.mail_queue()
                         .live()
-                        .retry(lease, now, RETRY_BACKOFF_MS, "list lookup failed")
+                        .retry(
+                            lease,
+                            now,
+                            role.backoff.delay_ms(lease.job.attempts),
+                            "list lookup failed",
+                        )
                         .await
                 }
             };
@@ -477,7 +486,11 @@ async fn prepare_delivery_full(
     Some(prepared)
 }
 
-async fn pending_for_delivery(db: &Database, lease: &Lease) -> Option<Vec<String>> {
+async fn pending_for_delivery(
+    db: &Database,
+    role: &MailRoleConfig,
+    lease: &Lease,
+) -> Option<Vec<String>> {
     let pending = match db.mail_queue().pending_recipients(lease.job.id).await {
         Ok(pending) => pending,
         Err(error) => {
@@ -488,7 +501,7 @@ async fn pending_for_delivery(db: &Database, lease: &Lease) -> Option<Vec<String
                 .retry(
                     lease,
                     chrono::Utc::now().timestamp_millis(),
-                    RETRY_BACKOFF_MS,
+                    role.backoff.delay_ms(lease.job.attempts),
                     "pending lookup failed",
                 )
                 .await;
@@ -507,13 +520,13 @@ async fn pending_for_delivery(db: &Database, lease: &Lease) -> Option<Vec<String
 }
 
 async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
-    let Some(pending) = pending_for_delivery(db, &lease).await else {
+    let Some(pending) = pending_for_delivery(db, role, &lease).await else {
         return;
     };
     let message = match db.mail_queue().message(lease.job.message_id).await {
         Ok(message) => message,
         Err(error) => {
-            local_delivery_result::<Vec<u8>>(db, &lease, Err(lookup_error(&error))).await;
+            local_delivery_result::<Vec<u8>>(db, role, &lease, Err(lookup_error(&error))).await;
             return;
         }
     };
@@ -539,7 +552,7 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
             .retry(
                 &lease,
                 chrono::Utc::now().timestamp_millis(),
-                RETRY_BACKOFF_MS,
+                role.backoff.delay_ms(lease.job.attempts),
                 "relay unreachable",
             )
             .await;
@@ -548,7 +561,7 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
     let digest = match db.digests().is_delivery(lease.job.id).await {
         Ok(digest) => digest,
         Err(error) => {
-            local_delivery_result::<Vec<u8>>(db, &lease, Err(lookup_error(&error))).await;
+            local_delivery_result::<Vec<u8>>(db, role, &lease, Err(lookup_error(&error))).await;
             return;
         }
     };
@@ -575,7 +588,7 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
                 tracing::error!(%error, "out-processor: durable attempt reservation failed; SMTP not started");
                 return;
             }
-            local_delivery_result::<Vec<u8>>(db, &lease, Err(lookup_error(&error))).await;
+            local_delivery_result::<Vec<u8>>(db, role, &lease, Err(lookup_error(&error))).await;
             return;
         }
     };
@@ -594,7 +607,7 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
         variants.as_deref(),
     )
     .await;
-    finish_delivery(db, &lease, &pending, &results).await;
+    finish_delivery(db, role, &lease, &pending, &results).await;
 }
 
 // The complete recipient set is durably reserved before any SMTP command.
@@ -629,11 +642,21 @@ async fn send_transactions_with_envid(
     let width = if variants.is_some() || (role.smtp_single_recipient && sender.is_some()) {
         1
     } else {
-        pending.len().max(1)
+        role.max_recipients_per_transaction
     };
     let mut first_stream = Some(stream);
-    let mut results = Vec::with_capacity(pending.len());
-    for (index, recipients) in pending.chunks(width).enumerate() {
+    let mut results: Vec<Option<RecipientStatus>> = vec![None; pending.len()];
+    for chunk in crate::delivery_policy::chunk_by_domain(pending, width) {
+        let recipients: Vec<String> = chunk.iter().map(|index| pending[*index].clone()).collect();
+        // Per-recipient material (a personalized copy, a VERP sender, an
+        // ENVID) exists only for one-recipient transactions.
+        let single = (chunk.len() == 1).then_some(chunk[0]);
+        let copy = single.and_then(|index| variants.and_then(|copies| copies.get(index)));
+        let bytes = copy.map_or(cooked, |copy| copy.bytes.as_slice());
+        let transaction_sender = copy.and_then(|copy| copy.mail_from.as_deref()).or(sender);
+        let envid = single
+            .and_then(|index| envids.get(index))
+            .map(String::as_str);
         let stream = if let Some(stream) = first_stream.take() {
             stream
         } else if let Ok(Ok(stream)) = tokio::time::timeout(
@@ -644,39 +667,41 @@ async fn send_transactions_with_envid(
         {
             stream
         } else {
-            results.extend(vec![
-                RecipientStatus::TransientFailure(
-                    "relay unreachable".into()
-                );
-                recipients.len()
-            ]);
+            for index in &chunk {
+                results[*index] = Some(RecipientStatus::TransientFailure(
+                    "relay unreachable".into(),
+                ));
+            }
             continue;
         };
-        let copy = variants.and_then(|copies| copies.get(index));
-        let bytes = copy.map_or(cooked, |copy| copy.bytes.as_slice());
-        let transaction_sender = copy.and_then(|copy| copy.mail_from.as_deref()).or(sender);
-        match send_secure_with_envid(
+        let outcome = match send_secure_with_envid(
             stream,
             &config,
             &role.smtp_tls,
             transaction_sender,
-            recipients,
+            &recipients,
             bytes,
-            envids.get(index).map(String::as_str),
+            envid,
         )
         .await
         {
-            Ok(outcome) => results.extend(outcome.results),
+            Ok(outcome) => outcome.results,
             // Errors are pre-DATA negotiation failures, not uncertain acceptance.
-            Err(_) => results.extend(vec![
-                RecipientStatus::TransientFailure(
-                    "relay greeting or TLS failure".into()
-                );
+            Err(_) => vec![
+                RecipientStatus::TransientFailure("relay greeting or TLS failure".into());
                 recipients.len()
-            ]),
+            ],
+        };
+        for (index, status) in chunk.iter().zip(outcome) {
+            results[*index] = Some(status);
         }
     }
     results
+        .into_iter()
+        .map(|status| {
+            status.unwrap_or_else(|| RecipientStatus::TransientFailure("not attempted".into()))
+        })
+        .collect()
 }
 
 // Resolve signing authority from the stored job-to-message association, not
@@ -726,6 +751,7 @@ const fn lookup_error(error: &listmngr_core::Error) -> PrepareError {
 
 async fn local_delivery_result<T>(
     db: &Database,
+    role: &MailRoleConfig,
     lease: &Lease,
     result: Result<T, PrepareError>,
 ) -> Option<T> {
@@ -737,7 +763,12 @@ async fn local_delivery_result<T>(
                 PrepareError::Dependency => {
                     db.mail_queue()
                         .live()
-                        .retry(lease, now, RETRY_BACKOFF_MS, "local delivery lookup failed")
+                        .retry(
+                            lease,
+                            now,
+                            role.backoff.delay_ms(lease.job.attempts),
+                            "local delivery lookup failed",
+                        )
                         .await
                 }
                 PrepareError::Invalid => {
@@ -759,6 +790,7 @@ async fn local_delivery_result<T>(
 /// recipients are quarantined, while ordinary transient failures stay pending.
 async fn finish_delivery(
     db: &Database,
+    role: &MailRoleConfig,
     lease: &Lease,
     pending: &[String],
     results: &[RecipientStatus],
@@ -786,7 +818,13 @@ async fn finish_delivery(
     if let Err(error) = db
         .mail_queue()
         .live()
-        .finish_delivery_with_smtp(lease, now_ms, &outcomes, RETRY_BACKOFF_MS, &smtp)
+        .finish_delivery_with_smtp(
+            lease,
+            now_ms,
+            &outcomes,
+            role.backoff.delay_ms(lease.job.attempts),
+            &smtp,
+        )
         .await
     {
         tracing::error!(%error, "out-processor: fenced delivery transaction failed; job not acknowledged");

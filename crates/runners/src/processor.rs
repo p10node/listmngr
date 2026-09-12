@@ -17,7 +17,6 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 const IDLE_POLL: Duration = Duration::from_millis(200);
-const RETRY_BACKOFF_MS: i64 = 5_000;
 
 fn parsed_context(context: &str) -> Value {
     serde_json::from_str(context).unwrap_or(Value::Null)
@@ -310,7 +309,7 @@ pub async fn run(
                         .retry(
                             &lease,
                             chrono::Utc::now().timestamp_millis(),
-                            RETRY_BACKOFF_MS,
+                            role.backoff.delay_ms(lease.job.attempts),
                             "processing error",
                         )
                         .await;

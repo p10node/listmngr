@@ -153,6 +153,23 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-DELIVERY-POLICY — bounded acceptance verified
+
+`crates/runners/src/delivery_policy.rs` holds the two decisions the out
+runner used to hard-code. `Backoff::delay_ms(attempts)` doubles from the
+initial delay per attempt already made, caps at the maximum, and jitters by
+±20% (never below one second); every transient transition in the out runner
+and the `in` processor's retry path take their delay from it through
+`MailRoleConfig::backoff`, so the queue's `retry` primitive keeps its
+caller-supplied-delay contract and the policy stays testable without the
+database. `chunk_by_domain` returns index chunks over the pending roster —
+a stable sort by domain, then fixed-size slices — and the transaction loop
+writes each outcome back to its recipient's index, which keeps the
+per-recipient ENVIDs, personalized copies and VERP senders (all only
+meaningful for one-recipient chunks) aligned with the roster the database
+reserved. `MtaConfig::validate` now owns the `[mta]` invariants that
+`Config::load` enforces, including the new sizing and retry bounds.
+
 ## P2-PERSONALIZE-VERP — bounded acceptance verified
 
 `prepare_post` now decides how a subscriber delivery is split. It resolves
