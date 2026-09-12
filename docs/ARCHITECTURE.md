@@ -153,6 +153,25 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-LMTP-PARAMETERS — bounded acceptance verified
+
+`parse_path` now returns the ESMTP parameters after the `<path>`, and
+`check_mail_parameters` validates them against exactly what `LHLO` announces:
+`SIZE` (RFC 1870) and `BODY` (RFC 6152). The three failure modes map to
+distinct replies — `552 5.3.4` for a declared size over
+`max_message_bytes`, `501` for an unusable value, `555 5.5.4` for anything
+unannounced — and all of them are decided before the transaction opens, so a
+refusal leaves no half-built state and the next `RCPT` is correctly out of
+sequence. `RCPT TO` carries no announced parameter at all, so any is a `555`.
+
+On the client side `negotiate` reads `8BITMIME` from the relay's `EHLO` (the
+authenticated path reads it in `auth::authenticate` and hands it over in
+`Capabilities`, alongside DSN). An 8-bit payload adds `BODY=8BITMIME`; a
+relay without the extension resolves every recipient as a transient failure
+before `MAIL FROM`, the same shape as the existing "DSN capability required"
+refusal. The in-crate SMTP sinks now announce 8BITMIME, as every real relay
+does.
+
 ## P2-METRICS — bounded acceptance verified
 
 `listmngr_core::metrics` is a hand-rolled Prometheus registry: `LabeledCounter`

@@ -186,10 +186,10 @@ pub async fn send_secure_with_envid<S: AsyncRead + AsyncWrite + Unpin + Send>(
     let (read, mut writer) = tokio::io::split(upgraded);
     let mut reader = tokio::io::BufReader::new(read);
     // AUTH negotiates a fresh EHLO only after certificate verification.
-    let supports_dsn = if let Some(auth) = auth {
+    let capabilities = if let Some(auth) = auth {
         auth.authenticate(&mut writer, &mut reader, config).await?
     } else {
-        false
+        super::auth::Capabilities::default()
     };
     // The shared envelope/DATA path is unchanged.
     let mut outcome = run_transaction(
@@ -200,7 +200,8 @@ pub async fn send_secure_with_envid<S: AsyncRead + AsyncWrite + Unpin + Send>(
         mail_from,
         recipients,
         data,
-        envid.map(|v| (v, supports_dsn)),
+        envid.map(|v| (v, capabilities.dsn)),
+        capabilities.eight_bitmime,
     )
     .await;
     if auth.is_some() {

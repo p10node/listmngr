@@ -624,6 +624,23 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## LMTP size and body parameters — bounded acceptance verified
+
+The LMTP listener now honours the extensions it announces. A front MTA that
+declares `MAIL FROM:<…> SIZE=n` larger than `mta.max_message_bytes` is
+refused with `552 5.3.4` before `DATA`, so an oversized message is never
+transferred; `BODY=7BIT` and `BODY=8BITMIME` (RFC 6152) are accepted, and any
+other parameter — `BODY=BINARYMIME`, DSN's `RET`/`NOTIFY`/`ORCPT`, `AUTH` —
+is refused with `555 5.5.4` rather than silently ignored, because this server
+announces none of them.
+
+Outgoing mail follows the same rule: a message containing 8-bit octets is
+sent as `MAIL FROM:<…> BODY=8BITMIME` when the relay announces 8BITMIME, and
+a relay that does not announce it never receives the message (the delivery
+retries instead). Every current MTA announces 8BITMIME; a relay that does not
+needs the message re-encoded upstream. See `P2-LMTP-PARAMETERS` in
+`docs/FEATURE_PARITY.md`.
+
 ## Mail metrics — bounded acceptance verified
 
 `GET /metrics` (unauthenticated, Prometheus text) now reports the mail path

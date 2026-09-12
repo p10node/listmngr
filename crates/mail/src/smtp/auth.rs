@@ -25,7 +25,7 @@ impl AuthPlain {
         writer: &mut W,
         reader: &mut R,
         config: &SmtpClientConfig,
-    ) -> IoResult<bool> {
+    ) -> IoResult<Capabilities> {
         tokio::time::timeout(config.command_timeout, async {
             let ehlo = command(
                 writer,
@@ -63,10 +63,16 @@ impl AuthPlain {
             if !response_sent || reply.code != 235 {
                 return Err(IoError::other("SMTP AUTH rejected"));
             }
-            Ok(ehlo
-                .extensions
-                .iter()
-                .any(|line| line.eq_ignore_ascii_case("DSN")))
+            Ok(Capabilities {
+                dsn: ehlo
+                    .extensions
+                    .iter()
+                    .any(|line| line.eq_ignore_ascii_case("DSN")),
+                eight_bitmime: ehlo
+                    .extensions
+                    .iter()
+                    .any(|line| line.eq_ignore_ascii_case("8BITMIME")),
+            })
         })
         .await
         .map_err(|_| IoError::new(std::io::ErrorKind::TimedOut, "SMTP AUTH deadline exceeded"))?
@@ -77,4 +83,13 @@ impl AuthPlain {
             )
         })
     }
+}
+
+/// The post-authentication `EHLO` capabilities the transaction needs. The
+/// authenticated path runs its own `EHLO`, so the shared negotiation cannot
+/// read them itself.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Capabilities {
+    pub dsn: bool,
+    pub eight_bitmime: bool,
 }

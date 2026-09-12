@@ -83,7 +83,10 @@ async fn capture_envelope_reply(
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     writer.write_all(b"220 fixture\r\n").await.unwrap();
-    let mut commands = vec![("EHLO listmngr.invalid\r\n".to_owned(), "250 fixture\r\n")];
+    let mut commands = vec![(
+        "EHLO listmngr.invalid\r\n".to_owned(),
+        "250-fixture\r\n250 8BITMIME\r\n",
+    )];
     commands.push((format!("MAIL FROM:<{sender}>\r\n"), "250 ok\r\n"));
     commands.extend(
         recipients
@@ -515,7 +518,7 @@ pub async fn capture_data(sink: &tokio::net::TcpListener) -> Vec<u8> {
     let mut reader = BufReader::new(reader);
     writer.write_all(b"220 sink\r\n").await.unwrap();
     for (prefix, reply) in [
-        ("EHLO", "250 sink\r\n"),
+        ("EHLO", "250-sink\r\n250 8BITMIME\r\n"),
         ("MAIL FROM:<test-bounces@example.invalid>", "250 ok\r\n"),
         ("RCPT TO:<member@example.invalid>", "250 ok\r\n"),
         ("DATA", "354 go\r\n"),
