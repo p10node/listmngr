@@ -624,6 +624,27 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Mailman's header set — bounded acceptance verified
+
+Delivered posts carry Mailman's headers: `List-Id` (with the list
+description), `List-Help`, `List-Subscribe`, `List-Unsubscribe`, `List-Post`
+(`NO` for announce-only lists with `allow_list_posts = false`), `List-Owner`,
+`Precedence: list`, `Sender: <list>-bounces@…`, `X-Mailman-Version`,
+`Message-ID-Hash`/`X-Message-ID-Hash`, and — once `site.base_url` is set —
+`List-Archive` and `Archived-At` pointing at HyperKitty-shaped archive URLs.
+`include_rfc2369_headers = false` suppresses the `List-*` set,
+`include_sender_header = false` keeps the poster's own `Sender`, and
+`reply_goes_to_list` with `reply_to_address` and `first_strip_reply_to`
+drive `Reply-To` exactly as in Mailman (`no_munging`, `point_to_list`,
+`explicit_header`, `explicit_header_only`):
+
+```toml
+[site]
+base_url = "https://lists.example.com"   # enables List-Archive / Archived-At
+```
+
+See `P2-COOK-HEADERS` in `docs/FEATURE_PARITY.md`.
+
 ## List headers, footers, topics and receipts — bounded acceptance verified
 
 Every subscriber copy carries the list's `list:member:regular:header` and

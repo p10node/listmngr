@@ -114,6 +114,6 @@ impl ArchiveRepo<'_> {
             Database::browser_user_tx(&mut tx, session).await?;
         }
         tx.commit().await.map_err(db_error)?;
-        render_rows(settings, &rows)
+        render_rows(settings, &rows, self.db.base_url())
     }
 }

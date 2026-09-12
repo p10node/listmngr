@@ -84,6 +84,9 @@ pub struct Database {
     /// a list states a language, and the system layer of preference
     /// resolution.
     default_language: String,
+    /// `site.base_url`: the public web origin the mail layer may point at
+    /// (`List-Archive`, `Archived-At`). Empty when unknown.
+    base_url: String,
 }
 
 impl Database {
@@ -118,6 +121,7 @@ impl Database {
             argon2: security.argon2.clone(),
             password_min_score: security.password_min_score,
             default_language: "en".into(),
+            base_url: String::new(),
         })
     }
     /// Carry `site.default_language` so notices and preference resolution
@@ -131,6 +135,17 @@ impl Database {
     #[must_use]
     pub fn default_language(&self) -> &str {
         &self.default_language
+    }
+    /// Carry `site.base_url` so cooked posts can advertise the archive.
+    #[must_use]
+    pub fn with_base_url(mut self, base_url: &str) -> Self {
+        base_url.trim().clone_into(&mut self.base_url);
+        self
+    }
+    /// The site's public base URL, when configured.
+    #[must_use]
+    pub fn base_url(&self) -> Option<&str> {
+        (!self.base_url.is_empty()).then_some(self.base_url.as_str())
     }
     /// # Errors
     ///

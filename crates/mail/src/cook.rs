@@ -209,6 +209,64 @@ fn redistribution_headers(header_block: &[u8]) -> Vec<u8> {
     })
 }
 
+/// Pipeline primitive: drop the named fields (lower-case names), every
+/// folded continuation included, never touching the body.
+/// # Errors
+/// Returns an error if `raw` has no header/body boundary.
+pub fn strip_named_headers(raw: &[u8], names: &[&str]) -> Result<Vec<u8>> {
+    let (blank_start, _) = header_body_split(raw).ok_or(Error::InvalidMessageId)?;
+    let mut output = strip_fields(&raw[..blank_start], |name| names.contains(&name));
+    output.extend_from_slice(&raw[blank_start..]);
+    Ok(output)
+}
+
+/// RFC 2047 `B` encoded words for a non-ASCII phrase; an ASCII phrase is
+/// quoted when it carries specials, else written bare.
+#[must_use]
+pub fn phrase(text: &str) -> String {
+    if text.is_ascii() {
+        // Python's `formataddr` quotes a phrase only when it carries specials.
+        if !text
+            .chars()
+            .any(|c| "()<>[]:;@\\,.\"".contains(c) || c.is_control())
+        {
+            return text.to_owned();
+        }
+        let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+        return format!("\"{escaped}\"");
+    }
+    let mut words = Vec::new();
+    let mut chunk = String::new();
+    for character in text.chars() {
+        if chunk.len() + character.len_utf8() > 33 {
+            words.push(encoded_word(&chunk));
+            chunk.clear();
+        }
+        chunk.push(character);
+    }
+    if !chunk.is_empty() {
+        words.push(encoded_word(&chunk));
+    }
+    words.join(" ")
+}
+
+fn encoded_word(chunk: &str) -> String {
+    let mut encoded = Vec::new();
+    let _ = Base64Encoder::new().encode_to_writer(chunk.as_bytes(), &mut encoded);
+    format!("=?utf-8?B?{}?=", String::from_utf8_lossy(&encoded))
+}
+
+/// `Name <address>` with the name as a phrase, or the bare address.
+#[must_use]
+pub fn format_mailbox(name: Option<&str>, address: &str) -> String {
+    name.map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map_or_else(
+            || address.to_owned(),
+            |name| format!("{} <{address}>", phrase(name)),
+        )
+}
+
 /// Pipeline primitive: drop list controls, private recipients and
 /// moderator-only fields (the `cleanse` handler).
 /// # Errors

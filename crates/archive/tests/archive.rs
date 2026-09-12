@@ -43,7 +43,10 @@ async fn munge_does_not_change_archive_authorship_at_ingestion_or_publication() 
         .unwrap();
     let text = String::from_utf8_lossy(&rows[0].raw);
     assert!(text.contains("From: Author <author@elsewhere.invalid>"));
-    assert!(text.contains("Sender: old@elsewhere.invalid"));
+    // `cook-headers` rewrites `Sender` to the bounces address by default;
+    // authorship (`From`) is what munging must not touch here.
+    assert!(text.contains("Sender: dev-bounces@example.invalid"));
+    assert!(!text.contains("old@elsewhere.invalid"));
     assert!(text.ends_with("\r\n\r\nbody\r\n"));
     let lease = enqueue(
         &db,

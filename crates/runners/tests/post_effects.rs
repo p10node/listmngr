@@ -15,7 +15,10 @@ const LIST: &str = "effects.example.invalid";
 const POSTING: &str = "effects@example.invalid";
 
 async fn fixture() -> Database {
-    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    fixture_with(Database::connect("sqlite::memory:", 1).await.unwrap()).await
+}
+
+async fn fixture_with(db: Database) -> Database {
     db.migrate().await.unwrap();
     db.domains()
         .create("example.invalid", "", None)
@@ -258,4 +261,65 @@ async fn only_the_subscriber_copy_is_decorated_with_expanded_templates() {
         );
         assert!(!text.contains("To unsubscribe send an email"), "{target:?}");
     }
+}
+
+#[tokio::test]
+async fn delivered_and_archived_copies_advertise_the_archive_when_the_site_url_is_known() {
+    let db = fixture_with(
+        Database::connect("sqlite::memory:", 1)
+            .await
+            .unwrap()
+            .with_base_url("https://lists.example.invalid/"),
+    )
+    .await;
+    let raw = message("archived");
+    let message_id = post(&db, &raw).await;
+    let stored = db.mail_queue().message(message_id).await.unwrap();
+    let (copy, _) = listmngr_runners::prepare_individual(
+        &db,
+        &stored.raw,
+        &stored.context,
+        uuid::Uuid::now_v7(),
+    )
+    .await
+    .ok()
+    .unwrap();
+    let hash = listmngr_mail::message_id_hash(
+        &listmngr_mail::header_value(&stored.raw, "message-id").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        listmngr_mail::header_value(&copy, "List-Archive").as_deref(),
+        Some("<https://lists.example.invalid/archives/list/effects.example.invalid/>")
+    );
+    assert_eq!(
+        listmngr_mail::header_value(&copy, "Archived-At").as_deref(),
+        Some(format!("<https://lists.example.invalid/archives/list/effects.example.invalid/message/{hash}/>").as_str())
+    );
+    assert_eq!(
+        listmngr_mail::header_value(&copy, "Sender").as_deref(),
+        Some("effects-bounces@example.invalid")
+    );
+    assert_eq!(
+        listmngr_mail::header_value(&copy, "List-Help").as_deref(),
+        Some("<mailto:effects-request@example.invalid?subject=help>")
+    );
+
+    // Without a configured base URL nothing points at a web origin.
+    let db = fixture().await;
+    let raw = message("unadvertised");
+    let message_id = post(&db, &raw).await;
+    let stored = db.mail_queue().message(message_id).await.unwrap();
+    let (copy, _) = listmngr_runners::prepare_individual(
+        &db,
+        &stored.raw,
+        &stored.context,
+        uuid::Uuid::now_v7(),
+    )
+    .await
+    .ok()
+    .unwrap();
+    assert!(listmngr_mail::header_value(&copy, "List-Archive").is_none());
+    assert!(listmngr_mail::header_value(&copy, "Archived-At").is_none());
+    assert!(listmngr_mail::header_value(&copy, "Message-ID-Hash").is_some());
 }

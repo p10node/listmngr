@@ -312,7 +312,8 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         &config.security,
     )
     .await?
-    .with_default_language(&config.site.default_language);
+    .with_default_language(&config.site.default_language)
+    .with_base_url(&config.site.base_url);
     match command {
         Command::Migrate => {
             db.migrate().await.context(errors::MigrationFailure)?;

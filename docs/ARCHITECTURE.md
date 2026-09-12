@@ -153,6 +153,30 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-COOK-HEADERS — bounded acceptance verified
+
+The header handlers now carry Mailman's full output. `rfc-2369` is a pure
+builder in `crates/mail/src/list_headers.rs` fed by the list settings and the
+site base URL that `PipelineContext::base_url` carries; `cook_for_site` is
+the entry point that passes it, `cook_for` (tests, planning) passes none.
+The archive URL shapes — `/archives/list/{list_id}/` and
+`/archives/list/{list_id}/message/{hash}/` — are HyperKitty's, and the hash
+is the same base32 SHA-1 the archive already keys on, so a message's
+`Archived-At` stays valid across a Mailman migration and the SSR archive
+must serve exactly these paths. `List-*` headers are emitted before the
+`to-archive`/`to-digest` snapshots, so the archive copy, the digest copy and
+the subscriber copy agree.
+
+`cook-headers` gained the `Sender` rewrite, the `Reply-To` policy
+(`crates/mail/src/reply_to.rs`, which parses the inbound addresses with
+`mail-parser`, applies `first_strip_reply_to` and `reply_goes_to_list`,
+deduplicates by address and writes one header back through
+`cook::format_mailbox`/`cook::phrase`, the `formataddr` equivalents), the
+`X-Mailman-Version` marker and the `Message-ID-Hash` pair. `Database` now
+carries `site.base_url` next to `default_language`, so the out runner and
+both archive renderers (queue processing and read-time rendering) cook with
+the same URLs the CLI was configured with.
+
 ## P2-HANDLERS-DECORATE — bounded acceptance verified
 
 Decoration happens where Mailman does it: at delivery. `cook_for(Target::Out)`

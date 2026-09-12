@@ -82,6 +82,7 @@ const fn ctx(list: &MailingList, target: Target) -> PipelineContext<'_> {
         list,
         identity: "identity",
         target,
+        base_url: None,
     }
 }
 
