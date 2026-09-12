@@ -57,6 +57,18 @@ impl OneClickRepo<'_> {
         one_click::Signer::new(&key)
     }
 
+    /// The one-click URL for a known membership, from a signer obtained once.
+    #[must_use]
+    pub fn url_for_member(
+        signer: &one_click::Signer,
+        base_url: &str,
+        list: &ListId,
+        member: MemberId,
+        now_secs: i64,
+    ) -> String {
+        one_click::url(base_url, list, &signer.issue(list, member, now_secs))
+    }
+
     /// The one-click URL for `email`'s membership of `list`, when they are a
     /// member and the site has a base URL.
     /// # Errors

@@ -86,7 +86,7 @@ async fn mixed_modes(munge: bool, signing: bool) {
         db.preferences().set_member(member.id,Preferences{delivery_mode:Some(mode),delivery_status:Some(status),receive_own_postings:Some(own),receive_list_copy:Some(copy),..Default::default()}).await.unwrap();
     }
     let raw=b"From: author@private.invalid\r\nTo: test@example.invalid, direct@example.invalid\r\nBcc: hidden@private.invalid\r\nApproved: password\r\nReceived: private.invalid\r\nMessage-ID: <private@private.invalid>\r\nSubject: Digest evidence\r\n\r\nbody evidence\r\n";
-    let mut inbound=InboundHandler{db:db.clone(),local_hostname:"example.invalid".into(),max_message_bytes:100_000,max_recipients:10,command_timeout:Duration::from_secs(2),in_max_attempts:3};
+    let mut inbound=InboundHandler{db:db.clone(),local_hostname:"example.invalid".into(),max_message_bytes:100_000,max_recipients:10,command_timeout:Duration::from_secs(2),in_max_attempts:3,verp_delimiter:"+".into()};
     assert_eq!(inbound.deliver(Some("author@example.invalid"),&["test@example.invalid".into()],raw).await[0].code,250);
     let mut config=Config::default(); config.mta.smtp_tls="plaintext_trusted_relay".into(); config.mailman.default_member_action=listmngr_core::ModerationAction::Accept;
     let keys=tempfile::tempdir().unwrap();

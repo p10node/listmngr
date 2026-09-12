@@ -624,6 +624,26 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Personalized delivery and VERP — bounded acceptance verified
+
+`personalize = individual` sends every member their own copy: the list
+header and footer can use `$user_email`, `$user_name`,
+`$user_delivered_to`, `$user_language` and `$member`, and the copy carries
+the one-click unsubscribe pair. `personalize = full` also addresses the
+copy to the member (`To: Name <address>`). Turn on VERP so bounces name the
+member they concern even when the bouncing server does not:
+
+```toml
+[mta]
+verp_personalized_deliveries = true   # personalized copies: list-bounces+member=domain@host
+verp_delivery_interval = 10           # every 10th post of any list is VERP'd
+```
+
+Regenerate the Postfix maps afterwards (`listmngr aliases regen`): they
+now route `list-bounces+local=domain@host` to the LMTP intake, which
+records the encoded member on the queued bounce. See `P2-PERSONALIZE-VERP`
+in `docs/FEATURE_PARITY.md`.
+
 ## One-click unsubscribe (RFC 8058) — bounded acceptance verified
 
 Mailbox providers that require `List-Unsubscribe-Post` for bulk senders get

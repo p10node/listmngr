@@ -237,6 +237,7 @@ fn seed_inbox(url: &str) {
             max_recipients: 4,
             command_timeout: Duration::from_secs(3),
             in_max_attempts: 3,
+            verp_delimiter: "+".into(),
         };
         let recipients: Vec<String> = vec![
             "list-bounces@example.invalid".into(),

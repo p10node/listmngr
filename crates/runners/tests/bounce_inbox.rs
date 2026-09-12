@@ -32,6 +32,7 @@ fn handler(db: Database) -> InboundHandler {
         max_recipients: 4,
         command_timeout: Duration::from_secs(3),
         in_max_attempts: 3,
+        verp_delimiter: "+".into(),
     }
 }
 
@@ -193,14 +194,15 @@ async fn bounce_batch_audit_failure_rolls_back_and_valid_retry_preserves_both_li
 }
 
 #[tokio::test]
-async fn exact_posting_list_wins_and_plus_bounce_addresses_remain_rejected() {
+async fn exact_posting_list_wins_and_only_verp_shaped_plus_addresses_are_bounces() {
     let db = Database::connect("sqlite::memory:", 1).await.unwrap();
     setup(&db, &["list", "list-bounces", "other"]).await;
     let mut intake = handler(db.clone());
     for address in [
         "list-bounces+token@example.invalid",
         "missing-bounces@example.invalid",
-        "other-bounces+local=domain@example.invalid",
+        "missing-bounces+local=domain@example.invalid",
+        "other-request+local=domain@example.invalid",
     ] {
         assert!(
             intake.validate_recipient(address).await.is_err(),
@@ -210,6 +212,7 @@ async fn exact_posting_list_wins_and_plus_bounce_addresses_remain_rejected() {
     let recipients: Vec<String> = vec![
         "list-bounces@example.invalid".into(),
         "OTHER-BOUNCES@EXAMPLE.INVALID".into(),
+        "other-bounces+Alice=Elsewhere.invalid@example.invalid".into(),
     ];
     for recipient in &recipients {
         intake.validate_recipient(recipient).await.unwrap();
@@ -219,21 +222,30 @@ async fn exact_posting_list_wins_and_plus_bounce_addresses_remain_rejected() {
         .await;
     assert_eq!(
         outcomes.iter().map(|o| o.code).collect::<Vec<_>>(),
-        [250, 250]
+        [250, 250, 250]
     );
-    let rows: Vec<(String, String)> = sqlx::query_as("SELECT q.queue,m.context FROM queue_jobs q JOIN messages m ON m.id=q.message_id ORDER BY q.queue")
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT q.queue,m.context FROM queue_jobs q JOIN messages m ON m.id=q.message_id ORDER BY q.queue, m.context")
         .fetch_all(db.pool()).await.unwrap();
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 3);
+    let contexts: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(_, context)| serde_json::from_str(context).unwrap())
+        .collect();
     assert_eq!(rows[0].0, "bounces");
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&rows[0].1).unwrap()["list_id"],
-        "other.example.invalid"
-    );
-    assert_eq!(rows[1].0, "in");
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&rows[1].1).unwrap()["list_id"],
-        "list-bounces.example.invalid"
-    );
+    assert_eq!(rows[1].0, "bounces");
+    let verp = contexts[..2]
+        .iter()
+        .find(|context| context.get("verp_recipient").is_some())
+        .expect("the VERP bounce names its recipient");
+    assert_eq!(verp["list_id"], "other.example.invalid");
+    assert_eq!(verp["verp_recipient"], "alice@elsewhere.invalid");
+    let plain = contexts[..2]
+        .iter()
+        .find(|context| context.get("verp_recipient").is_none())
+        .unwrap();
+    assert_eq!(plain["list_id"], "other.example.invalid");
+    assert_eq!(rows[2].0, "in");
+    assert_eq!(contexts[2]["list_id"], "list-bounces.example.invalid");
 }
 
 #[tokio::test]

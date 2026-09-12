@@ -76,6 +76,7 @@ async fn fixture() -> (Database, InboundHandler) {
         max_recipients: 10,
         command_timeout: Duration::from_secs(5),
         in_max_attempts: 5,
+        verp_delimiter: "+".into(),
     };
     (db, handler)
 }

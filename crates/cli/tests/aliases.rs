@@ -88,6 +88,15 @@ fn regen_publishes_exact_supported_recipients_in_a_fresh_generation() {
         writeln!(expected_recipients, "/^{escaped}$/ OK").unwrap();
         writeln!(expected_transport, "/^{escaped}$/ lmtp:[127.0.0.1]:8024").unwrap();
     }
+    // VERP bounce addresses follow the exact rows, one pattern per list.
+    for pattern in [
+        "alpha-bounces\\+[^@=]+=[^@=]+@example\\.invalid",
+        "alpha-join-bounces\\+[^@=]+=[^@=]+@example\\.invalid",
+        "beta-bounces\\+[^@=]+=[^@=]+@other\\.invalid",
+    ] {
+        writeln!(expected_recipients, "/^{pattern}$/ OK").unwrap();
+        writeln!(expected_transport, "/^{pattern}$/ lmtp:[127.0.0.1]:8024").unwrap();
+    }
     assert_eq!(recipients, expected_recipients);
     assert_eq!(transport, expected_transport);
     assert_eq!(
@@ -96,7 +105,12 @@ fn regen_publishes_exact_supported_recipients_in_a_fresh_generation() {
     );
     assert!(recipients.contains("bounces"));
     assert!(recipients.contains("owner"));
-    assert!(!recipients.contains('+'));
+    assert!(
+        !recipients
+            .lines()
+            .any(|line| line.contains('+') && !line.contains("bounces")),
+        "plus extensions exist only for VERP bounces"
+    );
     assert_eq!(std::fs::read_dir(&output).unwrap().count(), 1);
 }
 
@@ -260,6 +274,7 @@ fn real_postfix_lookup_agrees_with_runtime_recipient_validation() {
             max_recipients: 10,
             command_timeout: std::time::Duration::from_secs(2),
             in_max_attempts: 3,
+            verp_delimiter: "+".into(),
         };
         for (address, valid) in [
             ("alpha@example.invalid", true),

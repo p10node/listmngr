@@ -51,18 +51,32 @@ pub async fn run(db: &Database, config: &Config, command: Command) -> Result<()>
     let lists = db.lists().list(None).await?;
     let mut addresses = BTreeSet::new();
     let mut hosts = BTreeSet::new();
+    let mut verp = BTreeSet::new();
     for list in lists {
         hosts.insert(list.id.mail_host().to_owned());
         addresses.insert(list.id.posting_address());
         for (suffix, _) in listmngr_runners::COMMAND_SUFFIXES {
             addresses.insert(list.id.address_with_suffix(suffix));
         }
+        // VERP bounces: `list-bounces<delimiter>local=domain@host`.
+        verp.insert(format!(
+            "{}-bounces{}[^@=]+=[^@=]+@{}",
+            regexp_escape(list.id.list_name()),
+            regexp_escape(&config.mta.verp_delimiter),
+            regexp_escape(list.id.mail_host())
+        ));
     }
     let transport = format!("lmtp:[{}]:{}", target.ip(), target.port());
     let maps = [
         ("domains.regexp", render(&hosts, "OK")),
-        ("recipients.regexp", render(&addresses, "OK")),
-        ("transport.regexp", render(&addresses, &transport)),
+        (
+            "recipients.regexp",
+            render(&addresses, "OK") + &render_patterns(&verp, "OK"),
+        ),
+        (
+            "transport.regexp",
+            render(&addresses, &transport) + &render_patterns(&verp, &transport),
+        ),
     ];
     let generation = publish(&output, &maps)?;
     println!("{}", generation.display());
@@ -75,6 +89,28 @@ fn render(keys: &BTreeSet<String>, value: &str) -> String {
         // ListId permits only ASCII alphanumeric/hyphen list names and DNS
         // domain labels. The dot is the only regexp metacharacter in these keys.
         writeln!(result, "/^{}$/ {value}", key.replace('.', "\\.")).expect("String write");
+    }
+    result
+}
+
+/// Escape the regular-expression metacharacters for a Postfix `regexp:` key.
+fn regexp_escape(text: &str) -> String {
+    text.chars()
+        .flat_map(|c| {
+            if ".^$*+?()[]{}|\\/".contains(c) {
+                vec!['\\', c]
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
+}
+
+/// Rows whose keys are already regular expressions.
+fn render_patterns(patterns: &BTreeSet<String>, value: &str) -> String {
+    let mut result = String::new();
+    for pattern in patterns {
+        writeln!(result, "/^{pattern}$/ {value}").expect("String write");
     }
     result
 }

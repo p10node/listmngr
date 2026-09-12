@@ -14,8 +14,12 @@
 # recipient_delimiter =
 # lmtp_destination_recipient_limit = 1
 #
-# Example generated transport row:
+# Example generated transport rows (the second routes VERP bounces,
+# `list-bounces+local=domain@example.org`, produced when a list is
+# personalized with verp_personalized_deliveries or by verp_delivery_interval;
+# keep recipient_delimiter empty so the full address reaches the maps):
 # /^list@example\.org$/ lmtp:[127.0.0.1]:8024
+# /^list-bounces\+[^@=]+=[^@=]+@example\.org$/ lmtp:[127.0.0.1]:8024
 #
 # Activation gate:
 #   postconf -m  # must include regexp; do NOT compile these as hash maps

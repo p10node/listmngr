@@ -998,3 +998,154 @@ async fn unpersonalized_lists_keep_one_transaction_and_the_mailto_only_header() 
     );
     assert!(listmngr_mail::header_value(&payload, "List-Unsubscribe-Post").is_none());
 }
+
+fn role_with(sink: &tokio::net::TcpListener, mta: &serde_json::Value) -> MailRoleConfig {
+    let mut config = serde_json::json!({"mta": {"smtp_tls": "plaintext_trusted_relay"}});
+    config["mta"]
+        .as_object_mut()
+        .unwrap()
+        .extend(mta.as_object().unwrap().clone());
+    let config: listmngr_core::Config = serde_json::from_value(config).unwrap();
+    let mut role = MailRoleConfig::from_core(&config).unwrap();
+    role.smtp_relay = sink.local_addr().unwrap();
+    role.command_timeout = Duration::from_secs(2);
+    role
+}
+
+#[tokio::test]
+async fn full_personalization_rewrites_to_expands_user_placeholders_and_verps_the_envelope() {
+    let recipients: Vec<String> = vec!["a@example.invalid".into(), "b@example.invalid".into()];
+    let db = Database::connect("sqlite::memory:", 1)
+        .await
+        .unwrap()
+        .with_base_url("https://lists.example.invalid");
+    let (db, lease, _, sink) = fixture_on(
+        db,
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"From: author@elsewhere.invalid\r\nTo: test@example.invalid\r\nSubject: personal\r\nMessage-ID: <f@example.invalid>\r\nContent-Type: text/plain\r\n\r\nfixture-body\r\n",
+        recipients.clone(),
+    )
+    .await;
+    let role = role_with(
+        &sink,
+        &serde_json::json!({"verp_personalized_deliveries": true}),
+    );
+    let list_id: listmngr_core::ListId = "test.example.invalid".parse().unwrap();
+    db.lists()
+        .update(&list_id, &serde_json::json!({"personalize": "full"}))
+        .await
+        .unwrap();
+    db.templates()
+        .set_body(
+            &listmngr_db::templates::Scope::List(list_id.clone()),
+            "list:member:regular:footer",
+            "en",
+            "-- \nfor $user_email ($user_name, $user_language)\n",
+        )
+        .await
+        .unwrap();
+    for (email, name) in [("a@example.invalid", "Ann"), ("b@example.invalid", "")] {
+        db.members()
+            .create(listmngr_db::NewMember {
+                list_id: list_id.clone(),
+                email: email.into(),
+                display_name: name.into(),
+                role: listmngr_core::MemberRole::Member,
+                subscription_mode: listmngr_core::SubscriptionMode::AsAddress,
+            })
+            .await
+            .unwrap();
+    }
+    let capture = async {
+        let mut payloads = Vec::new();
+        for recipient in &recipients {
+            let local = recipient.split('@').next().unwrap();
+            payloads.push(
+                capture_envelope(
+                    &sink,
+                    &format!("test-bounces+{local}=example.invalid@example.invalid"),
+                    std::slice::from_ref(recipient),
+                )
+                .await,
+            );
+        }
+        payloads
+    };
+    let (payloads, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(capture, deliver_one(&db, &role, lease.clone()))
+    })
+    .await
+    .unwrap();
+    let first = String::from_utf8_lossy(&payloads[0]);
+    assert!(first.contains("To: Ann <a@example.invalid>\r\n"), "{first}");
+    assert!(!first.contains("To: test@example.invalid"), "{first}");
+    assert!(first.contains("for a@example.invalid (Ann, en)"), "{first}");
+    assert!(
+        first.contains("List-Unsubscribe-Post: List-Unsubscribe=One-Click"),
+        "{first}"
+    );
+    let second = String::from_utf8_lossy(&payloads[1]);
+    assert!(second.contains("To: b@example.invalid\r\n"), "{second}");
+    assert!(second.contains("for b@example.invalid (, en)"), "{second}");
+    assert_eq!(
+        db.mail_queue().job(lease.job.id).await.unwrap().state,
+        JobState::Done
+    );
+}
+
+#[tokio::test]
+async fn the_verp_delivery_interval_splits_an_ordinary_post_without_personalizing_it() {
+    let recipients: Vec<String> = vec!["a@example.invalid".into(), "b@example.invalid".into()];
+    let (db, lease, _, sink) = fixture_with_recipients(
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"From: author@elsewhere.invalid\r\nTo: test@example.invalid\r\nSubject: interval\r\nMessage-ID: <i@example.invalid>\r\n\r\nfixture-body\r\n",
+        recipients.clone(),
+    )
+    .await;
+    let role = role_with(&sink, &serde_json::json!({"verp_delivery_interval": 1}));
+    let capture = async {
+        let mut payloads = Vec::new();
+        for recipient in &recipients {
+            let local = recipient.split('@').next().unwrap();
+            payloads.push(
+                capture_envelope(
+                    &sink,
+                    &format!("test-bounces+{local}=example.invalid@example.invalid"),
+                    std::slice::from_ref(recipient),
+                )
+                .await,
+            );
+        }
+        payloads
+    };
+    let (payloads, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(capture, deliver_one(&db, &role, lease.clone()))
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        payloads[0], payloads[1],
+        "the copies are identical; only the envelope differs"
+    );
+    let text = String::from_utf8_lossy(&payloads[0]);
+    assert!(text.contains("To: test@example.invalid\r\n"), "{text}");
+    assert!(!text.contains("List-Unsubscribe-Post"), "{text}");
+
+    // Interval 2 on post_id 1 (fresh list): a single shared transaction.
+    let (db, lease, _, sink) = fixture_with_recipients(
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"Subject: shared\r\nMessage-ID: <s2@example.invalid>\r\n\r\nfixture-body\r\n",
+        recipients.clone(),
+    )
+    .await;
+    let role = role_with(&sink, &serde_json::json!({"verp_delivery_interval": 2}));
+    let (payload, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            capture_envelope(&sink, "test-bounces@example.invalid", &recipients),
+            deliver_one(&db, &role, lease)
+        )
+    })
+    .await
+    .unwrap();
+    assert!(payload.ends_with(b"fixture-body\r\n"));
+}
