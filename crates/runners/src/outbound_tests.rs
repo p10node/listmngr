@@ -650,6 +650,15 @@ pub(super) async fn fixture_at(
     recipients: Vec<String>,
 ) -> (Database, Lease, MailRoleConfig, tokio::net::TcpListener) {
     let db = Database::connect(url, 1).await.unwrap();
+    fixture_on(db, context, raw, recipients).await
+}
+
+pub(super) async fn fixture_on(
+    db: Database,
+    context: &str,
+    raw: &[u8],
+    recipients: Vec<String>,
+) -> (Database, Lease, MailRoleConfig, tokio::net::TcpListener) {
     db.migrate().await.unwrap();
     db.domains()
         .create("example.invalid", "test", None)
@@ -849,4 +858,143 @@ async fn list_lookup_failure_never_connects_and_retries() {
         db.mail_queue().job(lease.job.id).await.unwrap().state,
         JobState::Ready
     );
+}
+
+#[tokio::test]
+async fn personalized_lists_get_one_transaction_and_one_click_link_per_recipient() {
+    let recipients: Vec<String> = vec!["a@example.invalid".into(), "b@example.invalid".into()];
+    let db = Database::connect("sqlite::memory:", 1)
+        .await
+        .unwrap()
+        .with_base_url("https://lists.example.invalid");
+    let (db, lease, role, sink) = fixture_on(
+        db,
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"Subject: personal\r\nMessage-ID: <p@example.invalid>\r\n\r\nfixture-body\r\n",
+        recipients.clone(),
+    )
+    .await;
+    let list_id: listmngr_core::ListId = "test.example.invalid".parse().unwrap();
+    db.lists()
+        .update(&list_id, &serde_json::json!({"personalize": "individual"}))
+        .await
+        .unwrap();
+    for email in &recipients {
+        db.members()
+            .create(listmngr_db::NewMember {
+                list_id: list_id.clone(),
+                email: email.clone(),
+                display_name: String::new(),
+                role: listmngr_core::MemberRole::Member,
+                subscription_mode: listmngr_core::SubscriptionMode::AsAddress,
+            })
+            .await
+            .unwrap();
+    }
+    let capture = async {
+        let mut payloads = Vec::new();
+        for recipient in &recipients {
+            payloads.push(
+                capture_envelope(
+                    &sink,
+                    "test-bounces@example.invalid",
+                    std::slice::from_ref(recipient),
+                )
+                .await,
+            );
+        }
+        payloads
+    };
+    let (payloads, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(capture, deliver_one(&db, &role, lease.clone()))
+    })
+    .await
+    .unwrap();
+    assert_eq!(payloads.len(), 2, "one transaction per recipient");
+    let mut links = Vec::new();
+    for (payload, recipient) in payloads.iter().zip(&recipients) {
+        let unsubscribe = listmngr_mail::header_value(payload, "List-Unsubscribe").unwrap();
+        assert!(
+            unsubscribe.starts_with(
+                "<https://lists.example.invalid/unsubscribe/test.example.invalid?token="
+            ),
+            "{recipient}: {unsubscribe}"
+        );
+        assert!(
+            unsubscribe.ends_with(">, <mailto:test-leave@example.invalid>"),
+            "{unsubscribe}"
+        );
+        assert_eq!(
+            listmngr_mail::header_value(payload, "List-Unsubscribe-Post").as_deref(),
+            Some("List-Unsubscribe=One-Click")
+        );
+        assert!(
+            !unsubscribe.contains(recipient.as_str()),
+            "no address in the link"
+        );
+        links.push(unsubscribe);
+        assert!(payload.ends_with(b"fixture-body\r\n"));
+    }
+    assert_ne!(links[0], links[1], "each recipient gets their own token");
+    redeems_for_its_own_recipient(&db, &list_id, &links[0]).await;
+    assert_eq!(
+        db.mail_queue().job(lease.job.id).await.unwrap().state,
+        JobState::Done
+    );
+}
+
+/// Every link redeems for its own recipient only.
+async fn redeems_for_its_own_recipient(db: &Database, list_id: &listmngr_core::ListId, link: &str) {
+    let token = link
+        .split("token=")
+        .nth(1)
+        .unwrap()
+        .split('>')
+        .next()
+        .unwrap()
+        .to_owned();
+    let member = db
+        .one_click()
+        .redeem(
+            list_id,
+            &token,
+            chrono::Utc::now().timestamp(),
+            &listmngr_db::AuditContext::system(),
+        )
+        .await
+        .unwrap();
+    assert!(db.members().get(member.id).await.is_err());
+    assert_eq!(
+        db.members().find("b@example.invalid").await.unwrap().len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn unpersonalized_lists_keep_one_transaction_and_the_mailto_only_header() {
+    let recipients: Vec<String> = vec!["a@example.invalid".into(), "b@example.invalid".into()];
+    let db = Database::connect("sqlite::memory:", 1)
+        .await
+        .unwrap()
+        .with_base_url("https://lists.example.invalid");
+    let (db, lease, role, sink) = fixture_on(
+        db,
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"Subject: shared\r\nMessage-ID: <s@example.invalid>\r\n\r\nfixture-body\r\n",
+        recipients.clone(),
+    )
+    .await;
+    let (payload, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            capture_envelope(&sink, "test-bounces@example.invalid", &recipients),
+            deliver_one(&db, &role, lease.clone())
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        listmngr_mail::header_value(&payload, "List-Unsubscribe").as_deref(),
+        Some("<mailto:test-leave@example.invalid>")
+    );
+    assert!(listmngr_mail::header_value(&payload, "List-Unsubscribe-Post").is_none());
 }

@@ -12,6 +12,7 @@ pub use header_matches::HeaderMatchRow;
 pub mod mail_queue;
 pub mod moderation;
 pub mod notices;
+pub mod one_click;
 pub mod owner_mail;
 pub mod queue_operations;
 mod smtp_bounces;

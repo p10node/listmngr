@@ -323,3 +323,31 @@ fn anonymous_lists_point_replies_at_the_list_before_the_policy_runs() {
     assert_eq!(all(&out, "From"), ["dev@example.invalid"]);
     assert!(all(&out, "Sender").contains(&"dev-bounces@example.invalid".to_owned()));
 }
+
+#[test]
+fn a_personalized_copy_gets_the_rfc_8058_pair_with_https_first() {
+    let cooked = cook_for(Target::Out, &message(""), &list(), "id").unwrap();
+    let url = "https://lists.example.invalid/unsubscribe/dev.example.invalid?token=T";
+    let out = listmngr_mail::personalize::one_click_unsubscribe(&cooked, &list(), url).unwrap();
+    assert_eq!(
+        all(&out, "List-Unsubscribe"),
+        [format!("<{url}>, <mailto:dev-leave@example.invalid>")]
+    );
+    assert_eq!(
+        all(&out, "List-Unsubscribe-Post"),
+        ["List-Unsubscribe=One-Click"]
+    );
+    assert_eq!(all(&out, "List-Id").len(), 1, "other headers untouched");
+
+    let mut silent = list();
+    silent.alter_messages.include_rfc2369_headers = false;
+    let cooked = cook_for(Target::Out, &message(""), &silent, "id").unwrap();
+    let out = listmngr_mail::personalize::one_click_unsubscribe(&cooked, &silent, url).unwrap();
+    assert!(all(&out, "List-Unsubscribe").is_empty());
+    assert!(all(&out, "List-Unsubscribe-Post").is_empty());
+    assert!(
+        listmngr_mail::personalize::one_click_unsubscribe(&cooked, &list(), "https://x\r\nBcc: y")
+            .is_err(),
+        "a URL cannot splice headers"
+    );
+}

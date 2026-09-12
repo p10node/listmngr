@@ -34,6 +34,7 @@ use std::{
 };
 use utoipa::OpenApi;
 mod templates;
+mod unsubscribe;
 mod webui;
 mod workflows;
 
@@ -760,6 +761,7 @@ pub fn router(db: Database, config: Config) -> Router {
                 .with_state(state.clone()),
         )
         .merge(webui::routes())
+        .merge(unsubscribe::routes())
         .layer(middleware::from_fn(trace_request))
         .with_state(state)
 }

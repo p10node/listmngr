@@ -40,7 +40,7 @@ async fn signing_dependency_retries_but_invalid_mail_shunts() {
         .await;
         let before = chrono::Utc::now().timestamp_millis();
         assert!(
-            local_delivery_result(&db, &lease, Err(error))
+            local_delivery_result::<Vec<u8>>(&db, &lease, Err(error))
                 .await
                 .is_none()
         );

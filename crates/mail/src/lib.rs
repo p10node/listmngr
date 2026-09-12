@@ -28,6 +28,7 @@ pub mod list_headers;
 pub mod lmtp;
 pub mod mime_delete;
 pub mod owner;
+pub mod personalize;
 pub mod reply_to;
 pub mod smtp;
 pub mod templates;

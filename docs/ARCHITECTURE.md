@@ -153,6 +153,33 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-ONE-CLICK-UNSUBSCRIBE — bounded acceptance verified
+
+The out runner now has a per-recipient path. `prepare_delivery_full`
+returns `Prepared { cooked, mail_from, personalized }`; when the list is
+personalized, `signed_copies` builds one copy per pending recipient
+(`personalize_for`: the one-click pair spliced by
+`listmngr_mail::personalize::one_click_unsubscribe`), signs each with the
+list's DKIM key, and `send_transactions_with_envid` takes those `variants`
+and forces one transaction per recipient — the same width-1 loop the
+`smtp_single_recipient` setting already used, so ENVID issuance and
+per-recipient outcome fencing are unchanged. Everything else still cooks
+and signs once.
+
+Tokens are `listmngr_core::one_click::Signer` MACs over
+`(list_id, member_id, expiry)` with length-delimited domain separation like
+the DSN issuer; the key is a random 32-byte site secret generated into the
+`site_secrets` table on first use (`OneClickRepo::signer`), so no
+configuration is needed and a deployment with several nodes shares one
+key through the database. The URI carries the token in the query string
+because the request logger records only the path. `OneClickRepo::redeem`
+verifies, checks the membership still belongs to the list, and reuses
+`delete_member_with_goodbye` plus an audit event in one transaction. The
+HTTP surface (`crates/api/src/unsubscribe.rs`) is outside both the bearer
+API and the browser session router: the token is the only credential, the
+page is zero-JS under `default-src 'none'`, and the `POST` body must be
+exactly RFC 8058's pair.
+
 ## P2-COOK-HEADERS — bounded acceptance verified
 
 The header handlers now carry Mailman's full output. `rfc-2369` is a pure

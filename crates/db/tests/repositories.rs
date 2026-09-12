@@ -141,6 +141,7 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/hold-notices-schema.snapshot").lines())
             .chain(include_str!("fixtures/alter-messages-schema.snapshot").lines())
             .chain(include_str!("fixtures/topics-schema.snapshot").lines())
+            .chain(include_str!("fixtures/site-secrets-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )
