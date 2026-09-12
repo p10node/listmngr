@@ -40,13 +40,15 @@ struct Submission<'a> {
     authentication_results: Option<&'a str>,
 }
 
+/// Returns the `listmngr_posts_total` disposition: `accepted`, or
+/// `filtered` when a handler refused the post.
 async fn accept_post(
     db: &Database,
     config: &Config,
     role: &MailRoleConfig,
     lease: &Lease,
     submission: &Submission<'_>,
-) -> Result<(), listmngr_core::Error> {
+) -> Result<&'static str, listmngr_core::Error> {
     let Submission {
         list_id,
         envelope_sender,
@@ -64,8 +66,7 @@ async fn accept_post(
             reason,
             refusal,
         }) => {
-            return db
-                .moderation()
+            db.moderation()
                 .live()
                 .refuse(
                     lease,
@@ -79,7 +80,8 @@ async fn accept_post(
                     },
                     chrono::Utc::now().timestamp_millis(),
                 )
-                .await;
+                .await?;
+            return Ok("filtered");
         }
         Err(error) => return Err(listmngr_core::Error::Validation(error.to_string())),
     };
@@ -140,7 +142,7 @@ async fn accept_post(
             Some(&effects),
         )
         .await?;
-    Ok(())
+    Ok("accepted")
 }
 
 async fn refuse_by_chain(
@@ -194,6 +196,22 @@ async fn forward_to_owners(
     result
 }
 
+/// `validate-authenticity`: SPF/DKIM/DMARC against DNS, before the chain
+/// so `dmarc-mitigation` sees the From domain's policy.
+async fn authenticity_verdict(
+    role: &MailRoleConfig,
+    raw: &[u8],
+    envelope_sender: Option<&str>,
+) -> listmngr_mail::authenticity::Verdict {
+    match &role.authenticity {
+        Some(verifier) => {
+            let client = listmngr_mail::authenticity::received_client(raw);
+            verifier.verify(raw, envelope_sender, client.as_ref()).await
+        }
+        None => listmngr_mail::authenticity::Verdict::default(),
+    }
+}
+
 async fn process_one(
     db: &Database,
     config: &Config,
@@ -202,15 +220,19 @@ async fn process_one(
 ) -> Result<(), listmngr_core::Error> {
     let message = db.mail_queue().live().message(lease.job.message_id).await?;
     let context = parsed_context(&message.context);
+    let metrics = listmngr_core::metrics::global();
     if context["owner_route"] == true {
-        return forward_to_owners(db, role, lease).await;
+        forward_to_owners(db, role, lease).await?;
+        metrics.posts.inc("owner");
+        return Ok(());
     }
     if context.get("subscription_command").is_some() {
-        return db
-            .workflows()
+        db.workflows()
             .live()
             .request_from_lease(lease, chrono::Utc::now().timestamp_millis())
-            .await;
+            .await?;
+        metrics.posts.inc("command");
+        return Ok(());
     }
     let list_id: ListId = context["list_id"]
         .as_str()
@@ -227,20 +249,10 @@ async fn process_one(
         &message.raw,
     )
     .await?;
-    // `validate-authenticity`: SPF/DKIM/DMARC against DNS, before the chain
-    // so `dmarc-mitigation` sees the From domain's policy.
-    let verdict = match &role.authenticity {
-        Some(verifier) => {
-            let client = listmngr_mail::authenticity::received_client(&message.raw);
-            verifier
-                .verify(&message.raw, envelope_sender.as_deref(), client.as_ref())
-                .await
-        }
-        None => listmngr_mail::authenticity::Verdict::default(),
-    };
+    let verdict = authenticity_verdict(role, &message.raw, envelope_sender.as_deref()).await;
     ctx.sender.dmarc_policy_restrictive = verdict.dmarc_policy_restrictive;
     let outcome = decide_posting_traced(&ctx);
-    match outcome.disposition {
+    let disposition = match outcome.disposition {
         Disposition::Accept => {
             accept_post(
                 db,
@@ -259,7 +271,7 @@ async fn process_one(
                     authentication_results: verdict.header.as_deref(),
                 },
             )
-            .await?;
+            .await?
         }
         Disposition::Hold(reason) => {
             db.moderation()
@@ -273,6 +285,7 @@ async fn process_one(
                     chrono::Utc::now().timestamp_millis(),
                 )
                 .await?;
+            "held"
         }
         // Mailman's reject chain bounces the post back to its author with the
         // rule's reason; discard is silent. Both leave a `post.*` audit event.
@@ -286,6 +299,7 @@ async fn process_one(
                 Refusal::Reject,
             )
             .await?;
+            "rejected"
         }
         Disposition::Discard(reason) => {
             refuse_by_chain(
@@ -297,8 +311,10 @@ async fn process_one(
                 Refusal::Discard,
             )
             .await?;
+            "discarded"
         }
-    }
+    };
+    metrics.posts.inc(disposition);
     Ok(())
 }
 
@@ -338,6 +354,7 @@ pub async fn run(
                     .await
                 {
                     tracing::warn!(worker, %error, "in-processor: submission processing failed; retrying");
+                    listmngr_core::metrics::global().posts.inc("failed");
                     let _ = db
                         .mail_queue()
                         .live()

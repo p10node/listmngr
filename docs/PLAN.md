@@ -832,7 +832,7 @@ P2-STORE/P2-QUEUE/P2-CLI/P2-RUNTIME, held, and O2/O3 evidence.
 - [ ] RFC 2369/8058 headers + HTTP one-click unsubscribe endpoint (token HMAC)
 - [x] Postfix/Exim map generation + `aliases regen`; docker-compose thêm postfix
 - [ ] CLI `queue inject/show/unshunt`, `status`
-- [ ] Metrics: queue depth, deliveries, latency
+- [x] Metrics: queue depth, deliveries, latency
 - Acceptance: e2e test harness = pg + smtp sink (Rust mock hoặc `mailhog`) → gửi qua LMTP → assert N member nhận, headers đúng (List-*, subject prefix, footer, DKIM verify pass với key test), held → accept → delivered; nonmember → hold; ban → reject DSN; max-size → hold; `personalize=full` → N msg riêng với VERP đúng; crash giữa pipeline → job không mất (kill -9 test).
 
 ### Phase 3 — Subscription, commands, bounces, digests (L)

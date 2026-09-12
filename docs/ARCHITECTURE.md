@@ -153,6 +153,21 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P2-METRICS — bounded acceptance verified
+
+`listmngr_core::metrics` is a hand-rolled Prometheus registry: `LabeledCounter`
+(one label, a fixed value set declared up front so every series exists from
+the first scrape) and `Histogram` (fixed bounds, cumulative buckets, a
+microsecond sum) over atomics, behind one `global()` instance. It has no
+dependency and no locking. The runners feed it at the points where an outcome
+is final: the LMTP handler after the batch enqueue, `process_one` after each
+disposition committed (`accept_post` returns `accepted`/`filtered`), the
+runner loop on a processing error, and the out runner per transaction
+(duration, completed/failed) and per delivery (recipient outcomes, and the
+acceptance-to-relay latency from `messages.created_at`). The API renders the
+registry plus queue gauges from `MailQueueRepo::stats`, cached five seconds
+in `AppState` because `/metrics` is unauthenticated.
+
 ## P2-VALIDATE-AUTHENTICITY — bounded acceptance verified
 
 Authentication needs DNS, so it lives in the `in` runner rather than the

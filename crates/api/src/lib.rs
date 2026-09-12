@@ -610,6 +610,52 @@ pub struct AppState {
     flavor: ApiFlavor,
     /// `[mta] incoming`: the map writer regenerated after list changes.
     mta_maps: Option<Arc<listmngr_mail::mta::MapWriter>>,
+    /// The queue-depth part of `/metrics`, refreshed at most every few
+    /// seconds so an unauthenticated scrape cannot hammer the database.
+    queue_metrics: Arc<std::sync::Mutex<Option<(Instant, String)>>>,
+}
+
+const QUEUE_METRICS_TTL: Duration = Duration::from_secs(5);
+
+/// Queue depth as Prometheus gauges, from the same query `queue stats` uses.
+async fn queue_metrics(s: &AppState) -> String {
+    use std::fmt::Write as _;
+    if let Some((at, text)) = s.queue_metrics.lock().expect("metrics cache").as_ref()
+        && at.elapsed() < QUEUE_METRICS_TTL
+    {
+        return text.clone();
+    }
+    let stats = match s
+        .db
+        .mail_queue()
+        .stats(chrono::Utc::now().timestamp_millis())
+        .await
+    {
+        Ok(stats) => stats,
+        Err(error) => {
+            tracing::warn!(%error, "queue metrics unavailable");
+            return String::new();
+        }
+    };
+    let mut text = String::from(
+        "# HELP listmngr_queue_jobs Jobs per queue and state.\n# TYPE listmngr_queue_jobs gauge\n",
+    );
+    for (queue, states) in &stats.queues {
+        for (state, jobs) in states {
+            let _ = writeln!(
+                text,
+                "listmngr_queue_jobs{{queue=\"{queue}\",state=\"{state}\"}} {jobs}"
+            );
+        }
+    }
+    let _ = write!(
+        text,
+        "# HELP listmngr_queue_shunted_jobs Jobs parked in the shunt queue.\n# TYPE listmngr_queue_shunted_jobs gauge\nlistmngr_queue_shunted_jobs {}\n# HELP listmngr_queue_oldest_ready_age_seconds Seconds the oldest ready job has waited past its due time.\n# TYPE listmngr_queue_oldest_ready_age_seconds gauge\nlistmngr_queue_oldest_ready_age_seconds {}\n",
+        stats.shunted,
+        stats.oldest_ready_age_secs.unwrap_or(0)
+    );
+    *s.queue_metrics.lock().expect("metrics cache") = Some((Instant::now(), text.clone()));
+    text
 }
 
 /// Mailman regenerates the MTA's maps when a list is created or removed.
@@ -788,6 +834,7 @@ pub fn router(db: Database, config: Config) -> Router {
         web_login_rate: Arc::new(RateLimiter::from_config("5/min")),
         flavor: ApiFlavor::V1,
         mta_maps,
+        queue_metrics: Arc::new(std::sync::Mutex::new(None)),
     };
     let mut compat_state = state.clone();
     compat_state.flavor = ApiFlavor::Compat31;
@@ -961,11 +1008,13 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
         ),
     }
 }
-async fn metrics() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+async fn metrics(State(s): State<AppState>) -> impl IntoResponse {
+    let mut text = String::from(
         "# HELP listmngr_up Service readiness.\n# TYPE listmngr_up gauge\nlistmngr_up 1\n",
-    )
+    );
+    text.push_str(&listmngr_core::metrics::global().render());
+    text.push_str(&queue_metrics(&s).await);
+    ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], text)
 }
 async fn openapi() -> Json<Value> {
     Json(serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI serializes"))
