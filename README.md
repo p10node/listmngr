@@ -624,6 +624,25 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Delivery sizing and retries — bounded acceptance verified
+
+Shared deliveries go out in transactions of at most
+`mta.max_recipients_per_transaction` recipients (Mailman's `max_recipients`),
+grouped by domain; transient failures back off exponentially with jitter
+between `mta.retry_initial_secs` and `mta.retry_max_secs`:
+
+```toml
+[mta]
+max_recipients_per_transaction = 100
+retry_initial_secs = 10   # then 20, 40, 80 … seconds, ±20%
+retry_max_secs = 3600
+```
+
+`listmngr queue stats` shows depth per queue and state, how many jobs are
+shunted and how long the oldest ready job has waited; `listmngr queue
+unshunt <id> --target <queue>` replays a shunted job. See
+`P2-DELIVERY-POLICY` in `docs/FEATURE_PARITY.md`.
+
 ## Personalized delivery and VERP — bounded acceptance verified
 
 `personalize = individual` sends every member their own copy: the list

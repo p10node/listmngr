@@ -933,33 +933,7 @@ impl Config {
         if let Some(spec) = &config.security.rate_limit.api_pre_auth {
             validate_rate_limit("api_pre_auth", spec)?;
         }
-        if config.mta.enabled
-            && !matches!(
-                config.mta.smtp_tls.as_str(),
-                "plaintext_trusted_relay" | "required"
-            )
-        {
-            return Err(Error::Validation(
-                "mta.smtp_tls must be \"plaintext_trusted_relay\" or \"required\"; unsupported modes never downgrade".into(),
-            ));
-        }
-        if !(1..=86_400).contains(&config.mta.bounce_maintenance_interval_secs) {
-            return Err(Error::Validation(
-                "mta.bounce_maintenance_interval_secs must be 1..86400".into(),
-            ));
-        }
-        if !(1..=1000).contains(&config.mta.bounce_maintenance_batch_size) {
-            return Err(Error::Validation(
-                "mta.bounce_maintenance_batch_size must be 1..1000".into(),
-            ));
-        }
-        if config.mta.bounce_maintenance_enabled && !config.mta.enabled {
-            return Err(Error::Validation(
-                "mta.bounce_maintenance_enabled requires mta.enabled".into(),
-            ));
-        }
-        config.mta.smtp_auth_credentials()?;
-        verp::validate(&config.mta.verp_format, &config.mta.verp_delimiter)?;
+        config.mta.validate()?;
         Ok(config)
     }
 
@@ -1087,6 +1061,12 @@ config_struct!(MtaConfig {
     smtp_auth_password: Option<SmtpAuthSecret> = None,
     smtp_auth_password_file: Option<PathBuf> = None,
     max_recipients: u32 = 500,
+    // Mailman's `max_recipients`: recipients per outgoing SMTP transaction.
+    max_recipients_per_transaction: u32 = 500,
+    // Transient delivery failures back off exponentially between these
+    // bounds (seconds), with jitter.
+    retry_initial_secs: u32 = 10,
+    retry_max_secs: u32 = 3600,
     max_message_bytes: u32 = 10_485_760,
     command_timeout_secs: u32 = 30,
     postfix_map_dir: String = "data/postfix".into(),
@@ -1100,6 +1080,53 @@ config_struct!(MtaConfig {
     verp_delivery_interval: u32 = 0
 });
 impl MtaConfig {
+    /// The `[mta]` invariants `Config::load` enforces.
+    /// # Errors
+    /// Returns the first violated invariant as a validation error.
+    pub fn validate(&self) -> Result<()> {
+        if self.enabled
+            && !matches!(
+                self.smtp_tls.as_str(),
+                "plaintext_trusted_relay" | "required"
+            )
+        {
+            return Err(Error::Validation(
+                "mta.smtp_tls must be \"plaintext_trusted_relay\" or \"required\"; unsupported modes never downgrade".into(),
+            ));
+        }
+        if !(1..=86_400).contains(&self.bounce_maintenance_interval_secs) {
+            return Err(Error::Validation(
+                "mta.bounce_maintenance_interval_secs must be 1..86400".into(),
+            ));
+        }
+        if !(1..=1000).contains(&self.bounce_maintenance_batch_size) {
+            return Err(Error::Validation(
+                "mta.bounce_maintenance_batch_size must be 1..1000".into(),
+            ));
+        }
+        if self.bounce_maintenance_enabled && !self.enabled {
+            return Err(Error::Validation(
+                "mta.bounce_maintenance_enabled requires mta.enabled".into(),
+            ));
+        }
+        self.smtp_auth_credentials()?;
+        verp::validate(&self.verp_format, &self.verp_delimiter)?;
+        if !(1..=1000).contains(&self.max_recipients_per_transaction) {
+            return Err(Error::Validation(
+                "mta.max_recipients_per_transaction must be 1..1000".into(),
+            ));
+        }
+        if !(1..=3600).contains(&self.retry_initial_secs)
+            || self.retry_max_secs < self.retry_initial_secs
+            || self.retry_max_secs > 86_400
+        {
+            return Err(Error::Validation(
+                "mta.retry_initial_secs must be 1..3600 and mta.retry_max_secs between it and 86400".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Validate bounded AUTH PLAIN inputs, reading a private regular password file if set.
     /// File bytes are exact except for one optional terminal LF/CRLF. No whitespace trimming.
     /// # Errors

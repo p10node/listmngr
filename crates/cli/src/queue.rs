@@ -61,6 +61,9 @@ pub enum Command {
         #[arg(long, value_parser = parse_state)]
         state: Option<JobState>,
     },
+    /// Queue depth per queue and state, the shunted total and the age of the
+    /// oldest ready job; metadata only.
+    Stats,
     /// Replay a shunted (poison) job onto a live queue with a fresh attempt budget.
     Unshunt {
         id: Uuid,
@@ -216,6 +219,13 @@ pub async fn run(db: &Database, command: Command) -> Result<()> {
                 jobs.push(db.mail_queue().job(JobId(id.parse()?)).await?);
             }
             println!("{}", serde_json::to_string_pretty(&jobs)?);
+        }
+        Command::Stats => {
+            let stats = db
+                .mail_queue()
+                .stats(chrono::Utc::now().timestamp_millis())
+                .await?;
+            println!("{}", serde_json::to_string_pretty(&stats)?);
         }
         Command::Unshunt { id, target } => {
             let job = db

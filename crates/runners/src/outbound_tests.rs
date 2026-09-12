@@ -732,7 +732,7 @@ pub(super) async fn fixture_on(
 async fn mixed_and_missing_outcomes_persist_and_retry_only_pending_recipients() {
     let recipients: Vec<String> = (0..5).map(|n| format!("r{n}@example.invalid")).collect();
     let raw = b"Subject: mixed\r\n\r\nbody";
-    let (db, lease, _role, _sink) = fixture_with_recipients(
+    let (db, lease, role, _sink) = fixture_with_recipients(
         "{\"list_id\":\"test.example.invalid\"}",
         raw,
         recipients.clone(),
@@ -740,6 +740,7 @@ async fn mixed_and_missing_outcomes_persist_and_retry_only_pending_recipients() 
     .await;
     finish_delivery(
         &db,
+        &role,
         &lease,
         &recipients,
         &[
@@ -1148,4 +1149,100 @@ async fn the_verp_delivery_interval_splits_an_ordinary_post_without_personalizin
     .await
     .unwrap();
     assert!(payload.ends_with(b"fixture-body\r\n"));
+}
+
+#[tokio::test]
+async fn shared_deliveries_are_chunked_by_domain_up_to_the_transaction_limit() {
+    let recipients: Vec<String> = vec![
+        "a@one.invalid".into(),
+        "b@two.invalid".into(),
+        "c@one.invalid".into(),
+    ];
+    let (db, lease, _, sink) = fixture_with_recipients(
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"Subject: chunked\r\nMessage-ID: <c@example.invalid>\r\n\r\nfixture-body\r\n",
+        recipients.clone(),
+    )
+    .await;
+    let role = role_with(
+        &sink,
+        &serde_json::json!({"max_recipients_per_transaction": 2}),
+    );
+    let capture = async {
+        let first = capture_envelope(
+            &sink,
+            "test-bounces@example.invalid",
+            &["a@one.invalid".to_owned(), "c@one.invalid".to_owned()],
+        )
+        .await;
+        let second = capture_envelope(
+            &sink,
+            "test-bounces@example.invalid",
+            &["b@two.invalid".to_owned()],
+        )
+        .await;
+        (first, second)
+    };
+    let ((first, second), ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(capture, deliver_one(&db, &role, lease.clone()))
+    })
+    .await
+    .unwrap();
+    assert_eq!(first, second, "one signed copy shared by every transaction");
+    assert_eq!(
+        db.mail_queue().job(lease.job.id).await.unwrap().state,
+        JobState::Done
+    );
+    let sent: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM delivery_recipients WHERE job_id=$1 AND status='sent'",
+    )
+    .bind(lease.job.id.0.to_string())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(sent, 3);
+}
+
+#[tokio::test]
+async fn an_unreachable_relay_backs_off_exponentially_with_jitter() {
+    let (db, lease, mut role, sink) = fixture(
+        "{\"list_id\":\"test.example.invalid\"}",
+        b"Subject: retry\r\nMessage-ID: <r@example.invalid>\r\n\r\nfixture-body\r\n",
+    )
+    .await;
+    // Nothing listens once the sink is dropped: the connection is refused.
+    let relay = sink.local_addr().unwrap();
+    drop(sink);
+    role.smtp_relay = relay;
+    role.backoff = crate::delivery_policy::Backoff {
+        initial_ms: 10_000,
+        max_ms: 3_600_000,
+    };
+    let before = chrono::Utc::now().timestamp_millis();
+    deliver_one(&db, &role, lease.clone()).await;
+    let job = db.mail_queue().job(lease.job.id).await.unwrap();
+    assert_eq!(job.state, JobState::Ready);
+    assert_eq!(job.attempts, 1);
+    let delay = job.run_after - before;
+    assert!(
+        (8_000..=12_500).contains(&delay),
+        "first retry ≈ 10 s ± 20%: {delay}"
+    );
+
+    // The second attempt backs off twice as long.
+    let lease = db
+        .mail_queue()
+        .claim(Queue::Out, "out", job.run_after + 1, 20_000)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(lease.job.attempts, 2);
+    let before = chrono::Utc::now().timestamp_millis();
+    deliver_one(&db, &role, lease.clone()).await;
+    let job = db.mail_queue().job(lease.job.id).await.unwrap();
+    let delay = job.run_after - before;
+    assert!(
+        (16_000..=24_500).contains(&delay),
+        "second retry ≈ 20 s ± 20%: {delay}"
+    );
 }
