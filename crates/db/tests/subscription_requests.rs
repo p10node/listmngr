@@ -2,7 +2,7 @@
 //! `open` acts at once, `confirm` keeps today's token flow, `moderate` and
 //! `confirm_then_moderate` park the request until a moderator decides.
 use listmngr_core::{MemberRole, SubscriptionMode};
-use listmngr_db::workflows::{RequestDecision, SubscriptionAction};
+use listmngr_db::workflows::{RequestDecision, RequestFilter, SubscriptionAction, TokenOwner};
 use listmngr_db::{AuditContext, Database, NewList, NewMember};
 use serde_json::json;
 
@@ -73,6 +73,13 @@ async fn add_member(db: &Database, list: &listmngr_core::ListId, email: &str) {
         .unwrap();
 }
 
+const fn moderator() -> RequestFilter {
+    RequestFilter {
+        token_owner: Some(TokenOwner::Moderator),
+        action: None,
+    }
+}
+
 fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
@@ -91,7 +98,11 @@ async fn an_open_policy_subscribes_and_unsubscribes_without_a_token() {
         .unwrap();
     assert_eq!(members(&db).await, 1, "open joins immediately");
     assert!(
-        db.workflows().pending(&list).await.unwrap().is_empty(),
+        db.workflows()
+            .pending(&list, moderator())
+            .await
+            .unwrap()
+            .is_empty(),
         "nothing waits for a moderator"
     );
     let rows: i64 = sqlx::query_scalar(
@@ -131,7 +142,7 @@ async fn a_moderated_policy_parks_the_request_until_a_moderator_accepts() {
         .unwrap();
     assert_eq!(members(&db).await, 0, "nothing is subscribed yet");
     assert_eq!(notices(&db).await, 0, "the requester gets no token");
-    let pending = db.workflows().pending(&list).await.unwrap();
+    let pending = db.workflows().pending(&list, moderator()).await.unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].email, "reader@example.invalid");
     assert!(matches!(pending[0].action, SubscriptionAction::Join));
@@ -145,6 +156,7 @@ async fn a_moderated_policy_parks_the_request_until_a_moderator_accepts() {
         .decide(
             &pending[0].id,
             RequestDecision::Accept,
+            "",
             &AuditContext::system(),
         )
         .await
@@ -155,7 +167,13 @@ async fn a_moderated_policy_parks_the_request_until_a_moderator_accepts() {
         1,
         "the welcome notice is sent on acceptance"
     );
-    assert!(db.workflows().pending(&list).await.unwrap().is_empty());
+    assert!(
+        db.workflows()
+            .pending(&list, moderator())
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         actions(&db)
             .await
@@ -168,6 +186,7 @@ async fn a_moderated_policy_parks_the_request_until_a_moderator_accepts() {
             .decide(
                 &pending[0].id,
                 RequestDecision::Accept,
+                "",
                 &AuditContext::system(),
             )
             .await
@@ -190,13 +209,17 @@ async fn confirm_then_moderate_needs_both_the_token_and_the_moderator() {
         .unwrap();
     assert_eq!(notices(&db).await, 1, "the confirmation notice is sent");
     assert!(
-        db.workflows().pending(&list).await.unwrap().is_empty(),
+        db.workflows()
+            .pending(&list, moderator())
+            .await
+            .unwrap()
+            .is_empty(),
         "the moderator sees nothing before the address is confirmed"
     );
     let token = confirmation_token(&db).await;
     db.workflows().confirm(&list, &token, now()).await.unwrap();
     assert_eq!(members(&db).await, 0, "confirming only proves the address");
-    let pending = db.workflows().pending(&list).await.unwrap();
+    let pending = db.workflows().pending(&list, moderator()).await.unwrap();
     assert_eq!(pending.len(), 1);
     // The token is spent: replaying it cannot bypass the moderator.
     assert!(db.workflows().confirm(&list, &token, now()).await.is_err());
@@ -205,12 +228,19 @@ async fn confirm_then_moderate_needs_both_the_token_and_the_moderator() {
         .decide(
             &pending[0].id,
             RequestDecision::Reject,
+            "",
             &AuditContext::system(),
         )
         .await
         .unwrap();
     assert_eq!(members(&db).await, 0);
-    assert!(db.workflows().pending(&list).await.unwrap().is_empty());
+    assert!(
+        db.workflows()
+            .pending(&list, moderator())
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         actions(&db)
             .await
@@ -231,7 +261,7 @@ async fn discard_removes_the_request_and_defer_keeps_it_waiting() {
         )
         .await
         .unwrap();
-    let pending = db.workflows().pending(&list).await.unwrap();
+    let pending = db.workflows().pending(&list, moderator()).await.unwrap();
     assert_eq!(pending.len(), 1);
     assert!(matches!(pending[0].action, SubscriptionAction::Leave));
 
@@ -239,12 +269,17 @@ async fn discard_removes_the_request_and_defer_keeps_it_waiting() {
         .decide(
             &pending[0].id,
             RequestDecision::Defer,
+            "",
             &AuditContext::system(),
         )
         .await
         .unwrap();
     assert_eq!(
-        db.workflows().pending(&list).await.unwrap().len(),
+        db.workflows()
+            .pending(&list, moderator())
+            .await
+            .unwrap()
+            .len(),
         1,
         "defer leaves the request for later"
     );
@@ -258,6 +293,7 @@ async fn discard_removes_the_request_and_defer_keeps_it_waiting() {
         .decide(
             &pending[0].id,
             RequestDecision::Accept,
+            "",
             &AuditContext::system(),
         )
         .await
@@ -279,12 +315,13 @@ async fn discard_removes_the_request_and_defer_keeps_it_waiting() {
         )
         .await
         .unwrap();
-    let pending = db.workflows().pending(&list).await.unwrap();
+    let pending = db.workflows().pending(&list, moderator()).await.unwrap();
     assert_eq!(pending.len(), 1);
     db.workflows()
         .decide(
             &pending[0].id,
             RequestDecision::Discard,
+            "",
             &AuditContext::system(),
         )
         .await
@@ -326,7 +363,11 @@ async fn a_pending_request_survives_the_confirmation_expiry_sweep() {
         .await
         .unwrap();
     assert_eq!(
-        db.workflows().pending(&list).await.unwrap().len(),
+        db.workflows()
+            .pending(&list, moderator())
+            .await
+            .unwrap()
+            .len(),
         2,
         "moderation requests never expire with confirmation tokens"
     );

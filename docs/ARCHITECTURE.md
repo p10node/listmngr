@@ -177,6 +177,17 @@ waiting. The per-address hourly cooldown now applies only where a request
 produces something (a mail, a queue row): an `open` list is exempt, because a
 member who has just joined must be able to leave again.
 
+`TokenOwner` (Mailman's word) is derived from `state`: `pending_confirmation`
+is the subscriber's move, `pending_moderation` the moderator's. `pending`
+takes a `RequestFilter` on owner and action, `get` fetches one undecided
+request, and `decide` accepts either state — a moderator accepting a
+subscriber-owned request applies the change and spends the token, as Mailman
+does — recording the optional `reason` in the audit event. `api/src/requests.rs`
+projects this as `/lists/{id}/requests` (list, `count`, one by token,
+decision by form or JSON), mounted through `requests::routes()` under both
+prefixes; the request id is the `token` in the URL, and a request is only
+addressable through its own list.
+
 ## P2-LMTP-PARAMETERS — bounded acceptance verified
 
 `parse_path` now returns the ESMTP parameters after the `<path>`, and

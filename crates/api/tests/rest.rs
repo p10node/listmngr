@@ -16,6 +16,8 @@ mod goodbye;
 mod goodbye_unsubscribe;
 #[path = "rest/mta_maps.rs"]
 mod mta_maps;
+#[path = "rest/requests.rs"]
+mod requests;
 #[path = "rest/smtp_bounces.rs"]
 mod smtp_bounces;
 #[path = "rest/subject_prefix.rs"]

@@ -4,13 +4,18 @@
 use anyhow::Result;
 use clap::Subcommand;
 use listmngr_core::ListId;
-use listmngr_db::workflows::RequestDecision;
+use listmngr_db::workflows::{RequestDecision, RequestFilter, TokenOwner};
 use listmngr_db::{AuditContext, Database};
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Subscription requests waiting for a moderator, oldest first.
-    Ls { list_id: ListId },
+    Ls {
+        list_id: ListId,
+        /// Include requests still waiting for the subscriber's confirmation.
+        #[arg(long)]
+        all: bool,
+    },
     /// Apply the membership change the request asked for.
     Accept { id: String },
     /// Refuse the request; it stops waiting and nothing changes.
@@ -23,8 +28,12 @@ pub enum Command {
 
 pub async fn run(db: &Database, command: Command) -> Result<()> {
     let (id, decision) = match command {
-        Command::Ls { list_id } => {
-            for request in db.workflows().pending(&list_id).await? {
+        Command::Ls { list_id, all } => {
+            let filter = RequestFilter {
+                token_owner: (!all).then_some(TokenOwner::Moderator),
+                action: None,
+            };
+            for request in db.workflows().pending(&list_id, filter).await? {
                 println!("{}", serde_json::to_string(&request)?);
             }
             return Ok(());
@@ -35,7 +44,7 @@ pub async fn run(db: &Database, command: Command) -> Result<()> {
         Command::Defer { id } => (id, RequestDecision::Defer),
     };
     db.workflows()
-        .decide(&id, decision, &AuditContext::system())
+        .decide(&id, decision, "", &AuditContext::system())
         .await?;
     println!("{id} {}", serde_json::to_string(&decision)?);
     Ok(())

@@ -6,6 +6,7 @@ mod archive;
 mod bans;
 mod bounce_config;
 mod bounces;
+mod requests;
 
 use axum::{
     Json, Router,
@@ -129,6 +130,7 @@ macro_rules! page_response {
 
 page_response!(StringPageResponse, String);
 page_response!(BanPageResponse, bans::BanResponse);
+page_response!(RequestPageResponse, requests::RequestResponse);
 page_response!(BouncePageResponse, listmngr_db::bounces::BounceEvent);
 page_response!(CatalogPageResponse, CatalogEntry);
 page_response!(DomainPageResponse, listmngr_core::Domain);
@@ -490,6 +492,10 @@ impl utoipa::Modify for SecurityAddon {
         bans::get,
         bans::create,
         bans::delete,
+        requests::list,
+        requests::count,
+        requests::get,
+        requests::decide,
         system_versions,
         system_config,
         system_config_section,
@@ -582,6 +588,7 @@ impl utoipa::Modify for SecurityAddon {
     ),
     components(schemas(
         ErrorResponse, StringPageResponse, CatalogPageResponse, CatalogEntry, PageQuery,
+        RequestPageResponse, requests::RequestResponse, requests::DecisionInput,
         DomainPageResponse, MailingListPageResponse,
         UserPageResponse, ArchiverPageResponse, TemplatePageResponse, MemberPageResponse,
         AddressPageResponse, SystemVersionsResponse, ConfigurationResponse, UriResponse,
@@ -938,6 +945,7 @@ fn phase_one_routes() -> Router<AppState> {
             "/lists/{id}/member/{email}",
             get(list_member).delete(list_member_delete),
         )
+        .merge(requests::routes())
         .route("/lists/{id}/held", get(list_held))
         .route("/lists/{id}/held/count", get(list_held_count))
         .route(
