@@ -624,6 +624,32 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Subscription policies and the moderator queue — bounded acceptance verified
+
+`subscription_policy` and `unsubscription_policy` now decide what a public
+join or leave request becomes, the way Mailman does:
+
+| Policy | What happens |
+|---|---|
+| `open` | the roster changes at once; welcome/goodbye notices follow, no token |
+| `confirm` | a confirmation mail; replying (or posting the token) applies the change |
+| `moderate` | the request waits for a moderator; the requester gets no token |
+| `confirm_then_moderate` | the address is confirmed first, then a moderator decides |
+
+Moderators work the queue with the CLI:
+
+```sh
+listmngr requests ls dev.example.com     # one JSON object per waiting request
+listmngr requests accept <request-id>    # applies the join or leave
+listmngr requests reject <request-id>    # closes it, nothing changes
+listmngr requests discard <request-id>   # closes it silently, leaving no row
+listmngr requests defer <request-id>     # leaves it waiting, recorded in the audit log
+```
+
+Every decision commits with the membership change and the audit event it
+causes. A request waiting for a moderator is never swept by the confirmation
+expiry. See `P3-SUBSCRIPTION-POLICY` in `docs/FEATURE_PARITY.md`.
+
 ## LMTP size and body parameters — bounded acceptance verified
 
 The LMTP listener now honours the extensions it announces. A front MTA that

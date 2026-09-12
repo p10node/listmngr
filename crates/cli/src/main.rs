@@ -5,6 +5,7 @@ mod bounce;
 mod digests;
 mod errors;
 mod queue;
+mod requests;
 mod status;
 
 use anyhow::{Context, Result, bail};
@@ -71,6 +72,11 @@ enum Command {
     Queue {
         #[command(subcommand)]
         command: queue::Command,
+    },
+    /// Subscription requests waiting for a moderator.
+    Requests {
+        #[command(subcommand)]
+        command: requests::Command,
     },
 }
 #[derive(Debug, Subcommand)]
@@ -328,6 +334,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Token { command } => tokens(&db, command).await?,
         Command::Bounce { command } => bounce::run(&db, command).await?,
         Command::Queue { command } => queue::run(&db, command).await?,
+        Command::Requests { command } => requests::run(&db, command).await?,
         Command::Digests { command } => digests::run(&db, command).await?,
         Command::Aliases { command } => aliases::run(&db, &config, command).await?,
         Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
