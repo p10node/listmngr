@@ -153,6 +153,30 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P3-SUBSCRIPTION-POLICY — bounded acceptance verified
+
+`subscription_workflows` gains `state`
+(`pending_confirmation` → `pending_moderation` → `closed`), which is the
+request's own lifecycle; `consumed` stays the confirmation token's flag. The
+expiry sweep skips `pending_moderation`, so a request outlives the 24-hour
+token it may never have had. `request_owned` reads the list's policy column
+for the action and branches: `open` applies the membership change inside the
+same transaction (`apply_membership`, idempotent in both directions, so the
+welcome and goodbye notices come from the existing insert/delete paths),
+`moderate` parks the row, and the two confirming policies keep issuing a
+token. Rows that never issue one still store the hash of fresh OS randomness
+that is discarded, so the unique column stays populated by a secret nobody
+was given. `confirm_owned` re-reads the policy: under
+`confirm_then_moderate` the spent token moves the request to
+`pending_moderation` instead of the roster.
+
+`WorkflowRepo::pending` and `decide` are the moderator's side —
+accept/reject/discard/defer, each committing the membership change, its
+notices and the audit event together, and refusing a request that is not
+waiting. The per-address hourly cooldown now applies only where a request
+produces something (a mail, a queue row): an `open` list is exempt, because a
+member who has just joined must be able to leave again.
+
 ## P2-LMTP-PARAMETERS — bounded acceptance verified
 
 `parse_path` now returns the ESMTP parameters after the `<path>`, and

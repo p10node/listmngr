@@ -25,8 +25,51 @@ impl SubscriptionAction {
             Self::Leave => "leave",
         }
     }
+    fn parse(name: &str) -> Result<Self> {
+        match name {
+            "join" => Ok(Self::Join),
+            "leave" => Ok(Self::Leave),
+            _ => Err(Error::Validation("invalid subscription action".into())),
+        }
+    }
 }
 pub use listmngr_core::EmailCommand;
+
+/// A subscription request waiting for a moderator.
+#[derive(Clone, Debug, Serialize)]
+pub struct PendingRequest {
+    pub id: String,
+    pub list_id: ListId,
+    /// The mailbox as the requester wrote it.
+    pub email: String,
+    pub action: SubscriptionAction,
+    pub requested_at: i64,
+}
+
+/// Mailman's moderator verbs for a held subscription request.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestDecision {
+    /// Apply the membership change the requester asked for.
+    Accept,
+    /// Refuse it: the request is closed without the change.
+    Reject,
+    /// Refuse it silently, leaving no request behind.
+    Discard,
+    /// Leave it waiting for a later decision.
+    Defer,
+}
+
+impl RequestDecision {
+    const fn audit(self) -> &'static str {
+        match self {
+            Self::Accept => "subscription.accept",
+            Self::Reject => "subscription.reject",
+            Self::Discard => "subscription.discard",
+            Self::Defer => "subscription.defer",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct WorkflowRepo<'a> {
@@ -189,21 +232,36 @@ impl<'a> WorkflowRepo<'a> {
         let expires = now_ms
             .checked_add(86_400_000)
             .ok_or_else(|| Error::Validation("invalid time".into()))?;
-        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mailing_lists WHERE list_id=$1")
-            .bind(list.as_str())
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(db_error)?;
+        let policy_column = match action {
+            SubscriptionAction::Join => "subscription_policy",
+            SubscriptionAction::Leave => "unsubscription_policy",
+        };
+        let policy: Option<String> = sqlx::query_scalar(&format!(
+            "SELECT {policy_column} FROM mailing_lists WHERE list_id=$1"
+        ))
+        .bind(list.as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?;
         cleanup_expired(&mut tx, now_ms).await?;
-        if exists == 0
-            || (matches!(action, SubscriptionAction::Join)
-                && crate::bans::is_banned(&mut *tx, list, &address.original_email).await?)
+        let Some(policy) = policy else {
+            return self.commit_command(tx, lease, now_ms).await;
+        };
+        if matches!(action, SubscriptionAction::Join)
+            && crate::bans::is_banned(&mut *tx, list, &address.original_email).await?
         {
             return self.commit_command(tx, lease, now_ms).await;
         }
-        let recent:i64=sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND email=$2 AND created_at>$3").bind(list.as_str()).bind(&address.email).bind(now_ms.saturating_sub(3_600_000)).fetch_one(&mut *tx).await.map_err(db_error)?;
-        if recent > 0 {
-            return self.commit_command(tx, lease, now_ms).await;
+        // The per-address hourly cooldown bounds what an unauthenticated
+        // request can produce: a confirmation mail, or a row in the
+        // moderator's queue. An `open` list produces neither — it acts on
+        // the roster — and a member who joins must be able to leave again
+        // within the hour, so the cooldown does not apply there.
+        if policy != "open" {
+            let recent:i64=sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND email=$2 AND created_at>$3").bind(list.as_str()).bind(&address.email).bind(now_ms.saturating_sub(3_600_000)).fetch_one(&mut *tx).await.map_err(db_error)?;
+            if recent > 0 {
+                return self.commit_command(tx, lease, now_ms).await;
+            }
         }
         let updated=sqlx::query("UPDATE subscription_rate SET requests=CASE WHEN window_start<=$1 THEN 1 ELSE requests+1 END,window_start=CASE WHEN window_start<=$1 THEN $2 ELSE window_start END WHERE id=1 AND (window_start<=$1 OR requests<100)")
             .bind(now_ms.saturating_sub(60_000)).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
@@ -217,38 +275,34 @@ impl<'a> WorkflowRepo<'a> {
         let token = URL_SAFE_NO_PAD.encode(secret);
         let hash = format!("{:x}", Sha256::digest(secret));
         let id = Uuid::now_v7().to_string();
-        sqlx::query("INSERT INTO subscription_workflows(id,list_id,email,action,token_hash,created_at,expires_at,original_email) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(&id).bind(list.as_str()).bind(&address.email).bind(action.name()).bind(hash).bind(now_ms).bind(expires).bind(&address.original_email).execute(&mut *tx).await.map_err(db_error)?;
-        // The Subject must stay exactly `confirm TOKEN`: replying with it
-        // intact is the email confirmation path.
-        let template = match action {
-            SubscriptionAction::Join => "list:user:action:subscribe",
-            SubscriptionAction::Leave => "list:user:action:unsubscribe",
+        // Mailman's policy vocabulary decides what the request becomes. Only
+        // the two confirming policies ever put the token in the mail; the
+        // other rows keep its hash so the unique column stays populated by a
+        // secret nobody was given.
+        let state = match policy.as_str() {
+            "open" => "closed",
+            "moderate" => "pending_moderation",
+            _ => "pending_confirmation",
         };
-        let confirm_address = list.address_with_suffix("confirm");
-        let confirm_uri = format!("/api/v1/public/lists/{list}/confirm");
-        let user_email = address.original_email.clone();
-        enqueue_templated_notice(
-            &mut tx,
-            self.db,
-            list,
-            Notice {
-                to: &address.original_email,
-                reply_to: Some(&confirm_address),
-                // Stays `confirm TOKEN` in every catalog: reply-to-confirm parses it.
-                subject: "confirm-subject",
-                subject_args: &[("token", &token)],
-                template,
-            },
-            |values| {
-                values
-                    .set("user_email", user_email)
-                    .set("token", token.clone())
-                    .set("confirm_uri", confirm_uri)
-            },
-            now_ms,
-        )
-        .await?;
+        sqlx::query("INSERT INTO subscription_workflows(id,list_id,email,action,token_hash,created_at,expires_at,original_email,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
+            .bind(&id).bind(list.as_str()).bind(&address.email).bind(action.name()).bind(hash).bind(now_ms).bind(expires).bind(&address.original_email).bind(state).execute(&mut *tx).await.map_err(db_error)?;
+        if state != "pending_confirmation" {
+            record_unconfirmed(
+                &mut tx,
+                self.db,
+                &Unconfirmed {
+                    list,
+                    address: &address,
+                    action,
+                    id: &id,
+                    policy: &policy,
+                    immediate: state == "closed",
+                },
+            )
+            .await?;
+            return self.commit_command(tx, lease, now_ms).await;
+        }
+        enqueue_confirmation(&mut tx, self.db, list, &address, action, &token, now_ms).await?;
         Database::record_tx_with_context(
             &mut tx,
             &AuditContext::system(),
@@ -357,44 +411,135 @@ impl<'a> WorkflowRepo<'a> {
         if action == "join" && crate::bans::is_banned(&mut *tx, list, &original_email).await? {
             return Err(invalid_token());
         }
-        let existing=sqlx::query("SELECT m.id,m.preferences_id FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=$1 AND a.email=$2 AND m.role='member'")
-            .bind(list.as_str()).bind(&email).fetch_optional(&mut *tx).await.map_err(db_error)?;
-        if action == "join" && existing.is_none() {
-            let address = Address::new(&original_email, String::new())?;
-            if address.email != email {
-                return Err(Error::Validation(
-                    "workflow mailbox identity mismatch".into(),
-                ));
-            }
-            crate::insert_mass_members(
+
+        let id: String = row.try_get("id").map_err(db_error)?;
+        let action = SubscriptionAction::parse(&action)?;
+        let address = Address::new(&original_email, String::new())?;
+        if address.email != email {
+            return Err(Error::Validation(
+                "workflow mailbox identity mismatch".into(),
+            ));
+        }
+        // `confirm_then_moderate` proves the address here and hands the
+        // decision to a moderator; the token is spent either way.
+        let moderated = policy_of(&mut tx, list, action).await? == "confirm_then_moderate";
+        let state = if moderated {
+            "pending_moderation"
+        } else {
+            "closed"
+        };
+        sqlx::query("UPDATE subscription_workflows SET state=$1 WHERE id=$2")
+            .bind(state)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        if !moderated {
+            apply_membership(&mut tx, self.db, list, &address, action).await?;
+            enqueue_confirmation_receipt(
                 &mut tx,
                 self.db,
                 list,
-                MemberRole::Member,
-                SubscriptionMode::AsAddress,
-                &[&address],
+                &original_email,
+                action.name(),
+                now_ms,
             )
             .await?;
-        } else if action == "leave"
-            && let Some(member) = existing
-        {
-            let id: String = member.try_get("id").map_err(db_error)?;
-            let pref: String = member.try_get("preferences_id").map_err(db_error)?;
-            crate::delete_mass_members(&mut tx, self.db, &[(id, pref)]).await?;
         }
-        let id: String = row.try_get("id").map_err(db_error)?;
-        enqueue_confirmation_receipt(&mut tx, self.db, list, &original_email, &action, now_ms)
-            .await?;
         Database::record_tx_with_context(
             &mut tx,
             &AuditContext::system(),
             "subscription.confirm",
             "list",
             list.as_str(),
-            serde_json::json!({"workflow_id":id,"action":action}),
+            serde_json::json!({"workflow_id":id,"action":action.name(),"state":state}),
         )
         .await?;
         self.commit_command(tx, lease, now_ms).await
+    }
+
+    /// Subscription requests on `list` waiting for a moderator, oldest first.
+    /// # Errors
+    /// Returns a database error.
+    pub async fn pending(&self, list: &ListId) -> Result<Vec<PendingRequest>> {
+        let rows = sqlx::query("SELECT id,original_email,action,created_at FROM subscription_workflows WHERE list_id=$1 AND state='pending_moderation' ORDER BY created_at,id")
+            .bind(list.as_str())
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(db_error)?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(PendingRequest {
+                    id: row.try_get("id").map_err(db_error)?,
+                    list_id: list.clone(),
+                    email: row.try_get("original_email").map_err(db_error)?,
+                    action: SubscriptionAction::parse(
+                        &row.try_get::<String, _>("action").map_err(db_error)?,
+                    )?,
+                    requested_at: row.try_get("created_at").map_err(db_error)?,
+                })
+            })
+            .collect()
+    }
+
+    /// Apply a moderator's decision to one waiting request. The membership
+    /// change, the notices it produces and the audit event commit together.
+    /// # Errors
+    /// Returns `NotFound` when no request with that id is waiting, and
+    /// database errors.
+    pub async fn decide(
+        &self,
+        id: &str,
+        decision: RequestDecision,
+        context: &AuditContext,
+    ) -> Result<()> {
+        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        lock(&mut tx).await?;
+        let row = sqlx::query("SELECT list_id,original_email,email,action FROM subscription_workflows WHERE id=$1 AND state='pending_moderation'")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| Error::NotFound("subscription request".into()))?;
+        let list: ListId = row
+            .try_get::<String, _>("list_id")
+            .map_err(db_error)?
+            .parse()?;
+        let original_email: String = row.try_get("original_email").map_err(db_error)?;
+        let action =
+            SubscriptionAction::parse(&row.try_get::<String, _>("action").map_err(db_error)?)?;
+        match decision {
+            RequestDecision::Accept => {
+                let address = Address::new(&original_email, String::new())?;
+                if matches!(action, SubscriptionAction::Join)
+                    && crate::bans::is_banned(&mut *tx, &list, &original_email).await?
+                {
+                    return Err(Error::Validation("address is banned".into()));
+                }
+                apply_membership(&mut tx, self.db, &list, &address, action).await?;
+                close_request(&mut tx, id).await?;
+            }
+            RequestDecision::Reject => close_request(&mut tx, id).await?,
+            RequestDecision::Discard => {
+                sqlx::query("DELETE FROM subscription_workflows WHERE id=$1")
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+            }
+            // Mailman's defer is an explicit "not yet": the request stays.
+            RequestDecision::Defer => {}
+        }
+        Database::record_tx_with_context(
+            &mut tx,
+            context,
+            decision.audit(),
+            "list",
+            list.as_str(),
+            serde_json::json!({"workflow_id":id,"action":action.name()}),
+        )
+        .await?;
+        tx.commit().await.map_err(db_error)
     }
 }
 /// Called only after an actual membership INSERT, inside its audited transaction.
@@ -1066,7 +1211,7 @@ fn invalid_token() -> Error {
 // Indexed, capped, and committed with the request. Used tokens remain until
 // expiry so confirming cannot bypass the address cooldown.
 async fn cleanup_expired(tx: &mut Transaction<'_, Any>, now_ms: i64) -> Result<()> {
-    let deleted=sqlx::query("DELETE FROM subscription_workflows WHERE id IN (SELECT id FROM subscription_workflows WHERE expires_at<=$1 ORDER BY expires_at,id LIMIT 100)")
+    let deleted=sqlx::query("DELETE FROM subscription_workflows WHERE id IN (SELECT id FROM subscription_workflows WHERE expires_at<=$1 AND state<>'pending_moderation' ORDER BY expires_at,id LIMIT 100)")
         .bind(now_ms).execute(&mut **tx).await.map_err(db_error)?.rows_affected();
     if deleted > 0 {
         Database::record_tx_with_context(
@@ -1080,4 +1225,148 @@ async fn cleanup_expired(tx: &mut Transaction<'_, Any>, now_ms: i64) -> Result<(
         .await?;
     }
     Ok(())
+}
+
+/// The list's policy for this action, or `confirm` when the list is gone.
+async fn policy_of(
+    tx: &mut Transaction<'_, Any>,
+    list: &ListId,
+    action: SubscriptionAction,
+) -> Result<String> {
+    let column = match action {
+        SubscriptionAction::Join => "subscription_policy",
+        SubscriptionAction::Leave => "unsubscription_policy",
+    };
+    let policy: Option<String> = sqlx::query_scalar(&format!(
+        "SELECT {column} FROM mailing_lists WHERE list_id=$1"
+    ))
+    .bind(list.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    Ok(policy.unwrap_or_else(|| "confirm".to_owned()))
+}
+
+/// Subscribe or unsubscribe the request's own stored mailbox, with the
+/// welcome/goodbye notices the list configures. Idempotent: a join for an
+/// existing member and a leave for a stranger both do nothing.
+async fn apply_membership(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    list: &ListId,
+    address: &Address,
+    action: SubscriptionAction,
+) -> Result<()> {
+    let existing=sqlx::query("SELECT m.id,m.preferences_id FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=$1 AND a.email=$2 AND m.role='member'")
+        .bind(list.as_str()).bind(&address.email).fetch_optional(&mut **tx).await.map_err(db_error)?;
+    match (action, existing) {
+        (SubscriptionAction::Join, None) => {
+            crate::insert_mass_members(
+                tx,
+                db,
+                list,
+                MemberRole::Member,
+                SubscriptionMode::AsAddress,
+                &[address],
+            )
+            .await
+        }
+        (SubscriptionAction::Leave, Some(member)) => {
+            let id: String = member.try_get("id").map_err(db_error)?;
+            let pref: String = member.try_get("preferences_id").map_err(db_error)?;
+            crate::delete_mass_members(tx, db, &[(id, pref)]).await
+        }
+        _ => Ok(()),
+    }
+}
+
+/// A decided request keeps its row (and therefore its address cooldown)
+/// until the expiry sweep removes it.
+async fn close_request(tx: &mut Transaction<'_, Any>, id: &str) -> Result<()> {
+    sqlx::query("UPDATE subscription_workflows SET state='closed', consumed=1 WHERE id=$1")
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    Ok(())
+}
+
+/// A request that never issues a confirmation token: the `open` policy acts
+/// on the roster at once, the `moderate` policy waits for a moderator.
+struct Unconfirmed<'a> {
+    list: &'a ListId,
+    address: &'a Address,
+    action: SubscriptionAction,
+    id: &'a str,
+    policy: &'a str,
+    immediate: bool,
+}
+
+async fn record_unconfirmed(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    request: &Unconfirmed<'_>,
+) -> Result<()> {
+    if request.immediate {
+        apply_membership(tx, db, request.list, request.address, request.action).await?;
+    }
+    Database::record_tx_with_context(
+        tx,
+        &AuditContext::system(),
+        if request.immediate {
+            "subscription.open"
+        } else {
+            "subscription.request"
+        },
+        "list",
+        request.list.as_str(),
+        serde_json::json!({
+            "workflow_id": request.id,
+            "action": request.action.name(),
+            "policy": request.policy,
+        }),
+    )
+    .await
+}
+
+/// The confirmation mail carrying the token. Its Subject must stay exactly
+/// `confirm TOKEN`: replying with it intact is the email confirmation path.
+async fn enqueue_confirmation(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    list: &ListId,
+    address: &Address,
+    action: SubscriptionAction,
+    token: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let template = match action {
+        SubscriptionAction::Join => "list:user:action:subscribe",
+        SubscriptionAction::Leave => "list:user:action:unsubscribe",
+    };
+    let confirm_address = list.address_with_suffix("confirm");
+    let confirm_uri = format!("/api/v1/public/lists/{list}/confirm");
+    let user_email = address.original_email.clone();
+    let token = token.to_owned();
+    enqueue_templated_notice(
+        tx,
+        db,
+        list,
+        Notice {
+            to: &address.original_email,
+            reply_to: Some(&confirm_address),
+            // Stays `confirm TOKEN` in every catalog: reply-to-confirm parses it.
+            subject: "confirm-subject",
+            subject_args: &[("token", &token)],
+            template,
+        },
+        |values| {
+            values
+                .set("user_email", user_email)
+                .set("token", token.clone())
+                .set("confirm_uri", confirm_uri)
+        },
+        now_ms,
+    )
+    .await
 }
