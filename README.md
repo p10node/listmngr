@@ -624,6 +624,28 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## One-click unsubscribe (RFC 8058) — bounded acceptance verified
+
+Mailbox providers that require `List-Unsubscribe-Post` for bulk senders get
+it from any personalized list: set `personalize` to `individual` (or `full`)
+and `site.base_url`, and every subscriber copy is delivered on its own with
+`List-Unsubscribe: <https://…/unsubscribe/{list_id}?token=…>, <mailto:…>` and
+`List-Unsubscribe-Post: List-Unsubscribe=One-Click`. A `POST` to that URL
+with the body `List-Unsubscribe=One-Click` unsubscribes immediately (goodbye
+notice and audit included); a person who follows the link gets a
+confirmation page instead. Links are per recipient, never contain the
+address, expire after 90 days, and are signed with a site key generated
+into the database on first use — delete the `site_secrets` row to rotate
+it.
+
+```sh
+curl -X PATCH -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  https://lists.example.com/api/v1/lists/dev.example.com/config \
+  -d '{"personalize":"individual"}'
+```
+
+See `P2-ONE-CLICK-UNSUBSCRIBE` in `docs/FEATURE_PARITY.md`.
+
 ## Mailman's header set — bounded acceptance verified
 
 Delivered posts carry Mailman's headers: `List-Id` (with the list

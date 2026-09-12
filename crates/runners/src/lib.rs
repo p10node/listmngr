@@ -226,7 +226,7 @@ pub async fn serve_mail_role(
     });
     let outbound = outbound::run(db, role, "out-0".into(), shutdown.clone());
     tasks.spawn(async move {
-        outbound.await;
+        Box::pin(outbound).await;
         Ok(())
     });
     supervise_tasks(tasks, shutdown, drain).await

@@ -62,6 +62,16 @@ pub enum PrepareError {
     Dependency,
 }
 
+/// One delivery as the SMTP loop needs it.
+#[derive(Debug)]
+struct Prepared {
+    cooked: Vec<u8>,
+    mail_from: String,
+    /// The list, when this is a subscriber copy of a personalized list:
+    /// every recipient then gets their own transaction and headers.
+    personalized: Option<listmngr_core::MailingList>,
+}
+
 /// Fail closed: invalid context/cooking is shunted; dependency failure retries.
 pub async fn prepare(
     db: &Database,
@@ -69,7 +79,8 @@ pub async fn prepare(
     context: &str,
     delivery_id: uuid::Uuid,
 ) -> Result<(Vec<u8>, String), PrepareError> {
-    prepare_post(db, raw, context, delivery_id, false).await
+    let prepared = prepare_post(db, raw, context, delivery_id, false).await?;
+    Ok((prepared.cooked, prepared.mail_from))
 }
 
 async fn prepare_post(
@@ -78,7 +89,7 @@ async fn prepare_post(
     context: &str,
     delivery_id: uuid::Uuid,
     individual: bool,
-) -> Result<(Vec<u8>, String), PrepareError> {
+) -> Result<Prepared, PrepareError> {
     let context: serde_json::Value =
         serde_json::from_str(context).map_err(|_| PrepareError::Invalid)?;
 
@@ -102,12 +113,22 @@ async fn prepare_post(
     let cooked = cook_for_site(target, raw, &list, &delivery_id.to_string(), db.base_url())
         .map_err(|_| PrepareError::Invalid)?;
     if !individual {
-        return Ok((cooked, list_id.bounces_address()));
+        return Ok(Prepared {
+            cooked,
+            mail_from: list_id.bounces_address(),
+            personalized: None,
+        });
     }
     // Mailman decorates at delivery: the archive and digest copies were
     // taken above, only subscribers see the list header and footer.
     let decorated = decorate_for_delivery(db, &list, &cooked).await?;
-    Ok((decorated, list_id.bounces_address()))
+    let personalized =
+        (list.alter_messages.personalize != listmngr_core::Personalization::None).then_some(list);
+    Ok(Prepared {
+        cooked: decorated,
+        mail_from: list_id.bounces_address(),
+        personalized,
+    })
 }
 
 /// Expand and add the list's `list:member:regular:header`/`footer`.
@@ -147,15 +168,114 @@ pub async fn prepare_individual(
     context: &str,
     delivery_id: uuid::Uuid,
 ) -> Result<(Vec<u8>, String), PrepareError> {
-    prepare_post(db, raw, context, delivery_id, true).await
+    let prepared = prepare_post(db, raw, context, delivery_id, true).await?;
+    Ok((prepared.cooked, prepared.mail_from))
 }
 
+/// The signed bytes of a delivery: one shared copy, or — for a personalized
+/// list — one copy per pending recipient. A failure has already transitioned
+/// the job when this returns `None`.
+async fn signed_copies(
+    db: &Database,
+    role: &MailRoleConfig,
+    lease: &Lease,
+    prepared: Prepared,
+    pending: &[String],
+) -> Option<(Vec<u8>, String, Option<Vec<Vec<u8>>>)> {
+    let Prepared {
+        cooked,
+        mail_from,
+        personalized,
+    } = prepared;
+    if let Some(list) = &personalized {
+        let copies = personalized_copies(db, role, list, &cooked, pending).await;
+        let copies = local_delivery_result(db, lease, copies).await?;
+        return Some((cooked, mail_from, Some(copies)));
+    }
+    let signed =
+        local_delivery_result(db, lease, sign_delivery(db, role, lease, cooked).await).await?;
+    Some((signed, mail_from, None))
+}
+
+/// One personalized, signed copy per pending recipient, in order.
+async fn personalized_copies(
+    db: &Database,
+    role: &MailRoleConfig,
+    list: &listmngr_core::MailingList,
+    cooked: &[u8],
+    pending: &[String],
+) -> Result<Vec<Vec<u8>>, PrepareError> {
+    let mut copies = Vec::with_capacity(pending.len());
+    for recipient in pending {
+        let copy = personalize_for(db, list, cooked, recipient).await?;
+        let signed = if role.dkim.is_empty() {
+            copy
+        } else {
+            role.dkim
+                .sign(list.id.mail_host(), copy)
+                .map_err(|_| PrepareError::Invalid)?
+        };
+        copies.push(signed);
+    }
+    Ok(copies)
+}
+
+/// The recipient's own copy of a personalized delivery: the RFC 8058
+/// one-click unsubscribe pair when the site has a base URL and the
+/// recipient is a member. (Further personalization — VERP, `$user_*`
+/// placeholders, `To:` rewriting — belongs to the personalize work package.)
+async fn personalize_for(
+    db: &Database,
+    list: &listmngr_core::MailingList,
+    cooked: &[u8],
+    recipient: &str,
+) -> Result<Vec<u8>, PrepareError> {
+    let Some(base_url) = db.base_url() else {
+        return Ok(cooked.to_vec());
+    };
+    let url = db
+        .one_click()
+        .url_for(
+            base_url,
+            &list.id,
+            recipient,
+            chrono::Utc::now().timestamp(),
+        )
+        .await
+        .map_err(|error| lookup_error(&error))?;
+    url.map_or_else(
+        || Ok(cooked.to_vec()),
+        |url| {
+            listmngr_mail::personalize::one_click_unsubscribe(cooked, list, &url)
+                .map_err(|_| PrepareError::Invalid)
+        },
+    )
+}
+
+/// The bytes and envelope sender of a delivery, for tests of the projection.
+#[cfg(test)]
 async fn prepare_delivery(
     db: &Database,
     lease: &Lease,
     raw: &[u8],
     context: &str,
 ) -> Option<(Vec<u8>, String)> {
+    prepare_delivery_full(db, lease, raw, context)
+        .await
+        .map(|prepared| (prepared.cooked, prepared.mail_from))
+}
+
+async fn prepare_delivery_full(
+    db: &Database,
+    lease: &Lease,
+    raw: &[u8],
+    context: &str,
+) -> Option<Prepared> {
+    let unpersonalized = |cooked: Vec<u8>, mail_from: String| Prepared {
+        cooked,
+        mail_from,
+        personalized: None,
+    };
     let result = async {
         if db
             .owner_mail()
@@ -164,7 +284,7 @@ async fn prepare_delivery(
             .map_err(|_| PrepareError::Dependency)?
         {
             let cooked = listmngr_mail::owner::cook(raw).map_err(|_| PrepareError::Invalid)?;
-            return Ok((cooked, String::new()));
+            return Ok(unpersonalized(cooked, String::new()));
         }
         if db
             .workflows()
@@ -172,7 +292,7 @@ async fn prepare_delivery(
             .await
             .map_err(|_| PrepareError::Dependency)?
         {
-            return Ok((raw.to_vec(), String::new()));
+            return Ok(unpersonalized(raw.to_vec(), String::new()));
         }
         if db
             .digests()
@@ -191,7 +311,7 @@ async fn prepare_delivery(
                 .get(&list)
                 .await
                 .map_err(|_| PrepareError::Dependency)?;
-            Ok((raw.to_vec(), list.bounces_address()))
+            Ok(unpersonalized(raw.to_vec(), list.bounces_address()))
         } else {
             prepare_post(db, raw, context, lease.job.id.0, true).await
         }
@@ -260,17 +380,16 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
     let message = match db.mail_queue().message(lease.job.message_id).await {
         Ok(message) => message,
         Err(error) => {
-            local_delivery_result(db, &lease, Err(lookup_error(&error))).await;
+            local_delivery_result::<Vec<u8>>(db, &lease, Err(lookup_error(&error))).await;
             return;
         }
     };
-    let Some((cooked, mail_from)) =
-        prepare_delivery(db, &lease, &message.raw, &message.context).await
+    let Some(prepared) = prepare_delivery_full(db, &lease, &message.raw, &message.context).await
     else {
         return;
     };
-    let Some(cooked) =
-        local_delivery_result(db, &lease, sign_delivery(db, role, &lease, cooked).await).await
+    let Some((cooked, mail_from, variants)) =
+        signed_copies(db, role, &lease, prepared, &pending).await
     else {
         return;
     };
@@ -295,7 +414,7 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
     let digest = match db.digests().is_delivery(lease.job.id).await {
         Ok(digest) => digest,
         Err(error) => {
-            local_delivery_result(db, &lease, Err(lookup_error(&error))).await;
+            local_delivery_result::<Vec<u8>>(db, &lease, Err(lookup_error(&error))).await;
             return;
         }
     };
@@ -322,7 +441,7 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
                 tracing::error!(%error, "out-processor: durable attempt reservation failed; SMTP not started");
                 return;
             }
-            local_delivery_result(db, &lease, Err(lookup_error(&error))).await;
+            local_delivery_result::<Vec<u8>>(db, &lease, Err(lookup_error(&error))).await;
             return;
         }
     };
@@ -331,9 +450,16 @@ async fn deliver_one(db: &Database, role: &MailRoleConfig, lease: Lease) {
     } else {
         Some(mail_from.as_str())
     };
-    let results =
-        send_transactions_with_envid(stream, role, envelope_sender, &pending, &cooked, &envids)
-            .await;
+    let results = send_transactions_with_envid(
+        stream,
+        role,
+        envelope_sender,
+        &pending,
+        &cooked,
+        &envids,
+        variants.as_deref().map(<[Vec<u8>]>::as_ref),
+    )
+    .await;
     finish_delivery(db, &lease, &pending, &results).await;
 }
 
@@ -348,8 +474,10 @@ async fn send_transactions(
     pending: &[String],
     cooked: &[u8],
 ) -> Vec<RecipientStatus> {
-    send_transactions_with_envid(stream, role, sender, pending, cooked, &[]).await
+    send_transactions_with_envid(stream, role, sender, pending, cooked, &[], None).await
 }
+/// `variants`, when given, holds one message per pending recipient (in
+/// order) and forces one transaction per recipient.
 async fn send_transactions_with_envid(
     stream: tokio::net::TcpStream,
     role: &MailRoleConfig,
@@ -357,12 +485,13 @@ async fn send_transactions_with_envid(
     pending: &[String],
     cooked: &[u8],
     envids: &[String],
+    variants: Option<&[Vec<u8>]>,
 ) -> Vec<RecipientStatus> {
     let config = SmtpClientConfig {
         local_hostname: role.local_hostname.clone(),
         command_timeout: role.command_timeout,
     };
-    let width = if role.smtp_single_recipient && sender.is_some() {
+    let width = if variants.is_some() || (role.smtp_single_recipient && sender.is_some()) {
         1
     } else {
         pending.len().max(1)
@@ -388,13 +517,16 @@ async fn send_transactions_with_envid(
             ]);
             continue;
         };
+        let bytes = variants
+            .and_then(|copies| copies.get(index))
+            .map_or(cooked, Vec::as_slice);
         match send_secure_with_envid(
             stream,
             &config,
             &role.smtp_tls,
             sender,
             recipients,
-            cooked,
+            bytes,
             envids.get(index).map(String::as_str),
         )
         .await
@@ -457,11 +589,11 @@ const fn lookup_error(error: &listmngr_core::Error) -> PrepareError {
     }
 }
 
-async fn local_delivery_result(
+async fn local_delivery_result<T>(
     db: &Database,
     lease: &Lease,
-    result: Result<Vec<u8>, PrepareError>,
-) -> Option<Vec<u8>> {
+    result: Result<T, PrepareError>,
+) -> Option<T> {
     match result {
         Ok(bytes) => Some(bytes),
         Err(error) => {
@@ -549,7 +681,9 @@ pub async fn run(
                     &db,
                     &lease,
                     role.out_lease_ms,
-                    deliver_one(&db, &role, lease.clone()),
+                    // Boxed: the delivery path carries the personalized and
+                    // shared variants; keep the runner's own frame small.
+                    Box::pin(deliver_one(&db, &role, lease.clone())),
                 )
                 .await;
             }

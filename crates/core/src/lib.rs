@@ -3,6 +3,7 @@
 //! Shared configuration and Phase 0-1 domain model.
 
 pub mod dsn_issuance;
+pub mod one_click;
 
 use std::{
     fmt,
