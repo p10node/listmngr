@@ -46,7 +46,7 @@ use crate::MailRoleConfig;
 use listmngr_core::ListId;
 use listmngr_db::Database;
 use listmngr_db::mail_queue::{Lease, Queue, RecipientOutcome};
-use listmngr_mail::handlers::{Target, cook_for_site};
+use listmngr_mail::handlers::{Target, cook_with};
 #[cfg(test)]
 use listmngr_mail::smtp::send_secure;
 use listmngr_mail::smtp::{RecipientStatus, SmtpClientConfig, send_secure_with_envid};
@@ -137,8 +137,21 @@ async fn prepare_post(
     } else {
         Target::Digest
     };
-    let cooked = cook_for_site(target, raw, &list, &delivery_id.to_string(), db.base_url())
-        .map_err(|_| PrepareError::Invalid)?;
+    let authentication_results = context["authentication_results"]
+        .as_str()
+        .map(str::to_owned);
+    let cooked = cook_with(
+        target,
+        raw,
+        &list,
+        &delivery_id.to_string(),
+        &listmngr_mail::handlers::Admission {
+            base_url: db.base_url(),
+            dmarc_mitigate: context["dmarc_mitigate"] == true,
+            authentication_results: authentication_results.as_deref(),
+        },
+    )
+    .map_err(|_| PrepareError::Invalid)?;
     if !individual {
         return Ok(Prepared {
             cooked,

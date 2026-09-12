@@ -56,6 +56,8 @@ pub struct MailRoleConfig {
     pub max_recipients_per_transaction: usize,
     /// `[mta] retry_initial_secs` / `retry_max_secs` as a backoff policy.
     pub backoff: delivery_policy::Backoff,
+    /// `[mta] authenticity_checks`: the SPF/DKIM/DMARC verifier, when on.
+    pub authenticity: Option<Arc<listmngr_mail::authenticity::Verifier>>,
     /// `[mta] verp_format` and `verp_delimiter`, validated at load.
     pub verp_format: String,
     pub verp_delimiter: String,
@@ -112,6 +114,18 @@ impl MailRoleConfig {
             backoff: delivery_policy::Backoff {
                 initial_ms: i64::from(config.mta.retry_initial_secs) * 1000,
                 max_ms: i64::from(config.mta.retry_max_secs) * 1000,
+            },
+            authenticity: if config.mta.authenticity_checks {
+                Some(Arc::new(
+                    listmngr_mail::authenticity::Verifier::system(&config.mta.local_hostname)
+                        .map_err(|error| {
+                            listmngr_core::Error::Validation(format!(
+                                "mta.authenticity_checks: resolver unavailable: {error}"
+                            ))
+                        })?,
+                ))
+            } else {
+                None
             },
             verp_format: config.mta.verp_format.clone(),
             verp_delimiter: config.mta.verp_delimiter.clone(),

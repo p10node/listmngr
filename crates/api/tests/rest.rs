@@ -687,7 +687,7 @@ async fn create_configurable_list(app: &axum::Router, token: &str) {
 }
 
 #[tokio::test]
-async fn dmarc_config_roundtrips_and_rejects_conditional_transitions() {
+async fn dmarc_config_roundtrips_and_accepts_every_mailman_action() {
     let (app, token, _) = setup(&["admin"]).await;
     create_configurable_list(&app, &token).await;
     for prefix in ["/api/v1", "/3.1"] {
@@ -700,28 +700,28 @@ async fn dmarc_config_roundtrips_and_rejects_conditional_transitions() {
             ),
             (
                 "PATCH",
-                r#"{"dmarc_mitigate_unconditionally":false}"#,
-                StatusCode::BAD_REQUEST,
-            ),
-            (
-                "PATCH",
                 r#"{"dmarc_mitigate_action":"wrap_message"}"#,
                 StatusCode::BAD_REQUEST,
             ),
             (
                 "PATCH",
                 r#"{"dmarc_mitigate_action":"reject"}"#,
-                StatusCode::BAD_REQUEST,
+                StatusCode::OK,
             ),
             (
                 "PATCH",
                 r#"{"dmarc_mitigate_action":"discard"}"#,
-                StatusCode::BAD_REQUEST,
+                StatusCode::OK,
+            ),
+            (
+                "PATCH",
+                r#"{"dmarc_mitigate_action":"munge_from","dmarc_mitigate_unconditionally":false}"#,
+                StatusCode::OK,
             ),
             (
                 "PUT",
-                r#"{"dmarc_mitigate_action":"munge_from"}"#,
-                StatusCode::BAD_REQUEST,
+                r#"{"dmarc_mitigate_action":"munge_from","dmarc_mitigate_unconditionally":true}"#,
+                StatusCode::OK,
             ),
         ] {
             assert_eq!(
@@ -750,6 +750,7 @@ async fn dmarc_config_roundtrips_and_rejects_conditional_transitions() {
                 .unwrap();
         assert_eq!(value["dmarc_mitigate_action"], "no_mitigation");
         assert_eq!(value["dmarc_mitigate_unconditionally"], false);
+        // Conditional munging: the From domain's published policy decides.
         assert_eq!(
             call(
                 &app,
@@ -760,7 +761,7 @@ async fn dmarc_config_roundtrips_and_rejects_conditional_transitions() {
             )
             .await
             .status(),
-            StatusCode::BAD_REQUEST
+            StatusCode::OK
         );
         for method in ["PATCH", "PUT"] {
             assert_eq!(
@@ -2918,6 +2919,7 @@ async fn assert_phase_one_catalogs(app: &axum::Router, token: &str) {
             .map(|handler| handler.as_str().unwrap())
             .collect::<Vec<_>>(),
         vec![
+            "validate-authenticity",
             "mime-delete",
             "tagger",
             "member-recipients",
@@ -2983,6 +2985,7 @@ async fn assert_chain_projection_matches_the_engine(app: &axum::Router, token: &
             .map(|rule| rule.as_str().unwrap())
             .collect::<Vec<_>>(),
         vec![
+            "dmarc-mitigation",
             "no-senders",
             "approved",
             "emergency",
@@ -3010,11 +3013,12 @@ async fn assert_chain_projection_matches_the_engine(app: &axum::Router, token: &
     assert_eq!(by_name("header-match")["status"], "header-match");
     assert_eq!(by_name("header-match")["executable"], true);
 
-    // Declared but not yet wired: must not claim to be executable.
-    let declared = by_name("dmarc-mitigation");
-    assert_eq!(declared["status"], "declared");
-    assert_eq!(declared["executable"], false);
-    assert!(declared["rules"].as_array().unwrap().is_empty());
+    // The DMARC chain is a terminal decided by the list's action, so it
+    // carries no links of its own.
+    let dmarc = by_name("dmarc-mitigation");
+    assert_eq!(dmarc["status"], "dmarc-mitigation");
+    assert_eq!(dmarc["executable"], true);
+    assert!(dmarc["rules"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

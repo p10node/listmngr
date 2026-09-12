@@ -494,3 +494,81 @@ fn a_list_header_rule_without_a_chain_uses_the_site_jump_chain() {
     ctx.site_jump_chain = "discard".into();
     assert!(matches!(decide_posting(&ctx), Disposition::Discard(_)));
 }
+
+#[test]
+fn dmarc_mitigation_tags_munged_posts_and_refuses_when_the_list_says_so() {
+    use listmngr_core::DmarcMitigateAction as Action;
+    use listmngr_pipeline::rules::{DMARC_REJECT_REASON, DMARC_TAG};
+
+    // No mitigation: the policy is ignored entirely.
+    let mut ctx = base();
+    ctx.sender.dmarc_policy_restrictive = true;
+    let outcome = decide_posting_traced(&ctx);
+    assert_eq!(outcome.disposition, Disposition::Accept);
+    assert!(!outcome.tags.iter().any(|tag| tag == DMARC_TAG));
+    assert!(outcome.misses.contains(&"dmarc-mitigation".to_owned()));
+
+    // munge_from + restrictive policy: accepted, tagged for the handler.
+    ctx.list.dmarc_action = Action::MungeFrom;
+    let outcome = decide_posting_traced(&ctx);
+    assert_eq!(outcome.disposition, Disposition::Accept);
+    assert!(outcome.tags.iter().any(|tag| tag == DMARC_TAG));
+    assert!(
+        outcome.misses.contains(&"dmarc-mitigation".to_owned()),
+        "munging is not a hit"
+    );
+
+    // No policy, but unconditional or a listed address still tags.
+    let mut plain = base();
+    plain.list.dmarc_action = Action::MungeFrom;
+    assert!(
+        !decide_posting_traced(&plain)
+            .tags
+            .iter()
+            .any(|tag| tag == DMARC_TAG)
+    );
+    plain.list.dmarc_unconditional = true;
+    assert!(
+        decide_posting_traced(&plain)
+            .tags
+            .iter()
+            .any(|tag| tag == DMARC_TAG)
+    );
+    plain.list.dmarc_unconditional = false;
+    plain.list.dmarc_addresses = vec!["^.*@example\\.invalid$".into()];
+    assert!(
+        decide_posting_traced(&plain)
+            .tags
+            .iter()
+            .any(|tag| tag == DMARC_TAG)
+    );
+    plain.list.dmarc_addresses = vec!["other@example.invalid".into()];
+    assert!(
+        !decide_posting_traced(&plain)
+            .tags
+            .iter()
+            .any(|tag| tag == DMARC_TAG)
+    );
+
+    // reject / discard jump to the dmarc-mitigation chain with the notice.
+    ctx.list.dmarc_action = Action::Reject;
+    let outcome = decide_posting_traced(&ctx);
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Reject(DMARC_REJECT_REASON.into())
+    );
+    assert!(outcome.hits.contains(&"dmarc-mitigation".to_owned()));
+    ctx.list.dmarc_moderation_notice = "Use the web form.".into();
+    assert_eq!(
+        decide_posting(&ctx),
+        Disposition::Reject("Use the web form.".into())
+    );
+    ctx.list.dmarc_action = Action::Discard;
+    assert_eq!(
+        decide_posting(&ctx),
+        Disposition::Discard("Use the web form.".into())
+    );
+    // The reject action without an applicable policy lets the post through.
+    ctx.sender.dmarc_policy_restrictive = false;
+    assert_eq!(decide_posting(&ctx), Disposition::Accept);
+}

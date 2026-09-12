@@ -624,6 +624,25 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Authentication and DMARC mitigation — bounded acceptance verified
+
+Turn on `mta.authenticity_checks` and every post is checked for SPF, DKIM
+and DMARC before the posting chain runs; the verdict travels with the post
+as `Authentication-Results` and drives DMARC mitigation the way Mailman
+does: `dmarc_mitigate_action = munge_from` rewrites `From` only for posters
+whose domain publishes `p=reject` or `p=quarantine` (set
+`dmarc_mitigate_unconditionally` to munge everyone, or list addresses in
+`dmarc_addresses`), and `reject` / `discard` refuse such posts with
+`dmarc_moderation_notice`:
+
+```toml
+[mta]
+authenticity_checks = true   # uses the system resolver
+```
+
+The client IP for SPF comes from the first `Received:` header, which your
+MTA writes. See `P2-VALIDATE-AUTHENTICITY` in `docs/FEATURE_PARITY.md`.
+
 ## Delivery sizing and retries — bounded acceptance verified
 
 Shared deliveries go out in transactions of at most

@@ -51,7 +51,7 @@ fn render_rows(
             let stored = base64::engine::general_purpose::STANDARD
                 .decode(r.try_get::<String, _>("raw_b64").map_err(db_error)?)
                 .map_err(db_error)?;
-            let raw = publication(&stored, &settings, &hash, base_url)?;
+            let raw = publication(&stored, &settings, &hash, base_url, None)?;
             let parsed = mail_parser::MessageParser::default()
                 .parse(&raw)
                 .ok_or_else(|| Error::Validation("invalid archive MIME".into()))?;
@@ -66,19 +66,29 @@ fn render_rows(
         .collect()
 }
 
-/// The archive copy: the posting pipeline up to `to-archive`.
+/// The archive copy: the posting pipeline up to `to-archive`. `context` is
+/// the stored message context when the caller has it (queue processing);
+/// read-time rendering has only the bytes.
 fn publication(
     raw: &[u8],
     list: &listmngr_core::MailingList,
     identity: &str,
     base_url: Option<&str>,
+    context: Option<&serde_json::Value>,
 ) -> Result<Vec<u8>> {
-    listmngr_mail::handlers::cook_for_site(
+    let authentication_results = context
+        .and_then(|context| context["authentication_results"].as_str())
+        .map(str::to_owned);
+    listmngr_mail::handlers::cook_with(
         listmngr_mail::handlers::Target::Archive,
         raw,
         list,
         identity,
-        base_url,
+        &listmngr_mail::handlers::Admission {
+            base_url,
+            dmarc_mitigate: context.is_some_and(|context| context["dmarc_mitigate"] == true),
+            authentication_results: authentication_results.as_deref(),
+        },
     )
     .map_err(|e| Error::Validation(e.to_string()))
 }
@@ -246,7 +256,13 @@ impl<'a> ArchiveRepo<'a> {
             .parse()?;
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
         let settings = crate::lock_list_for_patch(&mut tx, &list).await?;
-        let raw = publication(&message.raw, &settings, &item.hash, self.db.base_url())?;
+        let raw = publication(
+            &message.raw,
+            &settings,
+            &item.hash,
+            self.db.base_url(),
+            Some(&context),
+        )?;
         let parsed = mail_parser::MessageParser::default()
             .parse(&raw)
             .ok_or_else(|| Error::Validation("invalid archive MIME".into()))?;

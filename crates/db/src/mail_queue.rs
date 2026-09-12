@@ -114,6 +114,11 @@ pub struct AcceptEffects<'a> {
     pub record_post: bool,
     /// Mailman's `acknowledge`: the poster's receipt, if they asked for one.
     pub acknowledge: Option<AcknowledgeRequest<'a>>,
+    /// What admission decided and every consumer must see: the
+    /// `dmarc-mitigation` tag and the `Authentication-Results` value,
+    /// recorded on the stored message's context.
+    pub dmarc_mitigate: bool,
+    pub authentication_results: Option<&'a str>,
 }
 
 /// Who posted what, for the acknowledgement notice.
@@ -372,6 +377,31 @@ impl<'a> MailQueueRepo<'a> {
             created.push(job);
         }
         if let Some(effects) = effects {
+            if effects.dmarc_mitigate || effects.authentication_results.is_some() {
+                let context: String =
+                    sqlx::query_scalar("SELECT context FROM messages WHERE id=$1")
+                        .bind(source.message_id.0.to_string())
+                        .fetch_one(&mut *tx)
+                        .await
+                        .map_err(db_error)?;
+                let mut context: serde_json::Value =
+                    serde_json::from_str(&context).unwrap_or(serde_json::Value::Null);
+                if !context.is_object() {
+                    context = serde_json::json!({});
+                }
+                if effects.dmarc_mitigate {
+                    context["dmarc_mitigate"] = serde_json::json!(true);
+                }
+                if let Some(results) = effects.authentication_results {
+                    context["authentication_results"] = serde_json::json!(results);
+                }
+                sqlx::query("UPDATE messages SET context=$1 WHERE id=$2")
+                    .bind(context.to_string())
+                    .bind(source.message_id.0.to_string())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+            }
             if effects.record_post {
                 let at = chrono::DateTime::from_timestamp_millis(now_ms)
                     .ok_or_else(|| Error::Validation("timestamp out of range".into()))?;

@@ -83,6 +83,8 @@ const fn ctx(list: &MailingList, target: Target) -> PipelineContext<'_> {
         identity: "identity",
         target,
         base_url: None,
+        dmarc_mitigate: false,
+        authentication_results: None,
     }
 }
 
@@ -257,6 +259,7 @@ fn the_builtin_posting_pipeline_keeps_mailman_order_with_dmarc_after_the_copies(
     assert_eq!(
         posting.handlers(),
         &[
+            "validate-authenticity",
             "mime-delete",
             "tagger",
             "member-recipients",

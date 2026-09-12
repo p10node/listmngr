@@ -95,6 +95,13 @@ pub struct PipelineContext<'a> {
     /// The site's public base URL (`site.base_url`), when the caller knows
     /// it; drives `List-Archive`/`Archived-At`. `None` omits those headers.
     pub base_url: Option<&'a str>,
+    /// The `in` runner's `dmarc-mitigation` verdict for this post: the
+    /// `dmarc` handler mitigates only when this is set (or the list is
+    /// unconditional).
+    pub dmarc_mitigate: bool,
+    /// The `Authentication-Results` value the `in` runner computed, written
+    /// by `validate-authenticity`.
+    pub authentication_results: Option<&'a str>,
 }
 
 /// What a handler that ends the pipeline asks the caller to do with the post.
@@ -472,15 +479,15 @@ pub const DEFAULT_POSTING_PIPELINE: &str = "default-posting-pipeline";
 
 /// The shipped pipeline definitions, in Mailman's handler order.
 ///
-/// Handlers that do not exist yet are left out: `validate-authenticity`,
-/// `avoid-duplicates`, `to-usenet`, `arc-sign`. Decoration happens at
-/// delivery, as in Mailman.
+/// Handlers that do not exist yet are left out: `avoid-duplicates`,
+/// `to-usenet`, `arc-sign`. Decoration happens at delivery, as in Mailman.
 #[must_use]
 pub fn builtin_pipelines() -> Vec<Pipeline> {
     vec![
         Pipeline::new(
             DEFAULT_POSTING_PIPELINE,
             vec![
+                "validate-authenticity",
                 "mime-delete",
                 "tagger",
                 "member-recipients",

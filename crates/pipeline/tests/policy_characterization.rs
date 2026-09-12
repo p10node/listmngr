@@ -130,6 +130,9 @@ fn contexts() -> impl Iterator<Item = PostingContext> {
                                 is_loop: bits(flags, 2),
                                 is_approved: bits(flags, 6),
                                 nonmember_action: nonmember,
+                                // The capture predates DMARC facts; lists in
+                                // it never mitigate, so the policy is moot.
+                                dmarc_policy_restrictive: false,
                             },
                             list: ListChecks {
                                 emergency: bits(flags, 3),

@@ -209,6 +209,52 @@ fn redistribution_headers(header_block: &[u8]) -> Vec<u8> {
     })
 }
 
+/// Remove whole fields whose lowercased name and unfolded value satisfy
+/// `drop`, folded continuations included, never touching MIME bytes.
+pub fn strip_fields_where(header_block: &[u8], drop: impl Fn(&str, &str) -> bool) -> Vec<u8> {
+    // First pass: decide per field on the unfolded value.
+    let mut decisions: Vec<bool> = Vec::new();
+    let mut current: Option<(String, String)> = None;
+    let flush = |current: &mut Option<(String, String)>, decisions: &mut Vec<bool>| {
+        if let Some((name, value)) = current.take() {
+            decisions.push(!drop(&name, value.trim()));
+        }
+    };
+    for line in header_block.split_inclusive(|b| *b == b'\n') {
+        let text = String::from_utf8_lossy(line);
+        let text = text.trim_end_matches(['\r', '\n']);
+        if line.starts_with(b" ") || line.starts_with(b"\t") {
+            if let Some((_, value)) = current.as_mut() {
+                value.push(' ');
+                value.push_str(text.trim());
+            }
+            continue;
+        }
+        flush(&mut current, &mut decisions);
+        let (name, value) = text.split_once(':').unwrap_or((text, ""));
+        current = Some((name.to_ascii_lowercase(), value.to_owned()));
+    }
+    flush(&mut current, &mut decisions);
+    // Second pass: copy the kept fields.
+    let mut output = Vec::with_capacity(header_block.len());
+    let mut field = 0usize;
+    let mut keep = true;
+    let mut first = true;
+    for line in header_block.split_inclusive(|b| *b == b'\n') {
+        if !line.starts_with(b" ") && !line.starts_with(b"\t") {
+            if !first {
+                field += 1;
+            }
+            first = false;
+            keep = decisions.get(field).copied().unwrap_or(true);
+        }
+        if keep {
+            output.extend_from_slice(line);
+        }
+    }
+    output
+}
+
 /// Pipeline primitive: drop the named fields (lower-case names), every
 /// folded continuation included, never touching the body.
 /// # Errors

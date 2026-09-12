@@ -62,6 +62,52 @@ impl Handler for MimeDelete {
     }
 }
 
+/// Mailman's `validate-authenticity`: write the `Authentication-Results`
+/// the `in` runner computed, after removing any inbound field that claims
+/// the same authserv-id (RFC 8601 §5).
+#[derive(Debug)]
+pub struct ValidateAuthenticity;
+
+impl Handler for ValidateAuthenticity {
+    fn name(&self) -> &'static str {
+        "validate-authenticity"
+    }
+    fn process(
+        &self,
+        message: &mut Working<'_>,
+        ctx: &PipelineContext<'_>,
+        _data: &mut MsgData,
+    ) -> std::result::Result<(), HandlerError> {
+        let Some(results) = ctx.authentication_results else {
+            return Ok(());
+        };
+        let authserv_id = results
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let (blank_start, _) = cook::header_body_split(&message.raw)
+            .ok_or_else(|| refuse(self.name(), &Error::InvalidMessageId))?;
+        let mut stripped = cook::strip_fields_where(&message.raw[..blank_start], |name, value| {
+            name == "authentication-results"
+                && value
+                    .split(';')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .eq_ignore_ascii_case(&authserv_id)
+        });
+        stripped.extend_from_slice(&message.raw[blank_start..]);
+        message.raw = cook::append_headers(
+            &stripped,
+            &[("Authentication-Results".to_owned(), results.to_owned())],
+        )
+        .map_err(|error| refuse(self.name(), &error))?;
+        Ok(())
+    }
+}
+
 /// Mailman's `tagger`: name the list topics a post hits in `X-Topics`.
 #[derive(Debug)]
 pub struct Tagger;
@@ -268,10 +314,11 @@ impl Handler for Dmarc {
         if list.anonymous_list || list.dmarc.action != DmarcMitigateAction::MungeFrom {
             return Ok(());
         }
-        if !list.dmarc.unconditional {
-            // Conditional (DNS-driven) mitigation is not implemented; a list
-            // configured for it must not silently deliver unmitigated.
-            return Err(refuse(self.name(), &Error::UnsafeHeaderContent));
+        // The `dmarc-mitigation` rule decided at admission whether the
+        // From domain's policy applies; an unconditional list munges every
+        // post.
+        if !list.dmarc.unconditional && !ctx.dmarc_mitigate {
+            return Ok(());
         }
         message.raw = munge::rewrite(&message.raw, &list.id.posting_address())
             .map_err(|error| refuse(self.name(), &error))?;
@@ -283,6 +330,7 @@ impl Handler for Dmarc {
 #[must_use]
 pub fn mail_handlers() -> Vec<Box<dyn Handler>> {
     vec![
+        Box::new(ValidateAuthenticity),
         Box::new(MimeDelete),
         Box::new(Tagger),
         Box::new(Cleanse),
@@ -355,6 +403,40 @@ pub fn cook_for_site(
     identity: &str,
     base_url: Option<&str>,
 ) -> Result<Vec<u8>> {
+    cook_with(
+        target,
+        raw,
+        list,
+        identity,
+        &Admission {
+            base_url,
+            dmarc_mitigate: false,
+            authentication_results: None,
+        },
+    )
+}
+
+/// What the `in` runner decided about a post at admission, carried to every
+/// consumer's cook so all copies agree.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Admission<'a> {
+    pub base_url: Option<&'a str>,
+    /// The `dmarc-mitigation` rule tagged the post.
+    pub dmarc_mitigate: bool,
+    /// The `Authentication-Results` value `validate-authenticity` writes.
+    pub authentication_results: Option<&'a str>,
+}
+
+/// [`cook_for`] with everything the admission recorded.
+/// # Errors
+/// As [`cook_for`].
+pub fn cook_with(
+    target: Target,
+    raw: &[u8],
+    list: &MailingList,
+    identity: &str,
+    admission: &Admission<'_>,
+) -> Result<Vec<u8>> {
     let (bytes, _) = builtin_registry()
         .run(
             &list.posting_pipeline,
@@ -363,7 +445,9 @@ pub fn cook_for_site(
                 list,
                 identity,
                 target,
-                base_url,
+                base_url: admission.base_url,
+                dmarc_mitigate: admission.dmarc_mitigate,
+                authentication_results: admission.authentication_results,
             },
         )
         .map_err(pipeline_error)?;
@@ -385,6 +469,8 @@ pub fn plan(raw: &[u8], list: &MailingList, identity: &str) -> Result<MsgData> {
                 identity,
                 target: Target::Plan,
                 base_url: None,
+                dmarc_mitigate: false,
+                authentication_results: None,
             },
         )
         .map_err(pipeline_error)?;

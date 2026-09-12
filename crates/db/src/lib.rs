@@ -1204,11 +1204,6 @@ impl ListRepo<'_> {
                 .as_bool()
                 .ok_or_else(|| Error::Validation("dmarc_mitigate_unconditionally".into()))?;
         }
-        if settings.action == listmngr_core::DmarcMitigateAction::MungeFrom
-            && !settings.unconditional
-        {
-            return Err(Error::Validation("munge_from requires dmarc_mitigate_unconditionally=true; conditional DNS mitigation is unsupported".into()));
-        }
         Ok(())
     }
 
