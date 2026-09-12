@@ -663,6 +663,17 @@ pub(super) async fn fixture_at(
         })
         .await
         .unwrap();
+    // These fixtures assert transport invariants on byte-identical bodies;
+    // delivery decoration has its own suite (`tests/post_effects.rs`).
+    db.templates()
+        .set_body(
+            &listmngr_db::templates::Scope::List("test.example.invalid".parse().unwrap()),
+            "list:member:regular:footer",
+            "en",
+            "",
+        )
+        .await
+        .unwrap();
     let now = chrono::Utc::now().timestamp_millis();
     db.mail_queue()
         .enqueue(

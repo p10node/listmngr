@@ -257,6 +257,7 @@ fn the_builtin_posting_pipeline_keeps_mailman_order_with_dmarc_after_the_copies(
         posting.handlers(),
         &[
             "mime-delete",
+            "tagger",
             "member-recipients",
             "cleanse",
             "cleanse-dkim",
@@ -265,6 +266,8 @@ fn the_builtin_posting_pipeline_keeps_mailman_order_with_dmarc_after_the_copies(
             "rfc-2369",
             "to-archive",
             "to-digest",
+            "after-delivery",
+            "acknowledge",
             "dmarc",
             "to-outgoing",
         ]

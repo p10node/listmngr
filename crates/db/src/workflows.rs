@@ -830,6 +830,74 @@ pub(crate) async fn enqueue_hold_notices(
     Ok(())
 }
 
+/// Mailman's `acknowledge` handler: when the poster is a member whose
+/// resolved `acknowledge_posts` preference is on, send
+/// `list:user:notice:post` from the list's bounces address.
+pub(crate) async fn enqueue_post_acknowledgement(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    list: &ListId,
+    sender: &str,
+    subject: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let Ok(author) = listmngr_core::Address::new(sender, String::new()) else {
+        return Ok(());
+    };
+    if listmngr_mail::owner::points_to_list(sender, list) {
+        return Ok(());
+    }
+    // The member's own layer, then the address layer, then the user layer:
+    // the same precedence `PreferencesRepo::resolve_member` applies.
+    let wants: Option<i64> = sqlx::query_scalar(
+        "SELECT COALESCE(pm.acknowledge_posts, pa.acknowledge_posts, pu.acknowledge_posts) FROM members m JOIN addresses a ON a.id=m.address_id LEFT JOIN preferences pm ON pm.id=m.preferences_id LEFT JOIN preferences pa ON pa.id=a.preferences_id LEFT JOIN users u ON u.id=m.user_id LEFT JOIN preferences pu ON pu.id=u.preferences_id WHERE m.list_id=$1 AND a.email=$2 AND m.role='member' LIMIT 1",
+    )
+    .bind(list.as_str())
+    .bind(&author.email)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?
+    .flatten();
+    if wants != Some(1) {
+        return Ok(());
+    }
+    let snapshot = crate::notices::list_snapshot(tx, list).await?;
+    let language =
+        crate::notices::recipient_language(tx, &snapshot, sender, db.default_language()).await?;
+    let shown_subject = if subject.trim().is_empty() {
+        listmngr_i18n::message(&language, "notice-no-subject", &[])
+    } else {
+        subject.to_owned()
+    };
+    let subject_line = listmngr_i18n::message(
+        &language,
+        "notice-post-ack-subject",
+        &[("display_name", &snapshot.display_name)],
+    );
+    let values = crate::notices::list_placeholders(&snapshot).set("subject", shown_subject);
+    let body =
+        crate::notices::render(tx, &snapshot, "list:user:notice:post", &language, &values).await?;
+    let id = Uuid::now_v7().to_string();
+    let date = chrono::DateTime::from_timestamp_millis(now_ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc2822();
+    let host = list.mail_host().to_owned();
+    let from = list.bounces_address();
+    let raw = crate::notices::serialize(
+        &crate::notices::Envelope {
+            from: &from,
+            to: sender,
+            reply_to: None,
+            subject: &subject_line,
+            message_id_local: &id,
+            mail_host: &host,
+            date: &date,
+        },
+        &body,
+    )?;
+    enqueue_notice(tx, list, sender, &id, raw, now_ms).await
+}
+
 /// Mailman's content-filter `forward` notice: the moderators (the owners
 /// when the list has none, so the only copy is never lost) receive a short
 /// explanation with the unfiltered original attached as `message/rfc822`.

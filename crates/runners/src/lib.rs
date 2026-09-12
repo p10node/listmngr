@@ -25,6 +25,7 @@ mod visible_recipients;
 
 pub use inbound::{COMMAND_SUFFIXES, InboundHandler};
 pub use outbound::run as run_out_processor;
+pub use outbound::{PrepareError, prepare_individual};
 pub use policy_facts::resolve_recipients;
 pub use processor::run as run_in_processor;
 

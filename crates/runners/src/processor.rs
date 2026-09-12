@@ -8,7 +8,7 @@ use crate::MailRoleConfig;
 use crate::policy_facts::gather_context;
 use listmngr_core::{Config, ListId};
 use listmngr_db::Database;
-use listmngr_db::mail_queue::{ChildJob, Lease, Queue};
+use listmngr_db::mail_queue::{AcceptEffects, AcknowledgeRequest, ChildJob, Lease, Queue};
 use listmngr_db::moderation::{PostRefusal, Refusal};
 use listmngr_pipeline::handlers::{Effect, FanOut};
 use listmngr_pipeline::{Disposition, decide_posting};
@@ -29,15 +29,27 @@ fn parsed_context(context: &str) -> Value {
 /// the inbound job. A handler that ends the pipeline with a disposition
 /// (the content filter's `filter_action`) is applied durably instead; any
 /// other pipeline refusal shunts rather than delivers.
+/// One accepted submission as the runner knows it.
+struct Submission<'a> {
+    list_id: &'a ListId,
+    envelope_sender: Option<&'a str>,
+    subject: &'a str,
+    raw: &'a [u8],
+}
+
 async fn accept_post(
     db: &Database,
     config: &Config,
     role: &MailRoleConfig,
     lease: &Lease,
-    list_id: &ListId,
-    envelope_sender: Option<&str>,
-    raw: &[u8],
+    submission: &Submission<'_>,
 ) -> Result<(), listmngr_core::Error> {
+    let Submission {
+        list_id,
+        envelope_sender,
+        subject,
+        raw,
+    } = *submission;
     let list = db.lists().get(list_id).await?;
     let data = match listmngr_mail::handlers::plan(raw, &list, &lease.job.message_id.0.to_string())
     {
@@ -68,8 +80,18 @@ async fn accept_post(
     };
     let mut plan = None;
     let mut children = Vec::new();
+    let mut effects = AcceptEffects {
+        list_id,
+        record_post: false,
+        acknowledge: None,
+    };
     for effect in &data.effects {
         match effect {
+            Effect::RecordPost => effects.record_post = true,
+            Effect::Acknowledge => {
+                effects.acknowledge =
+                    envelope_sender.map(|sender| AcknowledgeRequest { sender, subject });
+            }
             Effect::PlanRecipients => {
                 plan = Some(
                     db.mail_queue()
@@ -103,11 +125,12 @@ async fn accept_post(
     }
     db.mail_queue()
         .live()
-        .complete_with_plan(
+        .complete_accepted(
             lease,
             chrono::Utc::now().timestamp_millis(),
             &children,
             plan.as_ref(),
+            Some(&effects),
         )
         .await?;
     Ok(())
@@ -195,9 +218,12 @@ async fn process_one(
                 config,
                 role,
                 lease,
-                &list_id,
-                envelope_sender.as_deref(),
-                &message.raw,
+                &Submission {
+                    list_id: &list_id,
+                    envelope_sender: envelope_sender.as_deref(),
+                    subject: &subject,
+                    raw: &message.raw,
+                },
             )
             .await?;
         }

@@ -1219,6 +1219,7 @@ impl ListRepo<'_> {
             "allow_list_posts" => &mut list.alter_messages.allow_list_posts,
             "first_strip_reply_to" => &mut list.alter_messages.first_strip_reply_to,
             "include_sender_header" => &mut list.alter_messages.include_sender_header,
+            "topics_enabled" => &mut list.topics_enabled,
             _ => return Err(Error::Validation(key.into())),
         };
         *target = value
@@ -1266,6 +1267,14 @@ impl ListRepo<'_> {
                 list.forward_unrecognized_bounces_to = parse_enum(key, value)?;
             }
             "dmarc_addresses" => list.dmarc.dmarc_addresses = parse_address_list(key, value)?,
+            "topics_bodylines_limit" => {
+                list.topics_bodylines_limit = value
+                    .as_i64()
+                    .filter(|limit| (-1..=10_000).contains(limit))
+                    .and_then(|limit| i32::try_from(limit).ok())
+                    .ok_or_else(invalid)?;
+            }
+            "topics" => list.topics = parse_topics(value)?,
             "dmarc_moderation_notice" | "dmarc_wrapped_message_text" => {
                 let text = value
                     .as_str()
@@ -1404,7 +1413,8 @@ impl ListRepo<'_> {
             | "include_rfc2369_headers"
             | "allow_list_posts"
             | "first_strip_reply_to"
-            | "include_sender_header" => Self::patch_boolean(list, key, value)?,
+            | "include_sender_header"
+            | "topics_enabled" => Self::patch_boolean(list, key, value)?,
             "filter_types"
             | "pass_types"
             | "filter_extensions"
@@ -1419,7 +1429,9 @@ impl ListRepo<'_> {
             | "forward_unrecognized_bounces_to"
             | "dmarc_addresses"
             | "dmarc_moderation_notice"
-            | "dmarc_wrapped_message_text" => Self::patch_alter_messages(list, key, value)?,
+            | "dmarc_wrapped_message_text"
+            | "topics_bodylines_limit"
+            | "topics" => Self::patch_alter_messages(list, key, value)?,
             "preferred_language" => {
                 let language = value
                     .as_str()
@@ -1440,18 +1452,8 @@ impl ListRepo<'_> {
             | "bounce_info_stale_after" => Self::patch_bounce_setting(list, key, value)?,
             "max_message_size" => list.max_message_size = Self::posting_limit(value, key)?,
             "max_num_recipients" => list.max_num_recipients = Self::posting_limit(value, key)?,
-            "archive_policy" => {
-                list.archive_policy = value
-                    .as_str()
-                    .ok_or_else(|| Error::Validation(key.into()))?
-                    .parse()?;
-            }
-            "archive_rendering_mode" => {
-                list.archive_rendering_mode = value
-                    .as_str()
-                    .ok_or_else(|| Error::Validation(key.into()))?
-                    .parse()?;
-            }
+            "archive_policy" => list.archive_policy = parse_enum(key, value)?,
+            "archive_rendering_mode" => list.archive_rendering_mode = parse_enum(key, value)?,
             _ => {
                 return Err(Error::Validation(format!(
                     "read-only or unknown list setting: {key}"
@@ -1492,6 +1494,14 @@ impl ListRepo<'_> {
             .bind(&list.dmarc.dmarc_moderation_notice)
             .bind(&list.dmarc.dmarc_wrapped_message_text)
             .bind(list.forward_unrecognized_bounces_to.as_str())
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        sqlx::query("UPDATE mailing_lists SET topics_enabled=$1,topics_bodylines_limit=$2,topics=$3 WHERE list_id=$4")
+            .bind(i64::from(list.topics_enabled))
+            .bind(i64::from(list.topics_bodylines_limit))
+            .bind(serde_json::to_string(&list.topics).expect("topics serialize"))
             .bind(list.id.as_str())
             .execute(&mut **tx)
             .await
@@ -1957,16 +1967,8 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
             .map_err(db_error)?
             .parse()?,
         style_name: row.try_get("style_name").map_err(db_error)?,
-        default_member_action: row
-            .try_get::<Option<String>, _>("default_member_action")
-            .map_err(db_error)?
-            .map(|value| value.parse())
-            .transpose()?,
-        default_nonmember_action: row
-            .try_get::<Option<String>, _>("default_nonmember_action")
-            .map_err(db_error)?
-            .map(|value| value.parse())
-            .transpose()?,
+        default_member_action: optional_enum_column(row, "default_member_action")?,
+        default_nonmember_action: optional_enum_column(row, "default_nonmember_action")?,
         administrivia: flag_column(row, "administrivia")?,
         require_explicit_destination: flag_column(row, "require_explicit_destination")?,
         acceptable_aliases: address_list_column(row, "acceptable_aliases")?,
@@ -1984,7 +1986,32 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
             member_roster_visibility: enum_column(row, "member_roster_visibility")?,
         },
         forward_unrecognized_bounces_to: enum_column(row, "forward_unrecognized_bounces_to")?,
+        topics_enabled: flag_column(row, "topics_enabled")?,
+        topics_bodylines_limit: topics_limit_column(row)?,
+        topics: topics_column(row)?,
     })
+}
+
+fn optional_enum_column<T: std::str::FromStr<Err = Error>>(
+    row: &sqlx::any::AnyRow,
+    column: &str,
+) -> Result<Option<T>> {
+    row.try_get::<Option<String>, _>(column)
+        .map_err(db_error)?
+        .map(|value| value.parse())
+        .transpose()
+}
+
+fn topics_limit_column(row: &sqlx::any::AnyRow) -> Result<i32> {
+    row.try_get::<i64, _>("topics_bodylines_limit")
+        .map_err(db_error)?
+        .try_into()
+        .map_err(|_| Error::Validation("corrupt topics_bodylines_limit".into()))
+}
+
+fn topics_column(row: &sqlx::any::AnyRow) -> Result<Vec<listmngr_core::Topic>> {
+    let text: String = row.try_get("topics").map_err(db_error)?;
+    serde_json::from_str(&text).map_err(|_| Error::Validation("corrupt topics".into()))
 }
 
 fn alter_messages_from_row(row: &sqlx::any::AnyRow) -> Result<listmngr_core::AlterMessages> {
@@ -2066,6 +2093,51 @@ const SETTING_TEXT_BYTES: usize = 65_536;
 /// Longest MIME type or extension token and longest token list.
 const TOKEN_BYTES: usize = 255;
 const TOKEN_LIST_MAX_ENTRIES: usize = 1000;
+
+const TOPIC_MAX_ENTRIES: usize = 1000;
+const TOPIC_NAME_BYTES: usize = 64;
+const TOPIC_PATTERN_BYTES: usize = 4096;
+const TOPIC_DESCRIPTION_BYTES: usize = 1024;
+
+/// A JSON array of `{name, pattern, description}` topics: unique
+/// single-line names, patterns whose every line compiles as the matcher
+/// will run it, bounded description text.
+fn parse_topics(value: &serde_json::Value) -> Result<Vec<listmngr_core::Topic>> {
+    let invalid = |detail: &str| Error::Validation(format!("topics: {detail}"));
+    let topics: Vec<listmngr_core::Topic> =
+        serde_json::from_value(value.clone()).map_err(|_| invalid("expected a list of topics"))?;
+    if topics.len() > TOPIC_MAX_ENTRIES {
+        return Err(invalid("too many topics"));
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for topic in &topics {
+        let name = topic.name.trim();
+        if name.is_empty()
+            || name.len() > TOPIC_NAME_BYTES
+            || name.chars().any(char::is_control)
+            || !names.insert(name.to_ascii_lowercase())
+        {
+            return Err(invalid(
+                "topic names must be unique, single-line and at most 64 bytes",
+            ));
+        }
+        if topic.pattern.trim().is_empty() || topic.pattern.len() > TOPIC_PATTERN_BYTES {
+            return Err(invalid(
+                "topic patterns must be non-empty and at most 4096 bytes",
+            ));
+        }
+        listmngr_pipeline::topics::compile_topic_pattern(&topic.pattern)
+            .map_err(|error| invalid(&format!("topic {name}: {error}")))?;
+        if topic.description.len() > TOPIC_DESCRIPTION_BYTES
+            || topic.description.contains(['\r', '\n'])
+        {
+            return Err(invalid(
+                "topic descriptions must be single-line and at most 1024 bytes",
+            ));
+        }
+    }
+    Ok(topics)
+}
 
 /// One of a `string_enum`'s wire values, as a JSON string.
 fn parse_enum<T: std::str::FromStr<Err = Error>>(

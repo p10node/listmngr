@@ -101,7 +101,53 @@ async fn prepare_post(
     };
     let cooked = cook_for(target, raw, &list, &delivery_id.to_string())
         .map_err(|_| PrepareError::Invalid)?;
-    Ok((cooked, list_id.bounces_address()))
+    if !individual {
+        return Ok((cooked, list_id.bounces_address()));
+    }
+    // Mailman decorates at delivery: the archive and digest copies were
+    // taken above, only subscribers see the list header and footer.
+    let decorated = decorate_for_delivery(db, &list, &cooked).await?;
+    Ok((decorated, list_id.bounces_address()))
+}
+
+/// Expand and add the list's `list:member:regular:header`/`footer`.
+/// Template resolution needs the database; a broken template already fell
+/// back inside the repository, so only a lost connection is a dependency
+/// failure here.
+async fn decorate_for_delivery(
+    db: &Database,
+    list: &listmngr_core::MailingList,
+    cooked: &[u8],
+) -> Result<Vec<u8>, PrepareError> {
+    let placeholders = listmngr_mail::templates::list_placeholders(list);
+    let mut texts = Vec::with_capacity(2);
+    for name in ["list:member:regular:header", "list:member:regular:footer"] {
+        let resolved = db
+            .templates()
+            .resolve(name, list, &list.preferred_language)
+            .await
+            .map_err(|_| PrepareError::Dependency)?;
+        texts.push(listmngr_mail::templates::expand(
+            &resolved.body,
+            &placeholders,
+        ));
+    }
+    listmngr_mail::decorate::decorate(cooked, &texts[0], &texts[1])
+        .map_err(|_| PrepareError::Invalid)
+}
+
+/// The subscriber copy of a post: the pipeline up to `to-outgoing`, then
+/// delivery decoration. Exposed for tests of the delivery projection.
+/// # Errors
+/// Returns [`PrepareError`] for an invalid context or message, or a lost
+/// database.
+pub async fn prepare_individual(
+    db: &Database,
+    raw: &[u8],
+    context: &str,
+    delivery_id: uuid::Uuid,
+) -> Result<(Vec<u8>, String), PrepareError> {
+    prepare_post(db, raw, context, delivery_id, true).await
 }
 
 async fn prepare_delivery(

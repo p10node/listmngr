@@ -1,0 +1,3 @@
+C|mailing_lists|topics_enabled|integer|required|0
+C|mailing_lists|topics_bodylines_limit|integer|required|5
+C|mailing_lists|topics|text|required|[]

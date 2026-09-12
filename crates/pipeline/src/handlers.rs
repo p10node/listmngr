@@ -59,6 +59,12 @@ pub enum Effect {
     PlanRecipients,
     /// Create a child job on this queue.
     Enqueue(FanOut),
+    /// Mailman's `after-delivery`: bump the list's `post_id` and stamp
+    /// `last_post_at`.
+    RecordPost,
+    /// Mailman's `acknowledge`: tell a member who asked for it that their
+    /// post was received.
+    Acknowledge,
 }
 
 /// Mailman's `msgdata`: what handlers recorded while running.
@@ -414,8 +420,48 @@ pub fn fan_out_handlers() -> Vec<Box<dyn Handler>> {
         Box::new(MemberRecipients),
         Box::new(ToArchive),
         Box::new(ToDigest),
+        Box::new(AfterDelivery),
+        Box::new(Acknowledge),
         Box::new(ToOutgoing),
     ]
+}
+
+/// Mailman's `after-delivery`: record that the list posted.
+#[derive(Debug)]
+pub struct AfterDelivery;
+
+impl Handler for AfterDelivery {
+    fn name(&self) -> &'static str {
+        "after-delivery"
+    }
+    fn process(
+        &self,
+        _message: &mut Working<'_>,
+        _ctx: &PipelineContext<'_>,
+        data: &mut MsgData,
+    ) -> Result<(), HandlerError> {
+        data.effects.push(Effect::RecordPost);
+        Ok(())
+    }
+}
+
+/// Mailman's `acknowledge`: the poster's receipt, when they asked for one.
+#[derive(Debug)]
+pub struct Acknowledge;
+
+impl Handler for Acknowledge {
+    fn name(&self) -> &'static str {
+        "acknowledge"
+    }
+    fn process(
+        &self,
+        _message: &mut Working<'_>,
+        _ctx: &PipelineContext<'_>,
+        data: &mut MsgData,
+    ) -> Result<(), HandlerError> {
+        data.effects.push(Effect::Acknowledge);
+        Ok(())
+    }
 }
 
 /// The pipeline every list runs unless `posting_pipeline` names another.
@@ -424,8 +470,8 @@ pub const DEFAULT_POSTING_PIPELINE: &str = "default-posting-pipeline";
 /// The shipped pipeline definitions, in Mailman's handler order.
 ///
 /// Handlers that do not exist yet are left out: `validate-authenticity`,
-/// `tagger`, `avoid-duplicates`, `to-usenet`, `after-delivery`,
-/// `acknowledge`, `arc-sign`.
+/// `avoid-duplicates`, `to-usenet`, `arc-sign`. Decoration happens at
+/// delivery, as in Mailman.
 #[must_use]
 pub fn builtin_pipelines() -> Vec<Pipeline> {
     vec![
@@ -433,6 +479,7 @@ pub fn builtin_pipelines() -> Vec<Pipeline> {
             DEFAULT_POSTING_PIPELINE,
             vec![
                 "mime-delete",
+                "tagger",
                 "member-recipients",
                 "cleanse",
                 "cleanse-dkim",
@@ -441,6 +488,8 @@ pub fn builtin_pipelines() -> Vec<Pipeline> {
                 "rfc-2369",
                 "to-archive",
                 "to-digest",
+                "after-delivery",
+                "acknowledge",
                 "dmarc",
                 "to-outgoing",
             ],
