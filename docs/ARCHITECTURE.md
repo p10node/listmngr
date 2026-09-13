@@ -153,7 +153,21 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
-## P3-DIGEST-REST — bounded acceptance verified
+## P2-QUEUES-REST — bounded acceptance verified
+
+`listmngr_api::queues` mounts `/queues`, `/queues/{name}` and
+`/queues/{name}/{id}` on both prefixes. `Queue::ALL`, `Queue::name` and
+`Queue::from_name` give the wire names; `MailQueueRepo::pending_ids` and
+`pending_count` read the `ready`/`leased` rows of one queue in id order (the
+`queue_jobs_due` index covers the predicate). Injection reuses the CLI's
+intake exactly — `parse_message_id`, `message_id_hash`, the `version: 1`
+routing context with `list_id`, `envelope_sender` and `message_id_hash`, five
+attempts, `MailQueueRepo::enqueue` — with the envelope sender taken from the
+`From` mailbox instead of `--sender`; it is refused for every queue but `in`
+because the other queues' contexts are produced by the runners, not by
+callers. Reads use the same unbound-token rule as the site-wide bans; the
+job route checks that the job belongs to the named queue so a job id cannot
+be probed across queues.
 
 `listmngr_api::digest` mounts `/lists/{id}/digest` on both prefixes. `GET`
 projects `volume` and `next_digest_number` from the list row. `POST` parses

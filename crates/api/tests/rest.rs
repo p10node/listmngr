@@ -26,6 +26,8 @@ mod goodbye_unsubscribe;
 mod header_matches;
 #[path = "rest/mta_maps.rs"]
 mod mta_maps;
+#[path = "rest/queues.rs"]
+mod queues;
 #[path = "rest/requests.rs"]
 mod requests;
 #[path = "rest/site_bans.rs"]

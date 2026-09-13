@@ -219,6 +219,7 @@ fn live_v1_routes() -> Vec<LiveRoute> {
         ("bans", include_str!("../src/bans.rs")),
         ("header_matches", include_str!("../src/header_matches.rs")),
         ("digest", include_str!("../src/digest.rs")),
+        ("queues", include_str!("../src/queues.rs")),
     ] {
         let start = source.find("pub fn routes() ").unwrap();
         let end = source[start..].find("\n}\n").unwrap() + start;
@@ -306,6 +307,7 @@ fn expected_request_media(handler: &str) -> BTreeSet<&'static str> {
         Some(("bounces", name)) => (include_str!("../src/bounces.rs"), name),
         Some(("header_matches", name)) => (include_str!("../src/header_matches.rs"), name),
         Some(("digest", name)) => (include_str!("../src/digest.rs"), name),
+        Some(("queues", name)) => (include_str!("../src/queues.rs"), name),
         Some(("requests", name)) => (include_str!("../src/requests.rs"), name),
         Some(("templates", name)) => (include_str!("../src/templates.rs"), name),
         Some(_) => panic!("unregistered handler module: {handler}"),

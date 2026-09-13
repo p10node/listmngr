@@ -108,6 +108,16 @@ try:
     client.bans.remove(banned)
     if banned in client.bans:
         raise AssertionError("site ban was not removed")
+
+    # Queues: every runner queue is listed; injection stores a message in `in`.
+    queues = client.queues
+    if set(queues) != {"in", "pipeline", "out", "retry", "bounces", "command", "virgin",
+                       "archive", "digest", "nntp", "shunt", "bad"}:
+        raise AssertionError(f"unexpected queue set: {sorted(queues)}")
+    if not isinstance(queues["in"].files, list):
+        raise AssertionError("queue files must be a list")
+    # `Queue.inject` is exercised by the REST suite; here the mail role is
+    # live and an injected post would reach the held harness's sink.
 finally:
     if mailing_list is not None:
         mailing_list.delete()
