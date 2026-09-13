@@ -384,6 +384,15 @@ pub struct ListConfigInput {
     pub dmarc_wrapped_message_text: Option<String>,
     #[schema(default = "administrators")]
     pub forward_unrecognized_bounces_to: Option<listmngr_core::UnrecognizedBounceDisposition>,
+    #[schema(default = true)]
+    pub digests_enabled: Option<bool>,
+    /// KiB of pending posts that trigger an issue; 0 never does.
+    #[schema(default = 30.0, minimum = 0.0)]
+    pub digest_size_threshold: Option<f64>,
+    #[schema(default = true)]
+    pub digest_send_periodic: Option<bool>,
+    #[schema(default = "monthly")]
+    pub digest_volume_frequency: Option<listmngr_core::DigestFrequency>,
     #[schema(default = "none")]
     pub autorespond_owner: Option<listmngr_core::ResponseAction>,
     /// Reply body for mail to the owner address; empty uses the built-in text.
@@ -2000,6 +2009,8 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
         "require_explicit_destination",
         "respond_to_post_requests",
         "admin_immed_notify",
+        "digests_enabled",
+        "digest_send_periodic",
         "advertised",
         "anonymous_list",
         "emergency",
@@ -2042,13 +2053,15 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
             };
         }
     }
-    if let Some(Value::String(text)) = value.get("bounce_score_threshold") {
-        let number = text
-            .parse::<f64>()
-            .ok()
-            .filter(|n| n.is_finite())
-            .ok_or_else(|| ApiError(Error::Validation("bounce_score_threshold".into())))?;
-        value["bounce_score_threshold"] = json!(number);
+    for field in ["bounce_score_threshold", "digest_size_threshold"] {
+        if let Some(Value::String(text)) = value.get(field) {
+            let number = text
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite())
+                .ok_or_else(|| ApiError(Error::Validation(field.into())))?;
+            value[field] = json!(number);
+        }
     }
     for field in [
         "max_message_size",

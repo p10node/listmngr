@@ -1257,6 +1257,8 @@ impl ListRepo<'_> {
             "require_explicit_destination" => &mut list.require_explicit_destination,
             "respond_to_post_requests" => &mut list.respond_to_post_requests,
             "admin_immed_notify" => &mut list.admin_immed_notify,
+            "digests_enabled" => &mut list.digests_enabled,
+            "digest_send_periodic" => &mut list.digest_send_periodic,
             "filter_content" => &mut list.alter_messages.filter_content,
             "collapse_alternatives" => &mut list.alter_messages.collapse_alternatives,
             "convert_html_to_plaintext" => &mut list.alter_messages.convert_html_to_plaintext,
@@ -1484,6 +1486,8 @@ impl ListRepo<'_> {
             | "require_explicit_destination"
             | "respond_to_post_requests"
             | "admin_immed_notify"
+            | "digests_enabled"
+            | "digest_send_periodic"
             | "filter_content"
             | "collapse_alternatives"
             | "convert_html_to_plaintext"
@@ -1524,11 +1528,8 @@ impl ListRepo<'_> {
                 list.preferred_language = language.into();
             }
             "dmarc_mitigate_action" | "dmarc_mitigate_unconditionally" => {}
-            "next_digest_number" => {
-                list.next_digest_number = value
-                    .as_i64()
-                    .filter(|number| *number >= 1)
-                    .ok_or_else(|| Error::Validation(key.into()))?;
+            "next_digest_number" | "digest_size_threshold" | "digest_volume_frequency" => {
+                Self::patch_digest_setting(list, key, value)?;
             }
             "bounce_you_are_disabled_warnings"
             | "bounce_you_are_disabled_warnings_interval"
@@ -1606,10 +1607,42 @@ impl ListRepo<'_> {
         Ok(())
     }
 
+    fn patch_digest_setting(
+        list: &mut MailingList,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
+        match key {
+            "next_digest_number" => {
+                list.next_digest_number = value
+                    .as_i64()
+                    .filter(|number| *number >= 1)
+                    .ok_or_else(|| Error::Validation(key.into()))?;
+            }
+            "digest_size_threshold" => {
+                list.digest_size_threshold = value
+                    .as_f64()
+                    .filter(|kib| kib.is_finite() && (0.0..=1_048_576.0).contains(kib))
+                    .ok_or_else(|| Error::Validation(key.into()))?;
+            }
+            _ => list.digest_volume_frequency = parse_enum(key, value)?,
+        }
+        Ok(())
+    }
+
     async fn persist_acceptance(tx: &mut Transaction<'_, Any>, list: &MailingList) -> Result<()> {
         let encode = |entries: &Vec<String>| {
             serde_json::to_string(entries).expect("string vector serializes")
         };
+        sqlx::query("UPDATE mailing_lists SET digests_enabled=$1,digest_size_threshold=$2,digest_send_periodic=$3,digest_volume_frequency=$4 WHERE list_id=$5")
+            .bind(i64::from(list.digests_enabled))
+            .bind(list.digest_size_threshold)
+            .bind(i64::from(list.digest_send_periodic))
+            .bind(list.digest_volume_frequency.as_str())
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
         sqlx::query("UPDATE mailing_lists SET administrivia=$1,require_explicit_destination=$2,acceptable_aliases=$3,accept_these_nonmembers=$4,hold_these_nonmembers=$5,reject_these_nonmembers=$6,discard_these_nonmembers=$7,posting_pipeline=$9,respond_to_post_requests=$10,admin_immed_notify=$11 WHERE list_id=$8")
             .bind(i64::from(list.administrivia))
             .bind(i64::from(list.require_explicit_destination))
@@ -2064,6 +2097,10 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
             .map_err(db_error)?
             .map(|value| parse_time(&value))
             .transpose()?,
+        digests_enabled: flag_column(row, "digests_enabled")?,
+        digest_size_threshold: row.try_get("digest_size_threshold").map_err(db_error)?,
+        digest_send_periodic: flag_column(row, "digest_send_periodic")?,
+        digest_volume_frequency: enum_column(row, "digest_volume_frequency")?,
         emergency: row.try_get::<i64, _>("emergency").map_err(db_error)? != 0,
         max_message_size: row
             .try_get::<i64, _>("max_message_size")

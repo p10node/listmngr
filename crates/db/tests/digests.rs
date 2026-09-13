@@ -337,3 +337,151 @@ async fn postgres_isolated_digest_publish_rollback_and_single_winner() {
     admin.pool().close().await;
     result.unwrap();
 }
+
+const DAY_MS: i64 = 86_400_000;
+
+#[tokio::test]
+async fn the_size_threshold_and_periodic_switch_come_from_the_list() {
+    let (db, list) = fixture("sqlite::memory:").await;
+    // 4 KiB triggers a digest once the pending posts pass it.
+    db.lists()
+        .update(&list, &serde_json::json!({"digest_size_threshold": 4.0}))
+        .await
+        .unwrap();
+    collect(&db, &list, 100).await;
+    assert_eq!(
+        db.digests().flush(&list, 200, false, render).await.unwrap(),
+        0
+    );
+    sqlx::query("UPDATE digest_posts SET raw=$1 WHERE issue_id IS NULL")
+        .bind(vec![b'x'; 4096])
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        db.digests().flush(&list, 300, false, render).await.unwrap(),
+        1
+    );
+
+    // A zero threshold never sends for size; the periodic run still does,
+    // unless it is switched off.
+    db.lists()
+        .update(
+            &list,
+            &serde_json::json!({"digest_size_threshold": 0.0, "digest_send_periodic": false}),
+        )
+        .await
+        .unwrap();
+    collect(&db, &list, 1000).await;
+    sqlx::query("UPDATE digest_posts SET raw=$1 WHERE issue_id IS NULL")
+        .bind(vec![b'x'; 1024 * 1024])
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        db.digests()
+            .flush(&list, 1000 + 2 * DAY_MS, false, |_| panic!("not due"))
+            .await
+            .unwrap(),
+        0
+    );
+    db.lists()
+        .update(&list, &serde_json::json!({"digest_send_periodic": true}))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.digests()
+            .flush(&list, 1000 + 2 * DAY_MS, false, render)
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn the_volume_rolls_over_by_frequency_and_the_templates_reach_the_renderer() {
+    let (db, list) = fixture("sqlite::memory:").await;
+    db.templates()
+        .set_body(
+            &listmngr_db::templates::Scope::List(list.clone()),
+            "list:member:digest:header",
+            "en",
+            "Header for $display_name volume $volume issue $issue",
+        )
+        .await
+        .unwrap();
+    // 2026-01-15: the first issue of the year.
+    let january = chrono::DateTime::parse_from_rfc3339("2026-01-15T10:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    collect(&db, &list, january).await;
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let capture = {
+        let seen = seen.clone();
+        move |issue: &listmngr_db::digests::DigestIssue| {
+            seen.lock().unwrap().push((
+                issue.volume,
+                issue.number,
+                issue.header.clone(),
+                issue.masthead.clone(),
+            ));
+            render(issue)
+        }
+    };
+    assert_eq!(
+        db.digests()
+            .flush(&list, january + 1, true, capture.clone())
+            .await
+            .unwrap(),
+        1
+    );
+    // The default frequency is monthly: February starts volume 2, issue 1.
+    let february = chrono::DateTime::parse_from_rfc3339("2026-02-03T10:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    collect(&db, &list, february).await;
+    assert_eq!(
+        db.digests()
+            .flush(&list, february + 1, true, capture.clone())
+            .await
+            .unwrap(),
+        1
+    );
+    // Yearly: the next issue in the same year keeps the volume.
+    db.lists()
+        .update(
+            &list,
+            &serde_json::json!({"digest_volume_frequency": "yearly"}),
+        )
+        .await
+        .unwrap();
+    let march = chrono::DateTime::parse_from_rfc3339("2026-03-03T10:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    collect(&db, &list, march).await;
+    assert_eq!(
+        db.digests()
+            .flush(&list, march + 1, true, capture.clone())
+            .await
+            .unwrap(),
+        1
+    );
+    let issues = seen.lock().unwrap().clone();
+    assert_eq!(issues[0].0, 1);
+    assert_eq!(issues[0].1, 1);
+    assert_eq!(issues[1].0, 2, "a new month rolled the volume");
+    assert_eq!(issues[1].1, 1, "and restarted the issue numbers");
+    assert_eq!(issues[2].0, 2, "yearly: March stays in the 2026 volume");
+    assert_eq!(issues[2].1, 2);
+    assert_eq!(issues[1].2, "Header for Test volume 2 issue 1");
+    assert!(
+        issues[0]
+            .3
+            .contains("Send Test mailing list submissions to"),
+        "the built-in masthead: {}",
+        issues[0].3
+    );
+    let list_row = db.lists().get(&list).await.unwrap();
+    assert_eq!(list_row.volume, 2);
+    assert_eq!(list_row.next_digest_number, 3);
+}

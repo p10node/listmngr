@@ -152,6 +152,21 @@ fn a_never_archived_list_gets_no_archive_effect() {
 }
 
 #[test]
+fn a_list_without_digests_gets_no_digest_effect() {
+    let mut list = list();
+    list.digests_enabled = false;
+    let (_, data) = registry()
+        .run("p", b"|", &ctx(&list, Target::Plan))
+        .unwrap();
+    assert!(!data.effects.contains(&Effect::Enqueue(FanOut::Digest)));
+    assert!(data.effects.contains(&Effect::Enqueue(FanOut::Out)));
+    assert!(
+        data.ran.iter().any(|name| name == "to-digest"),
+        "the handler still runs"
+    );
+}
+
+#[test]
 fn handlers_see_the_original_bytes_even_after_earlier_handlers_changed_the_copy() {
     #[derive(Debug)]
     struct Original;

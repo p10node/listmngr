@@ -100,6 +100,9 @@ fn render(issue: &DigestIssue) -> Result<Vec<DigestOutput>> {
                 number: issue.number,
                 mode: mode.parse()?,
                 timestamp: issue.timestamp,
+                masthead: issue.masthead.clone(),
+                header: issue.header.clone(),
+                footer: issue.footer.clone(),
                 messages,
             })
             .map_err(|e| Error::Validation(e.to_string()))?;

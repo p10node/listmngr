@@ -153,6 +153,32 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P3-DIGEST-SETTINGS — bounded acceptance verified
+
+`DigestRepo::flush` reads its policy from the list under the publication
+lock (`load_settings`, migration `0040`) instead of the constants it had:
+the size trigger is `digest_size_threshold` KiB (zero disables it), the
+daily trigger applies only with `digest_send_periodic`, the thousand-post
+cap and `force` remain. Before rendering it compares the calendar period of
+`digest_last_sent_at` with now under `digest_volume_frequency` (`period`
+maps a timestamp to a year, month, quarter, ISO week or day) and, when the
+period changed, advances `volume` and resets `next_digest_number` in the same
+transaction, audited `digest.bump` exactly as the manual bump is. The three
+digest templates are resolved there too — the flush has the transaction and
+the list snapshot, the renderer is pure — and travel on `DigestIssue` as
+`masthead`, `header`, `footer`, with `$volume` and `$issue` added to the list
+placeholders and the list's own language chosen, since an issue is shared.
+
+`listmngr_mail::digest::build` gained the templates and writes the
+plain-text issue in RFC 1153's shape (`plaintext_body`: `Today's Topics:`
+with authors, the seventy-hyphen rule, `Message: N` header blocks separated
+by thirty hyphens, `Subject: Digest Footer`, `End of …` and its underline)
+and the MIME issue with the templates as text parts around the
+`multipart/digest` (`mime_body`). `to-digest` consults
+`ctx.list.digests_enabled` and otherwise pushes no effect, so a list without
+digests never collects. The settings ride the usual patch, persist, row and
+REST paths, with the form normalizer parsing the float and the two booleans.
+
 ## P3-BOUNCE-PROBES — bounded acceptance verified
 
 The threshold branch of `smtp_bounces::score` now forks on
