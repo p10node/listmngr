@@ -153,7 +153,20 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
-## P2-HEADER-MATCHES-REST — bounded acceptance verified
+## P3-SITE-BANS-REST — bounded acceptance verified
+
+`BanRepo` gained `site_get`, `site_list`, `site_count`, `site_create` and
+`site_delete` over the rows whose `list_id IS NULL`; the list-scoped methods
+and their callers are unchanged. Because both engines treat `NULL` as
+distinct under `UNIQUE(list_id, email_or_regex)`, `site_create` takes the
+site-wide `subscription_rate` reservation, selects the value inside the
+transaction and returns `Conflict` before inserting; `site_delete` reports
+not-found from the affected-row count. Both record `ban.create`/`ban.delete`
+against target `site`/`bans` in the same transaction. Matching is untouched:
+`is_banned` already read `list_id=$1 OR list_id IS NULL`. `listmngr_api::bans`
+mounts `/bans` and `/bans/{email}` next to the list routes; `authorize_site`
+authenticates the scope and refuses a token bound to a list or domain, the
+way domain creation does.
 
 `listmngr_api::header_matches` mounts Mailman's `/lists/{id}/header-matches`
 collection, `/{position}` item and `/find` on both prefixes over

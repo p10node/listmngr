@@ -1,4 +1,7 @@
-//! List-scoped sender bans. Global bans are deliberately not exposed here.
+//! Sender bans: per list, and site-wide rows that every list matches.
+//!
+//! The `bans` unique index ignores NULL list ids, so site-wide duplicates
+//! are refused by the repository under the global reservation.
 
 use listmngr_core::{Address, ListId, Result};
 use uuid::Uuid;
@@ -140,6 +143,115 @@ impl BanRepo<'_> {
             "ban.delete",
             "list",
             id.as_str(),
+            serde_json::json!({"email_or_regex": value}),
+        )
+        .await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// One stored site-wide ban by its canonical value.
+    ///
+    /// # Errors
+    /// Returns validation, missing-ban or database errors.
+    pub async fn site_get(&self, value: &str) -> Result<String> {
+        let value = normalize(value)?;
+        sqlx::query_scalar(
+            "SELECT email_or_regex FROM bans WHERE list_id IS NULL AND email_or_regex=$1",
+        )
+        .bind(&value)
+        .fetch_optional(self.db.pool())
+        .await
+        .map_err(db_error)?
+        .ok_or(listmngr_core::Error::NotFound(value))
+    }
+
+    /// Site-wide bans in stable lexical order.
+    ///
+    /// # Errors
+    /// Returns invalid pagination or database errors.
+    pub async fn site_list(&self, limit: i64, offset: i64) -> Result<Vec<String>> {
+        if limit < 0 || offset < 0 {
+            return Err(listmngr_core::Error::Validation(
+                "negative pagination".into(),
+            ));
+        }
+        sqlx::query_scalar("SELECT email_or_regex FROM bans WHERE list_id IS NULL ORDER BY email_or_regex LIMIT $1 OFFSET $2")
+            .bind(limit).bind(offset)
+            .fetch_all(&self.db.pool).await.map_err(db_error)
+    }
+
+    /// Counts the site-wide bans only.
+    ///
+    /// # Errors
+    /// Returns database errors.
+    pub async fn site_count(&self) -> Result<i64> {
+        sqlx::query_scalar("SELECT COUNT(*) FROM bans WHERE list_id IS NULL")
+            .fetch_one(&self.db.pool)
+            .await
+            .map_err(db_error)
+    }
+
+    /// Creates a site-wide ban under the global reservation, refusing a
+    /// value already banned site-wide.
+    ///
+    /// # Errors
+    /// Returns validation, conflict, database or audit errors.
+    pub async fn site_create(&self, value: &str, context: &AuditContext) -> Result<String> {
+        let value = normalize(value)?;
+        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        crate::workflows::lock(&mut tx).await?;
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT email_or_regex FROM bans WHERE list_id IS NULL AND email_or_regex=$1",
+        )
+        .bind(&value)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        if existing.is_some() {
+            return Err(listmngr_core::Error::Conflict(value));
+        }
+        sqlx::query("INSERT INTO bans(id,list_id,email_or_regex) VALUES($1,NULL,$2)")
+            .bind(Uuid::now_v7().to_string())
+            .bind(&value)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        Database::record_tx_with_context(
+            &mut tx,
+            context,
+            "ban.create",
+            "site",
+            "bans",
+            serde_json::json!({"email_or_regex": value}),
+        )
+        .await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(value)
+    }
+
+    /// Deletes a site-wide ban and records it atomically.
+    ///
+    /// # Errors
+    /// Returns validation, missing-ban, database or audit errors.
+    pub async fn site_delete(&self, value: &str, context: &AuditContext) -> Result<()> {
+        let value = normalize(value)?;
+        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        crate::workflows::lock(&mut tx).await?;
+        let changed = sqlx::query("DELETE FROM bans WHERE list_id IS NULL AND email_or_regex=$1")
+            .bind(&value)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?
+            .rows_affected();
+        if changed == 0 {
+            return Err(listmngr_core::Error::NotFound(value));
+        }
+        Database::record_tx_with_context(
+            &mut tx,
+            context,
+            "ban.delete",
+            "site",
+            "bans",
             serde_json::json!({"email_or_regex": value}),
         )
         .await?;
