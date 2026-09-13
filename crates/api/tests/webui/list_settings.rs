@@ -31,14 +31,16 @@ async fn owner_list_settings() {
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_SETTINGS_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_owner_list_settings() {
-    let db = Database::connect(&std::env::var("WEBUI_SETTINGS_POSTGRES_URL").unwrap(), 3)
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_settings")
         .await
         .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     matrix(db, app, false).await;
+    schema.drop().await.unwrap();
 }
 
 pub async fn matrix(db: Database, app: axum::Router, sqlite: bool) {

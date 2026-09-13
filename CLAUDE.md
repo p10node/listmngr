@@ -22,12 +22,16 @@ cargo deny check
 cargo audit --ignore RUSTSEC-2023-0071 # documented inactive SQLx/MySQL lock-only edge
 ```
 
-PostgreSQL is a separate mandatory gate and may not silently fall back to SQLite:
+PostgreSQL is a separate mandatory gate and may not silently fall back to SQLite. The first script is the chosen contract set; the second runs every `#[ignore]`d PostgreSQL test, each on its own schema of the same disposable server:
 
 ```sh
 TEST_POSTGRES_URL='postgres://listmngr:<local-password>@127.0.0.1:5432/listmngr' \
   scripts/test-postgres.sh
+TEST_POSTGRES_URL='postgres://listmngr:<local-password>@127.0.0.1:5432/listmngr' \
+  scripts/test-postgres-all.sh
 ```
+
+A new PostgreSQL test takes its schema from `listmngr_db::test_support::IsolatedSchema::create(prefix)` and is marked `#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]`; never ask for a separate empty database.
 
 Use `--locked` for Cargo builds/tests in CI. Keep action references at reviewed commit SHAs, tools at exact versions, and container bases at immutable manifest digests where practical.
 

@@ -44,6 +44,8 @@ jobs:
       - run: cargo test --locked --workspace --all-targets
       - name: Mandatory PostgreSQL migration and connectivity test
         run: scripts/test-postgres.sh
+      - name: Every PostgreSQL-backed test on the same disposable server
+        run: scripts/test-postgres-all.sh
       - name: Pinned real mailmanclient against a disposable server
         run: |
           python3 -m venv "$RUNNER_TEMP/mailmanclient"

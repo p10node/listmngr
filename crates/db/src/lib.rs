@@ -21,6 +21,7 @@ pub mod queue_operations;
 mod smtp_bounces;
 pub mod tasks;
 pub mod templates;
+pub mod test_support;
 pub mod web_admin;
 pub mod web_sessions;
 pub mod workflows;
@@ -52,6 +53,11 @@ use uuid::Uuid;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 static INSTALL_DRIVERS: Once = Once::new();
+
+/// Register the `SQLx` `Any` drivers once; safe to call repeatedly.
+pub(crate) fn install_drivers() {
+    INSTALL_DRIVERS.call_once(sqlx::any::install_default_drivers);
+}
 
 fn db_error(error: impl std::fmt::Display) -> Error {
     let message = error.to_string();
