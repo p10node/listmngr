@@ -1,0 +1,14 @@
+
+<script>
+(function(){
+  var links=[].slice.call(document.querySelectorAll('nav.toc a'));
+  var map={};links.forEach(function(a){map[a.getAttribute('href').slice(1)]=a;});
+  var hs=[].slice.call(document.querySelectorAll('main h2[id],main h3[id]'));
+  var cur=null;
+  function set(id){if(cur)cur.classList.remove('on');cur=map[id];if(cur){cur.classList.add('on');}}
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting)set(e.target.id);});},{rootMargin:'-10% 0px -80% 0px'});
+    hs.forEach(function(h){io.observe(h);});
+  }
+})();
+</script>
