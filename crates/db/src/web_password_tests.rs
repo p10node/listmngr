@@ -27,14 +27,16 @@ async fn password_change_sqlite_lock_matrix() {
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_PASSWORD_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn password_change_postgres_lock_matrix() {
-    let db = Database::connect(&std::env::var("WEBUI_PASSWORD_POSTGRES_URL").unwrap(), 3)
+    let schema = crate::test_support::IsolatedSchema::create("web_password")
         .await
         .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     matrix(&db, false).await;
     db.pool().close().await;
+    schema.drop().await.unwrap();
 }
 
 async fn matrix(db: &Database, sqlite: bool) {

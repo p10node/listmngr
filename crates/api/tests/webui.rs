@@ -189,13 +189,16 @@ async fn archive_permalink_selects_exact_message_beyond_first_page_with_current_
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_ARCHIVE_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_archive_permalink_matrix() {
-    let url = std::env::var("WEBUI_ARCHIVE_POSTGRES_URL").expect("new disposable PostgreSQL URL");
-    let db = Database::connect(&url, 1).await.unwrap();
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_archive")
+        .await
+        .unwrap();
+    let db = Database::connect(&schema.url, 1).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     verify_archive_permalink(db, app).await;
+    schema.drop().await.unwrap();
 }
 
 async fn verify_archive_permalink(db: Database, app: axum::Router) {
@@ -374,17 +377,16 @@ async fn archive_attachment_download_uses_current_policy_and_exact_selection() {
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_PRIVATE_ARCHIVE_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_archive_attachment_matrix() {
-    let db = Database::connect(
-        &std::env::var("WEBUI_PRIVATE_ARCHIVE_POSTGRES_URL").unwrap(),
-        3,
-    )
-    .await
-    .unwrap();
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_private_archive")
+        .await
+        .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     verify_archive_attachments(db, app).await;
+    schema.drop().await.unwrap();
 }
 
 async fn verify_archive_attachments(db: Database, app: axum::Router) {
@@ -578,17 +580,16 @@ async fn private_archive_browser_requires_current_verified_membership_and_sessio
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_PRIVATE_ARCHIVE_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_private_archive_browser_matrix() {
-    let db = Database::connect(
-        &std::env::var("WEBUI_PRIVATE_ARCHIVE_POSTGRES_URL").unwrap(),
-        3,
-    )
-    .await
-    .unwrap();
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_private_archive")
+        .await
+        .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     verify_private_archive_browser(db, app).await;
+    schema.drop().await.unwrap();
 }
 
 async fn verify_private_archive_browser(db: Database, app: axum::Router) {
@@ -1024,14 +1025,16 @@ async fn browser_password_change_revokes_sessions_and_audits_atomically() {
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_PASSWORD_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_browser_password_change() {
-    let db = Database::connect(&std::env::var("WEBUI_PASSWORD_POSTGRES_URL").unwrap(), 3)
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_password")
         .await
         .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     verify_password_change(db, app).await;
+    schema.drop().await.unwrap();
 }
 
 #[tokio::test]
@@ -1224,14 +1227,16 @@ async fn browser_member_leave_works_for_hidden_lists_without_removing_other_role
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_LEAVE_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_browser_member_leave() {
-    let db = Database::connect(&std::env::var("WEBUI_LEAVE_POSTGRES_URL").unwrap(), 3)
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_leave")
         .await
         .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     verify_member_leave(db, app, false).await;
+    schema.drop().await.unwrap();
 }
 
 async fn verify_member_leave(db: Database, app: axum::Router, sqlite: bool) {
@@ -2133,11 +2138,12 @@ async fn session_expiry_after_pool_wait_and_rotation_audit_rollback() {
 }
 
 #[tokio::test]
-#[ignore = "requires a NEW empty disposable WEBUI_POSTGRES_URL database"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_browser_session_forms_and_bounded_preview() {
-    let url = std::env::var("WEBUI_POSTGRES_URL").expect("new disposable PostgreSQL URL");
-    assert!(url.starts_with("postgres://"));
-    let db = Database::connect(&url, 2).await.unwrap();
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_session")
+        .await
+        .unwrap();
+    let db = Database::connect(&schema.url, 2).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     user(&db, "postgres@example.com", true).await;
@@ -2200,6 +2206,7 @@ async fn postgres_browser_session_forms_and_bounded_preview() {
     println!(
         "POSTGRES WEB PASS: migrations, hashed session/login, bounded directory/byte preview, persisted preference, discard, logout/revocation."
     );
+    schema.drop().await.unwrap();
 }
 
 /// The blocker owns a real database write lock. The observer proves the HTTP
@@ -2207,10 +2214,12 @@ async fn postgres_browser_session_forms_and_bounded_preview() {
 /// code) before invoking the actual revocation repository API. No scheduler
 /// sleep is used to assume that the request got far enough.
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_REVOCATION_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_inflight_browser_revocation_barrier() {
-    let url = std::env::var("WEBUI_REVOCATION_POSTGRES_URL").unwrap();
-    let db = Database::connect(&url, 5).await.unwrap();
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_revocation")
+        .await
+        .unwrap();
+    let db = Database::connect(&schema.url, 5).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     for revoke in [false, true] {
@@ -2297,14 +2306,16 @@ async fn postgres_inflight_browser_revocation_barrier() {
             response.status()
         );
     }
+    schema.drop().await.unwrap();
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_MATRIX_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_browser_authority_matrix_at_lock_barrier() {
-    let db = Database::connect(&std::env::var("WEBUI_MATRIX_POSTGRES_URL").unwrap(), 5)
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_matrix")
         .await
         .unwrap();
+    let db = Database::connect(&schema.url, 5).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     for review in [false, true] {
@@ -2329,6 +2340,7 @@ async fn postgres_browser_authority_matrix_at_lock_barrier() {
             pg_authority_case(&db, &app, review, change).await;
         }
     }
+    schema.drop().await.unwrap();
 }
 
 async fn pg_authority_case(db: &Database, app: &axum::Router, review: bool, change: &str) {

@@ -10,14 +10,16 @@ async fn literal_member_search_preserves_selection() {
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_SEARCH_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_literal_member_search() {
-    let db = Database::connect(&std::env::var("WEBUI_SEARCH_POSTGRES_URL").unwrap(), 3)
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_search")
         .await
         .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     matrix(db, app).await;
+    schema.drop().await.unwrap();
 }
 
 async fn matrix(db: Database, app: axum::Router) {

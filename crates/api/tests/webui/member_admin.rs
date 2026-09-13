@@ -10,14 +10,16 @@ async fn owner_can_manage_member_posting_policy() {
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_ADMIN_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_owner_member_policy() {
-    let db = Database::connect(&std::env::var("WEBUI_ADMIN_POSTGRES_URL").unwrap(), 3)
+    let schema = listmngr_db::test_support::IsolatedSchema::create("webui_admin")
         .await
         .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     let (db, app) = seeded_fixture(db).await;
     matrix(db, app, false).await;
+    schema.drop().await.unwrap();
 }
 
 async fn matrix(db: Database, app: axum::Router, sqlite: bool) {

@@ -1810,6 +1810,16 @@ The clippy gate is intentionally blocking in CI. A local failure is not evidence
 
 Phase 1 additionally requires the live PostgreSQL gate and the real Python compatibility flow. `scripts/test-postgres.sh` must receive a disposable PostgreSQL URL through `TEST_POSTGRES_URL`; `tests/compat/mailmanclient_phase1.py` must run against a live `/3.1` server with `mailmanclient==3.3.5`. Exact commands and evidence boundaries are in `docs/FEATURE_PARITY.md`.
 
+Both backends run in CI (`P3-DUAL-BACKEND-CI`): the ordinary workspace suite
+is the SQLite suite; `scripts/test-postgres.sh` is the chosen PostgreSQL
+contract set; `scripts/test-postgres-all.sh` runs every `#[ignore]`d
+PostgreSQL test in the workspace (53 today) on the same disposable server.
+Each such test creates and drops its own schema through
+`listmngr_db::test_support::IsolatedSchema`, so the server only has to be
+disposable, never empty, and the former per-test `WEBUI_*_POSTGRES_URL` /
+`ARCHIVE_THREAD_POSTGRES_URL` databases are gone. The three ignored tests
+that need other fixtures (a browser, `postmap`) are skipped by name.
+
 To run the client flow without configuring a development server, install `tests/compat/requirements-mailmanclient.txt` in a Python virtual environment, then run `python3 scripts/test-mailmanclient.py` after the locked build. The harness starts a loopback server with a fresh temporary SQLite database, creates fixture-only credentials, runs the real client, and stops the server on success or failure. It never reads `.env` or uses your configured database. The PostgreSQL gate separately runs both live CRUD and semantic schema contracts. These probes and the anti-stub check are blocking CI steps; local success is not a hosted CI run.
 
 ## Run against PostgreSQL from the host
