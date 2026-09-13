@@ -820,6 +820,37 @@ impl<'a> MailQueueRepo<'a> {
             raw: row.try_get("raw").map_err(db_error)?,
         })
     }
+    /// Ids of the jobs still waiting in `queue` (ready or leased), oldest
+    /// first, at most `limit`.
+    /// # Errors
+    /// Returns a database error.
+    pub async fn pending_ids(&self, queue: Queue, limit: i64) -> Result<Vec<JobId>> {
+        let ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM queue_jobs WHERE queue=$1 AND state IN ('ready','leased') ORDER BY id LIMIT $2",
+        )
+        .bind(queue_name(queue))
+        .bind(limit)
+        .fetch_all(self.db.pool())
+        .await
+        .map_err(db_error)?;
+        ids.iter()
+            .map(|id| id.parse().map(JobId).map_err(db_error))
+            .collect()
+    }
+
+    /// Jobs still waiting in `queue`.
+    /// # Errors
+    /// Returns a database error.
+    pub async fn pending_count(&self, queue: Queue) -> Result<i64> {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM queue_jobs WHERE queue=$1 AND state IN ('ready','leased')",
+        )
+        .bind(queue_name(queue))
+        .fetch_one(self.db.pool())
+        .await
+        .map_err(db_error)
+    }
+
     /// Inspect a job, including retained completed and shunted jobs.
     /// # Errors
     /// Returns not-found or database errors.
@@ -831,6 +862,36 @@ impl<'a> MailQueueRepo<'a> {
             .map_err(db_error)?
             .ok_or_else(|| Error::NotFound("queue job".into()))?;
         decode_job(&row)
+    }
+}
+
+impl Queue {
+    /// Every queue, in Mailman's order.
+    pub const ALL: [Self; 12] = [
+        Self::In,
+        Self::Pipeline,
+        Self::Out,
+        Self::Retry,
+        Self::Bounces,
+        Self::Command,
+        Self::Virgin,
+        Self::Archive,
+        Self::Digest,
+        Self::Nntp,
+        Self::Shunt,
+        Self::Bad,
+    ];
+
+    /// The queue's wire name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        queue_name(self)
+    }
+
+    /// The queue with this wire name.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|queue| queue.name() == name)
     }
 }
 

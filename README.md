@@ -1904,6 +1904,21 @@ Queue listing returns at most 1,000 records in ID order, including retained jobs
 The hash in submission routing metadata is the Mailman archive identifier;
 blob identity separately uses SHA-256 of the exact raw bytes.
 
+Mailman's `/queues` resource (`P2-QUEUES-REST`) is on both prefixes:
+`GET /queues` lists the twelve runner queues in Mailman's order, each with
+`directory` (`queue_jobs/<name>`: jobs are database rows, not files), `files`
+(the ids of the jobs still ready or leased, oldest first, at most 1000) and
+`count`; `GET /queues/{name}` is one queue and `GET /queues/{name}/{id}` one
+job's metadata (state, attempts, `run_after`, last error — never the raw
+message). `POST /queues/{name}` is mailmanclient's `Queue.inject(list_id,
+text)`: only `in` accepts it; the text is the complete message, its `From`
+mailbox becomes the envelope sender, `Message-ID` is required, line ends are
+normalised to CRLF, the 10 MiB intake bound applies, and the answer is `201`
+with the job's location. Reading queues needs `system:read` on a token bound
+to no list or domain; injecting needs `lists:write` within the token's list
+bounds. Injection stores the job like the CLI; only a running mail role
+consumes it.
+
 An opt-in mail role is now wired into `serve` when `mta.enabled` is true.
 Keep deployment MTA snippets disabled while the remaining acceptance and
 operational review obligations are open. The standalone filesystem-store library is not selected by
