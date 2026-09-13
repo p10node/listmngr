@@ -153,7 +153,21 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
-## P2-HELD-FORWARD — bounded acceptance verified
+## P2-E2E-ACCEPTANCE — bounded acceptance verified
+
+The e2e harness (`crates/cli/tests/mailpath_e2e.rs`) gained a `child_env`
+builder, `Fixture::start_with(dkim, extra)` (an OpenSSL-generated RSA key
+written as `[[mta.dkim_signing]]` TOML and passed through `LISTMNGR_CONFIG`,
+plus arbitrary `LISTMNGR__*` overrides), and typed-API helpers for the list
+configuration, inline templates and bans. DKIM is verified in-process with
+`listmngr_mail::authenticity::Verifier` over a seeded `TxtCache` holding the
+fixture's `<selector>._domainkey` record, i.e. the same verifier the inbound
+`validate-authenticity` rule uses, so the assertion is `dkim=pass` in a real
+`Authentication-Results` value rather than the presence of a header. Two
+runtime semantics surfaced and are asserted as configured rather than
+changed: VERP on personalized copies follows Mailman's
+`verp_personalized_deliveries` (default off), and the RFC 8058 one-click pair
+is emitted on per-recipient copies only, since the URL is per member.
 
 `ModerationRepo::review_forwarding(id, context, action, reason, forward_to,
 now)` is `review` with Mailman's `forward`; `review` delegates with `None` and

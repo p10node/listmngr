@@ -72,15 +72,15 @@ Người đang tìm/đang dùng Mailman có thể chọn listmngr mà **không m
 
 ### 1.2 Nguyên tắc thiết kế
 
-| Nguyên tắc | Ý nghĩa cụ thể |
-|---|---|
-| Parity trước, mở rộng sau | Mọi tính năng Mailman 3.3.x có tương đương. Tên khái niệm giữ nguyên → đọc doc Mailman vẫn hiểu listmngr. |
-| Wire-compat | REST `/3.1/` đủ để `mailmanclient` (Python) chạy; sub-address & VERP format giống; archive URL dùng `message_id_hash` (base32-sha1) giống HyperKitty. |
-| Single binary, zero-Python | Không Django/Celery/uwsgi/cron. Static assets & templates embed vào binary. 1 config file. |
-| Security by default | Argon2id, 2FA, scoped tokens, DKIM/ARC, CSRF, CSP, rate-limit, audit log, HTML sanitize. Mặc định an toàn, không cần bật. |
-| Crash-safe, multi-node | Queue + message store trong DB/object store. `FOR UPDATE SKIP LOCKED`. Chạy nhiều node cùng DB. |
-| Observability | `tracing` structured logs, `/metrics` Prometheus, `/healthz`, `/readyz`. |
-| Không unsafe | `unsafe_code = "forbid"` toàn workspace. |
+| Nguyên tắc                 | Ý nghĩa cụ thể                                                                                                                                        |
+|----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Parity trước, mở rộng sau  | Mọi tính năng Mailman 3.3.x có tương đương. Tên khái niệm giữ nguyên → đọc doc Mailman vẫn hiểu listmngr.                                             |
+| Wire-compat                | REST `/3.1/` đủ để `mailmanclient` (Python) chạy; sub-address & VERP format giống; archive URL dùng `message_id_hash` (base32-sha1) giống HyperKitty. |
+| Single binary, zero-Python | Không Django/Celery/uwsgi/cron. Static assets & templates embed vào binary. 1 config file.                                                            |
+| Security by default        | Argon2id, 2FA, scoped tokens, DKIM/ARC, CSRF, CSP, rate-limit, audit log, HTML sanitize. Mặc định an toàn, không cần bật.                             |
+| Crash-safe, multi-node     | Queue + message store trong DB/object store. `FOR UPDATE SKIP LOCKED`. Chạy nhiều node cùng DB.                                                       |
+| Observability              | `tracing` structured logs, `/metrics` Prometheus, `/healthz`, `/readyz`.                                                                              |
+| Không unsafe               | `unsafe_code = "forbid"` toàn workspace.                                                                                                              |
 
 ### 1.3 Non-goals (v1)
 
@@ -92,37 +92,37 @@ Người đang tìm/đang dùng Mailman có thể chọn listmngr mà **không m
 
 ## 2. Tech stack
 
-| Thành phần | Crate / tool | Version | Lý do |
-|---|---|---|---|
-| Runtime | `tokio` | 1.53 | chuẩn async |
-| HTTP | `axum` + `tower-http` + `axum-extra` | 0.8 / 0.7 / 0.12 | ergonomic, middleware tower |
-| DB | `sqlx` (postgres, sqlite, runtime-tokio, tls-rustls, chrono, uuid, migrate) | 0.9 | async, migrations embed |
-| Templates | `askama` + `askama_web` (axum-0.8) | 0.16 | compile-time, type-safe |
-| Frontend | htmx 2.x (vendored), CSS thuần (design tokens), không Node runtime | – | SSR, ít JS, CSP strict |
-| Mail parse/build | `mail-parser`, `mail-builder` | 0.11 / 0.5 | robust MIME |
-| SMTP out | `mail-send` | 0.6 | SMTP client + DKIM sign |
-| Email auth | `mail-auth` (DKIM/ARC/SPF/DMARC, hickory DNS) | 0.12 | verify in + sign out + DMARC policy lookup |
-| Search | `tantivy` | 0.26 | thay Whoosh/Elasticsearch |
-| CLI | `clap` (derive) | 4.6 | |
-| Config | `figment` (toml + env) | 0.10 | layered |
-| OpenAPI | `utoipa` | 5.5 | spec từ code |
-| Password | `argon2` + `zxcvbn` | 0.6 / 3.1 | Argon2id |
-| 2FA | `totp-rs`, `webauthn-rs` | 6.0 / bản stable gần nhất | |
-| Session | `tower-sessions` + `tower-sessions-sqlx-store` | 0.15 | DB session |
-| Rate limit | `governor` | 0.10 | |
-| Secrets | `secrecy`, `zeroize`, `subtle` | 0.10 / 1.9 / 2.6 | không log, const-time |
-| HTML sanitize | `ammonia` | 4.1 | archive render |
-| Markdown | `pulldown-cmark` | 0.13 | `archive_rendering_mode=markdown` |
-| HTML→text | `html2text` | 0.17 | `convert_html_to_plaintext` |
-| Hash | `sha1` + `data-encoding` | 0.11 / 2.11 | `Message-ID-Hash` base32(sha1) |
-| Validation | `garde` | 0.23 | |
-| Embed assets | `rust-embed` | 8.12 | |
-| Errors/log | `thiserror`, `anyhow`, `tracing`, `tracing-subscriber` | 2 / 1 / 0.1 | |
-| IDs/time | `uuid` (v7), `chrono` | 1.26 / 0.4 | |
-| IDN | `idna` | 1.1 | |
-| Pickle (import21) | `serde-pickle` | – | đọc `config.pck` Mailman 2.1 |
-| Test | `testcontainers`, `proptest`, `cargo-fuzz`, `insta`, Playwright (dev only) | – | |
-| Supply chain | `cargo-deny`, `cargo-audit`, `cargo-sbom`, `cosign` | – | |
+| Thành phần        | Crate / tool                                                                | Version                   | Lý do                                      |
+|-------------------|-----------------------------------------------------------------------------|---------------------------|--------------------------------------------|
+| Runtime           | `tokio`                                                                     | 1.53                      | chuẩn async                                |
+| HTTP              | `axum` + `tower-http` + `axum-extra`                                        | 0.8 / 0.7 / 0.12          | ergonomic, middleware tower                |
+| DB                | `sqlx` (postgres, sqlite, runtime-tokio, tls-rustls, chrono, uuid, migrate) | 0.9                       | async, migrations embed                    |
+| Templates         | `askama` + `askama_web` (axum-0.8)                                          | 0.16                      | compile-time, type-safe                    |
+| Frontend          | htmx 2.x (vendored), CSS thuần (design tokens), không Node runtime          | –                         | SSR, ít JS, CSP strict                     |
+| Mail parse/build  | `mail-parser`, `mail-builder`                                               | 0.11 / 0.5                | robust MIME                                |
+| SMTP out          | `mail-send`                                                                 | 0.6                       | SMTP client + DKIM sign                    |
+| Email auth        | `mail-auth` (DKIM/ARC/SPF/DMARC, hickory DNS)                               | 0.12                      | verify in + sign out + DMARC policy lookup |
+| Search            | `tantivy`                                                                   | 0.26                      | thay Whoosh/Elasticsearch                  |
+| CLI               | `clap` (derive)                                                             | 4.6                       |                                            |
+| Config            | `figment` (toml + env)                                                      | 0.10                      | layered                                    |
+| OpenAPI           | `utoipa`                                                                    | 5.5                       | spec từ code                               |
+| Password          | `argon2` + `zxcvbn`                                                         | 0.6 / 3.1                 | Argon2id                                   |
+| 2FA               | `totp-rs`, `webauthn-rs`                                                    | 6.0 / bản stable gần nhất |                                            |
+| Session           | `tower-sessions` + `tower-sessions-sqlx-store`                              | 0.15                      | DB session                                 |
+| Rate limit        | `governor`                                                                  | 0.10                      |                                            |
+| Secrets           | `secrecy`, `zeroize`, `subtle`                                              | 0.10 / 1.9 / 2.6          | không log, const-time                      |
+| HTML sanitize     | `ammonia`                                                                   | 4.1                       | archive render                             |
+| Markdown          | `pulldown-cmark`                                                            | 0.13                      | `archive_rendering_mode=markdown`          |
+| HTML→text         | `html2text`                                                                 | 0.17                      | `convert_html_to_plaintext`                |
+| Hash              | `sha1` + `data-encoding`                                                    | 0.11 / 2.11               | `Message-ID-Hash` base32(sha1)             |
+| Validation        | `garde`                                                                     | 0.23                      |                                            |
+| Embed assets      | `rust-embed`                                                                | 8.12                      |                                            |
+| Errors/log        | `thiserror`, `anyhow`, `tracing`, `tracing-subscriber`                      | 2 / 1 / 0.1               |                                            |
+| IDs/time          | `uuid` (v7), `chrono`                                                       | 1.26 / 0.4                |                                            |
+| IDN               | `idna`                                                                      | 1.1                       |                                            |
+| Pickle (import21) | `serde-pickle`                                                              | –                         | đọc `config.pck` Mailman 2.1               |
+| Test              | `testcontainers`, `proptest`, `cargo-fuzz`, `insta`, Playwright (dev only)  | –                         |                                            |
+| Supply chain      | `cargo-deny`, `cargo-audit`, `cargo-sbom`, `cosign`                         | –                         |                                            |
 
 Ghi chú:
 
@@ -177,12 +177,12 @@ cli ─┬─> api ─┐
 
 `listmngr serve` = 1 process, 1 tokio runtime, chạy đồng thời:
 
-| Thành phần | Mô tả |
-|---|---|
-| HTTP server | axum: `/` web UI, `/3.1/` REST compat, `/api/v1/` REST mới, `/archives/`, `/metrics`, `/healthz`, `/readyz`, `/openapi.json` |
-| LMTP listener | `:8024` (RFC 2033). Nhận thư từ MTA → ghi message store → enqueue `in`. Reject sớm nếu > max size / list không tồn tại. |
+| Thành phần        | Mô tả                                                                                                                                       |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| HTTP server       | axum: `/` web UI, `/3.1/` REST compat, `/api/v1/` REST mới, `/archives/`, `/metrics`, `/healthz`, `/readyz`, `/openapi.json`                |
+| LMTP listener     | `:8024` (RFC 2033). Nhận thư từ MTA → ghi message store → enqueue `in`. Reject sớm nếu > max size / list không tồn tại.                     |
 | Runner supervisor | mỗi runner = tokio task (có thể N worker/runner). Poll queue table (`SKIP LOCKED`), exponential backoff khi idle. Restart runner nếu panic. |
-| Scheduler | digest periodic, `task` runner (expire pendings/workflow states, cache cleanup), bounce stale reset, transport map regen, index commit. |
+| Scheduler         | digest periodic, `task` runner (expire pendings/workflow states, cache cleanup), bounce stale reset, transport map regen, index commit.     |
 
 - `listmngr serve --roles web,mta,runners` → tách vai trò khi scale ngang (nhiều node cùng DB + shared message store).
 - Graceful shutdown (SIGTERM): dừng nhận job mới, drain in-flight (timeout), đóng listener.
@@ -226,80 +226,80 @@ Ký hiệu: `PK`, `FK→`, `UQ`, `JSONB` (SQLite = TEXT json).
 
 **Identity**
 
-| Bảng | Cột chính |
-|---|---|
-| `domains` | `id PK`, `mail_host UQ`, `description`, `alias_domain`, `created_at` |
-| `domain_owners` | `domain_id FK→domains`, `user_id FK→users` |
-| `users` | `id uuid PK`, `display_name`, `is_server_owner bool`, `created_at`, `preferences_id FK`, `locale`, `timezone` |
-| `user_credentials` | `user_id PK FK`, `password_hash (argon2id)`, `password_updated_at`, `failed_attempts`, `locked_until` |
-| `user_totp` | `user_id`, `secret (encrypted)`, `enabled_at`, `recovery_codes_hash[]` |
-| `user_webauthn` | `id`, `user_id`, `credential (json)`, `name`, `created_at`, `last_used_at` |
-| `user_oidc` | `user_id`, `provider`, `subject UQ(provider,subject)` |
-| `addresses` | `id PK`, `email UQ (case-insensitive)`, `original_email`, `display_name`, `user_id FK nullable`, `verified_on`, `registered_on` |
-| `users.preferred_address_id` | FK→addresses |
-| `api_tokens` | `id`, `user_id`, `name`, `token_hash UQ`, `scopes text[]`, `list_id nullable`, `domain_id nullable`, `expires_at`, `last_used_at`, `revoked_at` |
-| `sessions` | tower-sessions store |
+| Bảng                         | Cột chính                                                                                                                                       |
+|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `domains`                    | `id PK`, `mail_host UQ`, `description`, `alias_domain`, `created_at`                                                                            |
+| `domain_owners`              | `domain_id FK→domains`, `user_id FK→users`                                                                                                      |
+| `users`                      | `id uuid PK`, `display_name`, `is_server_owner bool`, `created_at`, `preferences_id FK`, `locale`, `timezone`                                   |
+| `user_credentials`           | `user_id PK FK`, `password_hash (argon2id)`, `password_updated_at`, `failed_attempts`, `locked_until`                                           |
+| `user_totp`                  | `user_id`, `secret (encrypted)`, `enabled_at`, `recovery_codes_hash[]`                                                                          |
+| `user_webauthn`              | `id`, `user_id`, `credential (json)`, `name`, `created_at`, `last_used_at`                                                                      |
+| `user_oidc`                  | `user_id`, `provider`, `subject UQ(provider,subject)`                                                                                           |
+| `addresses`                  | `id PK`, `email UQ (case-insensitive)`, `original_email`, `display_name`, `user_id FK nullable`, `verified_on`, `registered_on`                 |
+| `users.preferred_address_id` | FK→addresses                                                                                                                                    |
+| `api_tokens`                 | `id`, `user_id`, `name`, `token_hash UQ`, `scopes text[]`, `list_id nullable`, `domain_id nullable`, `expires_at`, `last_used_at`, `revoked_at` |
+| `sessions`                   | tower-sessions store                                                                                                                            |
 
 **Lists & membership**
 
-| Bảng | Cột chính |
-|---|---|
-| `mailing_lists` | `id PK`, `list_id UQ (name.domain)`, `list_name`, `mail_host FK→domains`, `display_name`, `description`, `info`, `subject_prefix`, `advertised`, `anonymous_list`, `created_at`, `last_post_at`, `post_id`, `volume`, `next_digest_number`, `digest_last_sent_at`, `emergency`, `style_name`, + toàn bộ settings §4.1 dạng cột typed; setting ít dùng → `extra JSONB` |
-| `list_acceptable_aliases` | `list_id`, `alias (pattern)` |
-| `list_nonmember_rules` | `list_id`, `kind (accept/hold/reject/discard)`, `pattern` |
-| `members` | `id uuid PK`, `list_id FK`, `role (owner/moderator/member/nonmember)`, `address_id FK`, `user_id FK nullable`, `subscription_mode (as_address/as_user)`, `moderation_action nullable`, `display_name`, `preferences_id FK`, `bounce_score`, `last_bounce_received`, `last_warning_sent`, `total_warnings_sent`, `created_at`; `UQ(list_id, role, address_id)` |
-| `preferences` | `id PK`, `acknowledge_posts`, `hide_address`, `preferred_language`, `receive_list_copy`, `receive_own_postings`, `delivery_mode`, `delivery_status` (tất cả nullable → layered: member → address → user → system) |
-| `header_matches` | `id`, `list_id`, `position`, `header`, `pattern`, `action nullable`, `tag`, `chain nullable` |
-| `bans` | `id`, `list_id nullable (null = global)`, `email_or_regex` |
-| `templates` | `id`, `name (list:member:regular:footer …)`, `scope (site/domain/list)`, `scope_id`, `language`, `uri nullable`, `body nullable`, `username/password (cho http uri)`; `UQ(name,scope,scope_id,language)` |
-| `list_archivers` | `list_id`, `name`, `enabled` |
-| `list_styles` | code-defined (legacy-default, legacy-announce, private-default) + `custom_styles JSONB` |
+| Bảng                      | Cột chính                                                                                                                                                                                                                                                                                                                                                             |
+|---------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `mailing_lists`           | `id PK`, `list_id UQ (name.domain)`, `list_name`, `mail_host FK→domains`, `display_name`, `description`, `info`, `subject_prefix`, `advertised`, `anonymous_list`, `created_at`, `last_post_at`, `post_id`, `volume`, `next_digest_number`, `digest_last_sent_at`, `emergency`, `style_name`, + toàn bộ settings §4.1 dạng cột typed; setting ít dùng → `extra JSONB` |
+| `list_acceptable_aliases` | `list_id`, `alias (pattern)`                                                                                                                                                                                                                                                                                                                                          |
+| `list_nonmember_rules`    | `list_id`, `kind (accept/hold/reject/discard)`, `pattern`                                                                                                                                                                                                                                                                                                             |
+| `members`                 | `id uuid PK`, `list_id FK`, `role (owner/moderator/member/nonmember)`, `address_id FK`, `user_id FK nullable`, `subscription_mode (as_address/as_user)`, `moderation_action nullable`, `display_name`, `preferences_id FK`, `bounce_score`, `last_bounce_received`, `last_warning_sent`, `total_warnings_sent`, `created_at`; `UQ(list_id, role, address_id)`         |
+| `preferences`             | `id PK`, `acknowledge_posts`, `hide_address`, `preferred_language`, `receive_list_copy`, `receive_own_postings`, `delivery_mode`, `delivery_status` (tất cả nullable → layered: member → address → user → system)                                                                                                                                                     |
+| `header_matches`          | `id`, `list_id`, `position`, `header`, `pattern`, `action nullable`, `tag`, `chain nullable`                                                                                                                                                                                                                                                                          |
+| `bans`                    | `id`, `list_id nullable (null = global)`, `email_or_regex`                                                                                                                                                                                                                                                                                                            |
+| `templates`               | `id`, `name (list:member:regular:footer …)`, `scope (site/domain/list)`, `scope_id`, `language`, `uri nullable`, `body nullable`, `username/password (cho http uri)`; `UQ(name,scope,scope_id,language)`                                                                                                                                                              |
+| `list_archivers`          | `list_id`, `name`, `enabled`                                                                                                                                                                                                                                                                                                                                          |
+| `list_styles`             | code-defined (legacy-default, legacy-announce, private-default) + `custom_styles JSONB`                                                                                                                                                                                                                                                                               |
 
 **Workflow & moderation**
 
-| Bảng | Cột chính |
-|---|---|
-| `pendings` | `id`, `token_hash UQ`, `kind (subscription/unsubscription/held/probe/invite/verify)`, `payload JSONB`, `expires_at`, `created_at` |
-| `workflow_states` | `token`, `name (subscription/unsubscription)`, `step`, `data JSONB` |
-| `held_messages` | `id`, `list_id`, `message_key FK→messages`, `sender`, `subject`, `reason`, `hold_date`, `msgdata JSONB`, `moderator_id nullable`, `disposition nullable` |
-| `moderation_log` | `held_id`, `action`, `reason`, `moderator_id`, `forward_to`, `at` |
+| Bảng              | Cột chính                                                                                                                                                |
+|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `pendings`        | `id`, `token_hash UQ`, `kind (subscription/unsubscription/held/probe/invite/verify)`, `payload JSONB`, `expires_at`, `created_at`                        |
+| `workflow_states` | `token`, `name (subscription/unsubscription)`, `step`, `data JSONB`                                                                                      |
+| `held_messages`   | `id`, `list_id`, `message_key FK→messages`, `sender`, `subject`, `reason`, `hold_date`, `msgdata JSONB`, `moderator_id nullable`, `disposition nullable` |
+| `moderation_log`  | `held_id`, `action`, `reason`, `moderator_id`, `forward_to`, `at`                                                                                        |
 
 **Mail infrastructure**
 
-| Bảng | Cột chính |
-|---|---|
-| `messages` (message store index) | `id PK`, `message_id`, `message_id_hash UQ`, `list_id nullable`, `size`, `store_key` (fs/db/s3 ref), `headers JSONB (subset)`, `created_at`, `refcount` |
-| `message_blobs` | `store_key PK`, `raw bytea` (backend `db` only) |
-| `queue_jobs` | `id bigserial`, `queue (in/out/pipeline/…)`, `message_key`, `msgdata JSONB`, `run_after`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `last_error`, `created_at`; index `(queue, run_after) WHERE locked_by IS NULL` |
-| `bounce_events` | `id`, `list_id`, `email`, `timestamp`, `message_id`, `context (normal/relay/probe)`, `processed bool` |
-| `digest_mbox` | `list_id`, `volume`, `number`, `messages (append-only refs)`, `size` |
-| `dkim_keys` | `domain_id`, `selector`, `algorithm (rsa2048/ed25519)`, `private_key (encrypted)`, `public_dns_record`, `active`, `rotated_at` |
-| `nntp_watermarks` | `list_id`, `watermark` |
+| Bảng                             | Cột chính                                                                                                                                                                                                                      |
+|----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `messages` (message store index) | `id PK`, `message_id`, `message_id_hash UQ`, `list_id nullable`, `size`, `store_key` (fs/db/s3 ref), `headers JSONB (subset)`, `created_at`, `refcount`                                                                        |
+| `message_blobs`                  | `store_key PK`, `raw bytea` (backend `db` only)                                                                                                                                                                                |
+| `queue_jobs`                     | `id bigserial`, `queue (in/out/pipeline/…)`, `message_key`, `msgdata JSONB`, `run_after`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `last_error`, `created_at`; index `(queue, run_after) WHERE locked_by IS NULL` |
+| `bounce_events`                  | `id`, `list_id`, `email`, `timestamp`, `message_id`, `context (normal/relay/probe)`, `processed bool`                                                                                                                          |
+| `digest_mbox`                    | `list_id`, `volume`, `number`, `messages (append-only refs)`, `size`                                                                                                                                                           |
+| `dkim_keys`                      | `domain_id`, `selector`, `algorithm (rsa2048/ed25519)`, `private_key (encrypted)`, `public_dns_record`, `active`, `rotated_at`                                                                                                 |
+| `nntp_watermarks`                | `list_id`, `watermark`                                                                                                                                                                                                         |
 
 **Archive**
 
-| Bảng | Cột chính |
-|---|---|
-| `archive_lists` | `list_id`, `archive_policy cache`, `stats cache JSONB` |
-| `archive_senders` | `id`, `email`, `display_name`, `user_id nullable` |
-| `archive_threads` | `id`, `list_id`, `thread_id (hash msg đầu)`, `subject`, `date_active`, `starting_message_id`, `category_id nullable`, `reply_count`, `participants_count` |
-| `archive_messages` | `id`, `list_id`, `message_id_hash UQ(list,hash)`, `thread_id FK`, `parent_id nullable`, `sender_id`, `subject`, `body_text`, `body_html_sanitized nullable`, `date`, `timezone`, `in_reply_to`, `references text[]`, `store_key`, `archived_date` |
-| `archive_attachments` | `message_id FK`, `counter`, `name`, `content_type`, `encoding`, `size`, `store_key` |
-| `archive_votes` | `message_id`, `user_id`, `value (+1/-1)` |
-| `archive_tags`, `archive_taggings` | tag name; `(thread_id, tag_id, user_id)` |
-| `archive_categories` | `id`, `name`, `color` |
-| `archive_favorites` | `(thread_id, user_id)` |
-| `archive_last_views` | `(thread_id, user_id)`, `view_date` |
-| tantivy index | trên disk `data/index/`, rebuild từ DB bất cứ lúc nào |
+| Bảng                               | Cột chính                                                                                                                                                                                                                                         |
+|------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `archive_lists`                    | `list_id`, `archive_policy cache`, `stats cache JSONB`                                                                                                                                                                                            |
+| `archive_senders`                  | `id`, `email`, `display_name`, `user_id nullable`                                                                                                                                                                                                 |
+| `archive_threads`                  | `id`, `list_id`, `thread_id (hash msg đầu)`, `subject`, `date_active`, `starting_message_id`, `category_id nullable`, `reply_count`, `participants_count`                                                                                         |
+| `archive_messages`                 | `id`, `list_id`, `message_id_hash UQ(list,hash)`, `thread_id FK`, `parent_id nullable`, `sender_id`, `subject`, `body_text`, `body_html_sanitized nullable`, `date`, `timezone`, `in_reply_to`, `references text[]`, `store_key`, `archived_date` |
+| `archive_attachments`              | `message_id FK`, `counter`, `name`, `content_type`, `encoding`, `size`, `store_key`                                                                                                                                                               |
+| `archive_votes`                    | `message_id`, `user_id`, `value (+1/-1)`                                                                                                                                                                                                          |
+| `archive_tags`, `archive_taggings` | tag name; `(thread_id, tag_id, user_id)`                                                                                                                                                                                                          |
+| `archive_categories`               | `id`, `name`, `color`                                                                                                                                                                                                                             |
+| `archive_favorites`                | `(thread_id, user_id)`                                                                                                                                                                                                                            |
+| `archive_last_views`               | `(thread_id, user_id)`, `view_date`                                                                                                                                                                                                               |
+| tantivy index                      | trên disk `data/index/`, rebuild từ DB bất cứ lúc nào                                                                                                                                                                                             |
 
 **Ops**
 
-| Bảng | Cột chính |
-|---|---|
-| `audit_log` | `id`, `at`, `actor_user_id`, `actor_token_id`, `ip`, `action`, `target_type`, `target_id`, `diff JSONB`; append-only |
-| `webhooks` | `id`, `url`, `secret_hash`, `events text[]`, `list_id nullable`, `enabled` |
-| `webhook_deliveries` | retry state |
-| `_sqlx_migrations` | sqlx |
+| Bảng                 | Cột chính                                                                                                            |
+|----------------------|----------------------------------------------------------------------------------------------------------------------|
+| `audit_log`          | `id`, `at`, `actor_user_id`, `actor_token_id`, `ip`, `action`, `target_type`, `target_id`, `diff JSONB`; append-only |
+| `webhooks`           | `id`, `url`, `secret_hash`, `events text[]`, `list_id nullable`, `enabled`                                           |
+| `webhook_deliveries` | retry state                                                                                                          |
+| `_sqlx_migrations`   | sqlx                                                                                                                 |
 
 ### 3.5 Queue & message store
 
@@ -422,11 +422,11 @@ metrics = true
 
 ### 3.7 MTA integration
 
-| MTA | Inbound | Maps sinh tự động |
-|---|---|---|
-| Postfix (khuyến nghị) | `transport_maps`, `relay_recipient_maps`, `relay_domains` → LMTP `:8024` | `data/mta/current/{domains,recipients,transport}.regexp` (hoặc `hash:` `postfix_domains`/`postfix_lmtp` + `postmap`), chạy khi start, tạo/xoá list & `listmngr aliases regen` |
-| Exim 4 | router `manualroute` + `lsearch` giống Mailman 3 | `data/mta/current/exim_{domains,recipients}` + snippet trong `deploy/exim/` |
-| Built-in SMTP (phase 6, experimental) | listmngr nhận `:25` trực tiếp | không cần map |
+| MTA                                   | Inbound                                                                  | Maps sinh tự động                                                                                                                                                             |
+|---------------------------------------|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Postfix (khuyến nghị)                 | `transport_maps`, `relay_recipient_maps`, `relay_domains` → LMTP `:8024` | `data/mta/current/{domains,recipients,transport}.regexp` (hoặc `hash:` `postfix_domains`/`postfix_lmtp` + `postmap`), chạy khi start, tạo/xoá list & `listmngr aliases regen` |
+| Exim 4                                | router `manualroute` + `lsearch` giống Mailman 3                         | `data/mta/current/exim_{domains,recipients}` + snippet trong `deploy/exim/`                                                                                                   |
+| Built-in SMTP (phase 6, experimental) | listmngr nhận `:25` trực tiếp                                            | không cần map                                                                                                                                                                 |
 
 Outbound: SMTP relay (Postfix localhost hoặc external có AUTH/STARTTLS/implicit TLS), chunk theo `max_recipients`, `MAIL FROM = list-bounces+VERP@host`, DKIM sign per domain, `List-*` headers.
 
@@ -436,250 +436,250 @@ Trạng thái: `P0`..`P7` = phase dự kiến. Cột "Thay đổi" = khác Mailm
 
 ### 4.1 Core — List settings (Postorius 9 nhóm)
 
-| Nhóm | Setting (tên Mailman giữ nguyên) | Phase |
-|---|---|---|
-| List Identity | `display_name`, `description`, `info`, `subject_prefix`, `advertised`, `preferred_language`, `mail_host`, `list_name`, `fqdn_listname`, `list_id`, `created_at`, `last_post_at`, `post_id`, `volume` | P1 |
-| Automatic Responses | `autorespond_owner`, `autoresponse_owner_text`, `autorespond_postings`, `autoresponse_postings_text`, `autorespond_requests`, `autoresponse_request_text`, `autoresponse_grace_period`, `respond_to_post_requests`, `send_welcome_message`, `send_goodbye_message`, `admin_immed_notify`, `admin_notify_mchanges` | P3 |
-| Alter Messages | `filter_content`, `filter_types`, `pass_types`, `filter_extensions`, `pass_extensions`, `collapse_alternatives`, `convert_html_to_plaintext`, `filter_action`, `anonymous_list`, `include_rfc2369_headers`, `allow_list_posts`, `reply_goes_to_list` (no_munging/point_to_list/explicit_header), `reply_to_address`, `first_strip_reply_to`, `personalize` (none/individual/full), `include_sender_header` (Sender: override) | P2 |
-| DMARC Mitigations | `dmarc_mitigate_action` (no_mitigation/munge_from/wrap_message/reject/discard), `dmarc_mitigate_unconditionally`, `dmarc_addresses`, `dmarc_moderation_notice`, `dmarc_wrapped_message_text` | P2 (munge_from) / P6 (đủ) |
-| Digest | `digests_enabled`, `digest_size_threshold`, `digest_send_periodic`, `digest_volume_frequency` (yearly/monthly/quarterly/weekly/daily), `next_digest_number`, `digest_last_sent_at` | P3 |
-| Message Acceptance | `default_member_action`, `default_nonmember_action` (defer/accept/hold/reject/discard), `accept_these_nonmembers`, `hold_these_nonmembers`, `reject_these_nonmembers`, `discard_these_nonmembers`, `require_explicit_destination`, `acceptable_aliases`, `administrivia`, `max_message_size`, `max_num_recipients`, `emergency`, `posting_pipeline`, `moderator "Approved:" posting key` | P2 |
-| Archiving | `archive_policy` (public/private/never), `archive_rendering_mode` (text/markdown), `archivers` (prototype/local=listmngr/mail-archive/mhonarc/hyperkitty-remote) | P1 (field) / P5 (thực thi) |
-| Member Policy | `subscription_policy` (open/confirm/moderate/confirm_then_moderate), `unsubscription_policy`, `member_roster_visibility` (public/members/moderators) | P3 |
-| Bounce Processing | `process_bounces`, `bounce_score_threshold`, `bounce_info_stale_after`, `bounce_you_are_disabled_warnings`, `bounce_you_are_disabled_warnings_interval`, `bounce_notify_owner_on_disable`, `bounce_notify_owner_on_removal`, `bounce_notify_owner_on_bounce_increment`, `forward_unrecognized_bounces_to` (discard/site_owner/administrators) | P3 |
-| Usenet | `gateway_to_mail`, `gateway_to_news`, `linked_newsgroup`, `nntp_prefix_subject_too`, `newsgroup_moderation` (none/open_moderated/moderated), `usenet_watermark` | P6 |
-| Địa chỉ | `posting_address`, `bounces_address`, `join_address`, `leave_address`, `owner_address`, `request_address`, `no_reply_address` (derived) | P1 |
-| Styles | `legacy-default`, `legacy-announce`, `private-default` + custom style (JSON) | P1 |
+| Nhóm                | Setting (tên Mailman giữ nguyên)                                                                                                                                                                                                                                                                                                                                                                                              | Phase                      |
+|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------|
+| List Identity       | `display_name`, `description`, `info`, `subject_prefix`, `advertised`, `preferred_language`, `mail_host`, `list_name`, `fqdn_listname`, `list_id`, `created_at`, `last_post_at`, `post_id`, `volume`                                                                                                                                                                                                                          | P1                         |
+| Automatic Responses | `autorespond_owner`, `autoresponse_owner_text`, `autorespond_postings`, `autoresponse_postings_text`, `autorespond_requests`, `autoresponse_request_text`, `autoresponse_grace_period`, `respond_to_post_requests`, `send_welcome_message`, `send_goodbye_message`, `admin_immed_notify`, `admin_notify_mchanges`                                                                                                             | P3                         |
+| Alter Messages      | `filter_content`, `filter_types`, `pass_types`, `filter_extensions`, `pass_extensions`, `collapse_alternatives`, `convert_html_to_plaintext`, `filter_action`, `anonymous_list`, `include_rfc2369_headers`, `allow_list_posts`, `reply_goes_to_list` (no_munging/point_to_list/explicit_header), `reply_to_address`, `first_strip_reply_to`, `personalize` (none/individual/full), `include_sender_header` (Sender: override) | P2                         |
+| DMARC Mitigations   | `dmarc_mitigate_action` (no_mitigation/munge_from/wrap_message/reject/discard), `dmarc_mitigate_unconditionally`, `dmarc_addresses`, `dmarc_moderation_notice`, `dmarc_wrapped_message_text`                                                                                                                                                                                                                                  | P2 (munge_from) / P6 (đủ)  |
+| Digest              | `digests_enabled`, `digest_size_threshold`, `digest_send_periodic`, `digest_volume_frequency` (yearly/monthly/quarterly/weekly/daily), `next_digest_number`, `digest_last_sent_at`                                                                                                                                                                                                                                            | P3                         |
+| Message Acceptance  | `default_member_action`, `default_nonmember_action` (defer/accept/hold/reject/discard), `accept_these_nonmembers`, `hold_these_nonmembers`, `reject_these_nonmembers`, `discard_these_nonmembers`, `require_explicit_destination`, `acceptable_aliases`, `administrivia`, `max_message_size`, `max_num_recipients`, `emergency`, `posting_pipeline`, `moderator "Approved:" posting key`                                      | P2                         |
+| Archiving           | `archive_policy` (public/private/never), `archive_rendering_mode` (text/markdown), `archivers` (prototype/local=listmngr/mail-archive/mhonarc/hyperkitty-remote)                                                                                                                                                                                                                                                              | P1 (field) / P5 (thực thi) |
+| Member Policy       | `subscription_policy` (open/confirm/moderate/confirm_then_moderate), `unsubscription_policy`, `member_roster_visibility` (public/members/moderators)                                                                                                                                                                                                                                                                          | P3                         |
+| Bounce Processing   | `process_bounces`, `bounce_score_threshold`, `bounce_info_stale_after`, `bounce_you_are_disabled_warnings`, `bounce_you_are_disabled_warnings_interval`, `bounce_notify_owner_on_disable`, `bounce_notify_owner_on_removal`, `bounce_notify_owner_on_bounce_increment`, `forward_unrecognized_bounces_to` (discard/site_owner/administrators)                                                                                 | P3                         |
+| Usenet              | `gateway_to_mail`, `gateway_to_news`, `linked_newsgroup`, `nntp_prefix_subject_too`, `newsgroup_moderation` (none/open_moderated/moderated), `usenet_watermark`                                                                                                                                                                                                                                                               | P6                         |
+| Địa chỉ             | `posting_address`, `bounces_address`, `join_address`, `leave_address`, `owner_address`, `request_address`, `no_reply_address` (derived)                                                                                                                                                                                                                                                                                       | P1                         |
+| Styles              | `legacy-default`, `legacy-announce`, `private-default` + custom style (JSON)                                                                                                                                                                                                                                                                                                                                                  | P1                         |
 
 ### 4.2 Core — Users, addresses, membership
 
-| Tính năng | Phase | Thay đổi |
-|---|---|---|
-| User: `user_id` uuid, `display_name`, password, `is_server_owner`, preferences, nhiều addresses, `preferred_address` | P1 | thêm locale/timezone |
-| Address: verify/unverify, link/unlink user, `display_name`, case-preserve `original_email` | P1 | |
-| Member roles: owner, moderator, member, nonmember | P1 | |
-| `subscription_mode`: as_address / as_user | P1 | |
-| Preferences layered: member → address → user → system (`delivery_mode`, `delivery_status`, `acknowledge_posts`, `hide_address`, `preferred_language`, `receive_list_copy`, `receive_own_postings`) | P1 | |
-| `delivery_mode`: regular, plaintext_digests, mime_digests, summary_digests | P1/P3 | |
-| `delivery_status`: enabled, by_user, by_bounces, by_moderator, unknown | P1 | |
-| Per-member `moderation_action` override | P2 | |
-| Subscription workflow: verify → confirm → moderate (state machine, resume được), `pre_verified`, `pre_confirmed`, `pre_approved`, `invitation`, `send_welcome_message` override | P3 | token hashed |
-| Unsubscription workflow (confirm / moderate) | P3 | |
-| Mass subscribe / mass unsubscribe / sync members (file) | P1 CLI, P4 UI | |
-| Bans: global + per-list, regex `^` | P3 | |
-| Server owners | P1 | |
-| Find member (`/members/find`, `findmember`) | P1 | |
+| Tính năng                                                                                                                                                                                          | Phase         | Thay đổi             |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|----------------------|
+| User: `user_id` uuid, `display_name`, password, `is_server_owner`, preferences, nhiều addresses, `preferred_address`                                                                               | P1            | thêm locale/timezone |
+| Address: verify/unverify, link/unlink user, `display_name`, case-preserve `original_email`                                                                                                         | P1            |                      |
+| Member roles: owner, moderator, member, nonmember                                                                                                                                                  | P1            |                      |
+| `subscription_mode`: as_address / as_user                                                                                                                                                          | P1            |                      |
+| Preferences layered: member → address → user → system (`delivery_mode`, `delivery_status`, `acknowledge_posts`, `hide_address`, `preferred_language`, `receive_list_copy`, `receive_own_postings`) | P1            |                      |
+| `delivery_mode`: regular, plaintext_digests, mime_digests, summary_digests                                                                                                                         | P1/P3         |                      |
+| `delivery_status`: enabled, by_user, by_bounces, by_moderator, unknown                                                                                                                             | P1            |                      |
+| Per-member `moderation_action` override                                                                                                                                                            | P2            |                      |
+| Subscription workflow: verify → confirm → moderate (state machine, resume được), `pre_verified`, `pre_confirmed`, `pre_approved`, `invitation`, `send_welcome_message` override                    | P3            | token hashed         |
+| Unsubscription workflow (confirm / moderate)                                                                                                                                                       | P3            |                      |
+| Mass subscribe / mass unsubscribe / sync members (file)                                                                                                                                            | P1 CLI, P4 UI |                      |
+| Bans: global + per-list, regex `^`                                                                                                                                                                 | P3            |                      |
+| Server owners                                                                                                                                                                                      | P1            |                      |
+| Find member (`/members/find`, `findmember`)                                                                                                                                                        | P1            |                      |
 
 ### 4.3 Core — Chains & rules (moderation)
 
 Chains: `default-posting-chain`, `default-owner-chain`, `accept`, `hold`, `reject`, `discard`, `moderation`, `header-match`, `dmarc-mitigation`. Link actions: `jump`, `defer`, `stop`, `run`, `detour`.
 
-| Rule | Mô tả | Phase |
-|---|---|---|
-| `approved` | `Approved:`/`Approve:` header hoặc dòng đầu body khớp posting key → accept; strip header | P2 |
-| `emergency` | list `emergency=true` → hold | P2 |
-| `loop` | `List-Post` trùng list → discard | P2 |
-| `banned-address` | sender bị ban (global/list) → reject | P2 |
-| `member-moderation` | member có `moderation_action` | P2 |
-| `nonmember-moderation` | `*_these_nonmembers` + `default_nonmember_action` | P2 |
-| `administrivia` | body giống lệnh (subscribe/unsubscribe…) | P2 |
-| `implicit-dest` | `require_explicit_destination` + `acceptable_aliases` | P2 |
-| `max-recipients` | | P2 |
-| `max-size` | | P2 |
-| `no-subject` | | P2 |
-| `suspicious-header` | header matches (legacy) | P2 |
-| `no-senders` | không có From/Sender | P2 |
-| `news-moderation` | | P6 |
-| `dmarc-mitigation` | DNS `_dmarc` p=reject/quarantine (+org domain qua PSL) | P2 |
-| `digests` | rule cho digest messages | P3 |
-| `any`, `truth` | glue | P2 |
-| Header matches động (per-list, action/tag/chain) | | P2 |
-| Hold reasons & moderator notice (`list:admin:action:post`), user notice (`list:user:notice:hold`) | | P2 |
-| Moderator actions: accept / reject (reason) / discard / defer, forward, "moderate sender" → set member action, "add to ban", "add to header match" | | P2 REST / P4 UI |
+| Rule                                                                                                                                               | Mô tả                                                                                    | Phase           |
+|----------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|-----------------|
+| `approved`                                                                                                                                         | `Approved:`/`Approve:` header hoặc dòng đầu body khớp posting key → accept; strip header | P2              |
+| `emergency`                                                                                                                                        | list `emergency=true` → hold                                                             | P2              |
+| `loop`                                                                                                                                             | `List-Post` trùng list → discard                                                         | P2              |
+| `banned-address`                                                                                                                                   | sender bị ban (global/list) → reject                                                     | P2              |
+| `member-moderation`                                                                                                                                | member có `moderation_action`                                                            | P2              |
+| `nonmember-moderation`                                                                                                                             | `*_these_nonmembers` + `default_nonmember_action`                                        | P2              |
+| `administrivia`                                                                                                                                    | body giống lệnh (subscribe/unsubscribe…)                                                 | P2              |
+| `implicit-dest`                                                                                                                                    | `require_explicit_destination` + `acceptable_aliases`                                    | P2              |
+| `max-recipients`                                                                                                                                   |                                                                                          | P2              |
+| `max-size`                                                                                                                                         |                                                                                          | P2              |
+| `no-subject`                                                                                                                                       |                                                                                          | P2              |
+| `suspicious-header`                                                                                                                                | header matches (legacy)                                                                  | P2              |
+| `no-senders`                                                                                                                                       | không có From/Sender                                                                     | P2              |
+| `news-moderation`                                                                                                                                  |                                                                                          | P6              |
+| `dmarc-mitigation`                                                                                                                                 | DNS `_dmarc` p=reject/quarantine (+org domain qua PSL)                                   | P2              |
+| `digests`                                                                                                                                          | rule cho digest messages                                                                 | P3              |
+| `any`, `truth`                                                                                                                                     | glue                                                                                     | P2              |
+| Header matches động (per-list, action/tag/chain)                                                                                                   |                                                                                          | P2              |
+| Hold reasons & moderator notice (`list:admin:action:post`), user notice (`list:user:notice:hold`)                                                  |                                                                                          | P2              |
+| Moderator actions: accept / reject (reason) / discard / defer, forward, "moderate sender" → set member action, "add to ban", "add to header match" |                                                                                          | P2 REST / P4 UI |
 
 ### 4.4 Core — Pipeline handlers
 
-| Pipeline | Handlers (thứ tự) | Phase |
-|---|---|---|
-| `default-posting-pipeline` | `validate-authenticity` → `mime-delete` → `tagger` → `member-recipients` → `avoid-duplicates` → `cleanse` → `cleanse-dkim` → `cook-headers` → `subject-prefix` → `rfc-2369` → `to-archive` → `to-digest` → `to-usenet` → `after-delivery` → `acknowledge` → `dmarc` → `arc-sign` → `to-outgoing` | P2 (trừ to-usenet P6, arc-sign P6) |
-| `virgin` | `cook-headers` → `to-outgoing` | P2 |
-| `default-owner-pipeline` | `owner-recipients` → `cleanse` → `cook-headers` → `to-outgoing` | P2 |
-| Handler khác | `decorate` (header/footer template, placeholders `$display_name`, `$listinfo_uri`, `$user_address`, `$user_delivered_to`, `$user_name`, `$user_options_uri`…), `file-recipients`, `replybot` (autoresponder) | P2 / P3 |
-| `mime-delete` chi tiết | filter/pass types & extensions, collapse alternatives, html→text, `filter_action` (discard/reject/forward_to_list_owner/preserve), giữ `Content-Disposition` | P2 |
-| `cook-headers` chi tiết | `Sender`, `Reply-To` policy, `X-Mailman-Version` → `X-Listmngr-Version`, `Precedence: list`, `X-Mailman-Rule-Hits/Misses`, `List-Id`, `X-Message-ID-Hash` | P2 |
-| `rfc-2369` | `List-Help`, `List-Post`, `List-Subscribe`, `List-Unsubscribe`, `List-Archive`, `Archived-At`, **+ `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058)** | P2 |
-| Personalization | `personalize=full` → 1 msg/recipient, VERP luôn bật khi personalize | P2 |
-| Custom pipeline per list (`posting_pipeline`) | | P2 |
+| Pipeline                                      | Handlers (thứ tự)                                                                                                                                                                                                                                                                                | Phase                              |
+|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------|
+| `default-posting-pipeline`                    | `validate-authenticity` → `mime-delete` → `tagger` → `member-recipients` → `avoid-duplicates` → `cleanse` → `cleanse-dkim` → `cook-headers` → `subject-prefix` → `rfc-2369` → `to-archive` → `to-digest` → `to-usenet` → `after-delivery` → `acknowledge` → `dmarc` → `arc-sign` → `to-outgoing` | P2 (trừ to-usenet P6, arc-sign P6) |
+| `virgin`                                      | `cook-headers` → `to-outgoing`                                                                                                                                                                                                                                                                   | P2                                 |
+| `default-owner-pipeline`                      | `owner-recipients` → `cleanse` → `cook-headers` → `to-outgoing`                                                                                                                                                                                                                                  | P2                                 |
+| Handler khác                                  | `decorate` (header/footer template, placeholders `$display_name`, `$listinfo_uri`, `$user_address`, `$user_delivered_to`, `$user_name`, `$user_options_uri`…), `file-recipients`, `replybot` (autoresponder)                                                                                     | P2 / P3                            |
+| `mime-delete` chi tiết                        | filter/pass types & extensions, collapse alternatives, html→text, `filter_action` (discard/reject/forward_to_list_owner/preserve), giữ `Content-Disposition`                                                                                                                                     | P2                                 |
+| `cook-headers` chi tiết                       | `Sender`, `Reply-To` policy, `X-Mailman-Version` → `X-Listmngr-Version`, `Precedence: list`, `X-Mailman-Rule-Hits/Misses`, `List-Id`, `X-Message-ID-Hash`                                                                                                                                        | P2                                 |
+| `rfc-2369`                                    | `List-Help`, `List-Post`, `List-Subscribe`, `List-Unsubscribe`, `List-Archive`, `Archived-At`, **+ `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058)**                                                                                                                              | P2                                 |
+| Personalization                               | `personalize=full` → 1 msg/recipient, VERP luôn bật khi personalize                                                                                                                                                                                                                              | P2                                 |
+| Custom pipeline per list (`posting_pipeline`) |                                                                                                                                                                                                                                                                                                  | P2                                 |
 
 ### 4.5 Core — Runners & queues
 
-| Runner | Phase | Ghi chú |
-|---|---|---|
-| `lmtp` | P2 | server built-in |
-| `in` | P2 | |
-| `pipeline` | P2 | |
-| `out` | P2 | chunking, VERP, DKIM |
-| `retry` | P2 | backoff, `delivery_retry_period` |
-| `virgin` | P2 | |
-| `bounces` | P3 | |
-| `command` | P3 | |
-| `digest` | P3 | |
-| `archive` | P5 | |
-| `nntp` | P6 | |
-| `task` | P3 | expire pendings/workflows, cache |
-| `shunt`, `bad` | P2 | CLI `unshunt` |
-| `rest` | – | gộp vào HTTP server |
+| Runner         | Phase | Ghi chú                          |
+|----------------|-------|----------------------------------|
+| `lmtp`         | P2    | server built-in                  |
+| `in`           | P2    |                                  |
+| `pipeline`     | P2    |                                  |
+| `out`          | P2    | chunking, VERP, DKIM             |
+| `retry`        | P2    | backoff, `delivery_retry_period` |
+| `virgin`       | P2    |                                  |
+| `bounces`      | P3    |                                  |
+| `command`      | P3    |                                  |
+| `digest`       | P3    |                                  |
+| `archive`      | P5    |                                  |
+| `nntp`         | P6    |                                  |
+| `task`         | P3    | expire pendings/workflows, cache |
+| `shunt`, `bad` | P2    | CLI `unshunt`                    |
+| `rest`         | –     | gộp vào HTTP server              |
 
 ### 4.6 Core — Email commands & sub-addresses
 
-| Sub-address | Xử lý | Phase |
-|---|---|---|
-| `list@` | posting | P2 |
-| `list-owner@` | owner pipeline → owners + moderators | P2 |
-| `list-bounces@`, `list-bounces+VERP@` | bounce runner | P3 |
-| `list-request@` | command bot: `confirm <tok>`, `join`/`subscribe [digest=…] [address=…]`, `leave`/`unsubscribe`, `help`, `echo`, `end`/`stop` | P3 |
-| `list-join@`, `list-subscribe@` | = `join` | P3 |
-| `list-leave@`, `list-unsubscribe@` | = `leave` | P3 |
-| `list-confirm+token@` | = `confirm` (Subject/To token) | P3 |
-| Autoresponder cho owner/postings/requests + grace period | | P3 |
-| `List-Unsubscribe-Post` one-click HTTP POST (RFC 8058) | HTTP endpoint | P2 |
+| Sub-address                                              | Xử lý                                                                                                                        | Phase |
+|----------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|-------|
+| `list@`                                                  | posting                                                                                                                      | P2    |
+| `list-owner@`                                            | owner pipeline → owners + moderators                                                                                         | P2    |
+| `list-bounces@`, `list-bounces+VERP@`                    | bounce runner                                                                                                                | P3    |
+| `list-request@`                                          | command bot: `confirm <tok>`, `join`/`subscribe [digest=…] [address=…]`, `leave`/`unsubscribe`, `help`, `echo`, `end`/`stop` | P3    |
+| `list-join@`, `list-subscribe@`                          | = `join`                                                                                                                     | P3    |
+| `list-leave@`, `list-unsubscribe@`                       | = `leave`                                                                                                                    | P3    |
+| `list-confirm+token@`                                    | = `confirm` (Subject/To token)                                                                                               | P3    |
+| Autoresponder cho owner/postings/requests + grace period |                                                                                                                              | P3    |
+| `List-Unsubscribe-Post` one-click HTTP POST (RFC 8058)   | HTTP endpoint                                                                                                                | P2    |
 
 ### 4.7 Core — Bounce processing
 
-| Tính năng | Phase |
-|---|---|
-| VERP encode/decode (`bounces+local=domain@host`), `verp_confirmations`, `verp_delivery_interval` | P2/P3 |
-| Detectors (port từ `flufl.bounce`): DSN RFC 3464 (multipart/report), `aol`, `caiwireless`, `exchange`, `exim`, `groupwise`, `llnl`, `microsoft`, `netscape`, `postfix`, `qmail`, `sendmail`, `simplematch` (regex catalog), `simplewarning`, `sina`, `smtp32`, `yahoo`, `yale` + fixture corpus | P3 |
-| `bounce_events` (context normal/relay/probe), `processed` | P3 |
-| Score tăng 1/ngày/địa chỉ, `bounce_info_stale_after` reset, threshold → `delivery_status=by_bounces` | P3 |
-| Warnings (`bounce_you_are_disabled_warnings` × interval) → remove | P3 |
-| Probe message (`-bounces+<token>`), probe bounce → disable ngay | P3 |
-| Owner notices: increment/disable/removal/unrecognized; `forward_unrecognized_bounces_to` | P3 |
-| Member re-enable (web/email confirm) | P4 |
+| Tính năng                                                                                                                                                                                                                                                                                       | Phase |
+|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------|
+| VERP encode/decode (`bounces+local=domain@host`), `verp_confirmations`, `verp_delivery_interval`                                                                                                                                                                                                | P2/P3 |
+| Detectors (port từ `flufl.bounce`): DSN RFC 3464 (multipart/report), `aol`, `caiwireless`, `exchange`, `exim`, `groupwise`, `llnl`, `microsoft`, `netscape`, `postfix`, `qmail`, `sendmail`, `simplematch` (regex catalog), `simplewarning`, `sina`, `smtp32`, `yahoo`, `yale` + fixture corpus | P3    |
+| `bounce_events` (context normal/relay/probe), `processed`                                                                                                                                                                                                                                       | P3    |
+| Score tăng 1/ngày/địa chỉ, `bounce_info_stale_after` reset, threshold → `delivery_status=by_bounces`                                                                                                                                                                                            | P3    |
+| Warnings (`bounce_you_are_disabled_warnings` × interval) → remove                                                                                                                                                                                                                               | P3    |
+| Probe message (`-bounces+<token>`), probe bounce → disable ngay                                                                                                                                                                                                                                 | P3    |
+| Owner notices: increment/disable/removal/unrecognized; `forward_unrecognized_bounces_to`                                                                                                                                                                                                        | P3    |
+| Member re-enable (web/email confirm)                                                                                                                                                                                                                                                            | P4    |
 
 ### 4.8 Core — Digests
 
-| Tính năng | Phase |
-|---|---|
-| Append vào digest mbox per list; `digest_size_threshold` (KB) trigger; `digest_send_periodic` + `digest_volume_frequency` | P3 |
-| MIME digest (multipart/digest, `multipart/mixed` masthead + TOC + messages + footer) | P3 |
-| Plaintext digest RFC 1153 | P3 |
-| Summary digest (Mailman: = MIME với flag) | P3 |
-| Volume/number bump, `listmngr digests --send/--bump/--periodic` | P3 |
-| Templates: `list:member:digest:masthead/header/footer` | P3 |
-| Member `receive_list_copy`/`digest` delivery mode routing | P3 |
+| Tính năng                                                                                                                 | Phase |
+|---------------------------------------------------------------------------------------------------------------------------|-------|
+| Append vào digest mbox per list; `digest_size_threshold` (KB) trigger; `digest_send_periodic` + `digest_volume_frequency` | P3    |
+| MIME digest (multipart/digest, `multipart/mixed` masthead + TOC + messages + footer)                                      | P3    |
+| Plaintext digest RFC 1153                                                                                                 | P3    |
+| Summary digest (Mailman: = MIME với flag)                                                                                 | P3    |
+| Volume/number bump, `listmngr digests --send/--bump/--periodic`                                                           | P3    |
+| Templates: `list:member:digest:masthead/header/footer`                                                                    | P3    |
+| Member `receive_list_copy`/`digest` delivery mode routing                                                                 | P3    |
 
 ### 4.9 Core — Templates (URIs)
 
 Scope: site → domain → list; language fallback; loader `mailman:///` (built-in), `file:///`, `https://` (basic auth), DB body. Tên giữ nguyên Mailman:
 
-| Nhóm | Templates | Phase |
-|---|---|---|
-| Admin | `list:admin:action:post`, `list:admin:action:subscribe`, `list:admin:action:unsubscribe`, `list:admin:notice:disable`, `list:admin:notice:increment`, `list:admin:notice:removal`, `list:admin:notice:subscribe`, `list:admin:notice:unrecognized`, `list:admin:notice:unsubscribe`, `list:admin:notice:pending` | P2–P3 |
-| Member | `list:member:digest:footer`, `list:member:digest:header`, `list:member:digest:masthead`, `list:member:generic:footer`, `list:member:regular:footer`, `list:member:regular:header` | P2–P3 |
-| User | `list:user:action:invite`, `list:user:action:subscribe`, `list:user:action:unsubscribe`, `list:user:notice:goodbye`, `list:user:notice:hold`, `list:user:notice:no-more-today`, `list:user:notice:post`, `list:user:notice:probe`, `list:user:notice:refuse`, `list:user:notice:rejected`, `list:user:notice:warning`, `list:user:notice:welcome` | P3 |
-| Domain | `domain:admin:notice:new-list` | P1 |
-| Placeholders | `$listname`, `$list_id`, `$display_name`, `$fqdn_listname`, `$list_domain`, `$description`, `$info`, `$request_email`, `$owner_email`, `$listinfo_uri`, `$list_requests`, `$user_email`, `$user_name`, `$user_delivered_to`, `$user_options_uri`, `$subject`, `$reasons`, `$confirm_email`, `$token`, `$sender_email`, `$moderator_notice`… | – |
-| i18n | Templates + UI strings: `en`, `vi` ban đầu; fluent hoặc gettext `.po` import từ Mailman để tận dụng 40+ ngôn ngữ | P3 (framework) / P6 (import) |
+| Nhóm         | Templates                                                                                                                                                                                                                                                                                                                                         | Phase                        |
+|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------|
+| Admin        | `list:admin:action:post`, `list:admin:action:subscribe`, `list:admin:action:unsubscribe`, `list:admin:notice:disable`, `list:admin:notice:increment`, `list:admin:notice:removal`, `list:admin:notice:subscribe`, `list:admin:notice:unrecognized`, `list:admin:notice:unsubscribe`, `list:admin:notice:pending`                                  | P2–P3                        |
+| Member       | `list:member:digest:footer`, `list:member:digest:header`, `list:member:digest:masthead`, `list:member:generic:footer`, `list:member:regular:footer`, `list:member:regular:header`                                                                                                                                                                 | P2–P3                        |
+| User         | `list:user:action:invite`, `list:user:action:subscribe`, `list:user:action:unsubscribe`, `list:user:notice:goodbye`, `list:user:notice:hold`, `list:user:notice:no-more-today`, `list:user:notice:post`, `list:user:notice:probe`, `list:user:notice:refuse`, `list:user:notice:rejected`, `list:user:notice:warning`, `list:user:notice:welcome` | P3                           |
+| Domain       | `domain:admin:notice:new-list`                                                                                                                                                                                                                                                                                                                    | P1                           |
+| Placeholders | `$listname`, `$list_id`, `$display_name`, `$fqdn_listname`, `$list_domain`, `$description`, `$info`, `$request_email`, `$owner_email`, `$listinfo_uri`, `$list_requests`, `$user_email`, `$user_name`, `$user_delivered_to`, `$user_options_uri`, `$subject`, `$reasons`, `$confirm_email`, `$token`, `$sender_email`, `$moderator_notice`…       | –                            |
+| i18n         | Templates + UI strings: `en`, `vi` ban đầu; fluent hoặc gettext `.po` import từ Mailman để tận dụng 40+ ngôn ngữ                                                                                                                                                                                                                                  | P3 (framework) / P6 (import) |
 
 ### 4.10 Core — REST API
 
 Hai prefix: `/3.1/` (compat, JSON shape giống Mailman 3.3 để `mailmanclient` chạy) và `/api/v1/` (mới, OpenAPI, typed, pagination cursor, ETag). Cùng handler, khác serializer.
 
-| Resource | Endpoints | Phase |
-|---|---|---|
-| system | `GET /system/versions`, `/system/configuration[/section]`, `/system/preferences`, `/system/pipelines`, `/system/chains` | P1 |
-| domains | `GET/POST /domains`, `GET/DELETE /domains/{host}`, `/domains/{host}/lists`, `/domains/{host}/owners`, `/domains/{host}/uris` | P1 |
-| lists | `GET/POST /lists`, `GET/DELETE /lists/{id}`, `/lists/{id}/config[/{attr}]` (GET/PUT/PATCH), `/lists/styles`, `?advertised=true`, `/lists/{id}/archivers`, `/lists/{id}/digest` (GET/POST send/bump), `/lists/{id}/uris`, `/lists/{id}/templates` | P1 (config) / P3 |
-| roster/members | `/lists/{id}/roster/{owner,moderator,member,nonmember}`, `/lists/{id}/member/{email}`, `POST /members` (subscribe, `pre_*`, `invitation`, `send_welcome_message`, `role`), `GET/PATCH/DELETE /members/{id}`, `/members/{id}/preferences`, `/members/{id}/all/preferences`, `POST /members/find`, mass ops | P1 |
-| held | `GET /lists/{id}/held[?count&page]`, `GET /lists/{id}/held/{id}`, `POST /lists/{id}/held/{id}` (`action=accept|reject|discard|defer`, `comment`, `forward`) | P2 |
-| requests | `GET /lists/{id}/requests[?token_owner&request_type]`, `GET/POST /lists/{id}/requests/{token}` (`action=accept|reject|discard|defer`) | P3 |
-| header-matches | `GET/POST /lists/{id}/header-matches`, `GET/PATCH/PUT/DELETE /lists/{id}/header-matches/{n}`, `DELETE` all | P2 |
-| bans | `/bans`, `/lists/{id}/bans`, `DELETE …/{email}` | P3 |
-| users | `GET/POST /users`, `GET/PATCH/DELETE /users/{id}`, `/users/{id}/addresses` (GET/POST), `/users/{id}/preferences`, `POST /users/{id}/login` (verify pwd — compat), `/users/{id}/all/preferences` | P1 |
-| addresses | `GET /addresses/{email}`, `POST …/verify`, `…/unverify`, `GET/POST /addresses/{email}/user`, `DELETE` unlink, `/addresses/{email}/memberships`, `/addresses/{email}/preferences` | P1 |
-| queues | `GET /queues`, `GET /queues/{name}`, `POST /queues/{name}` (inject) | P2 |
-| templates/uris | `/templates/{id}`, `/uris`, list/domain uris | P3 |
-| owners | `GET /owners` (server owners) | P1 |
-| plugins | `GET /plugins` (trả rỗng/ list Rust plugins) | P6 |
-| archive (mới) | `/api/v1/archive/...` (search, threads, mbox export) | P5 |
-| webhooks (mới) | `/api/v1/webhooks` | P6 |
-| Auth | `/3.1/`: Basic (khi `compat_basic_auth`, CIDR allowlist) hoặc Bearer; `/api/v1/`: Bearer scoped token | P1 |
-| OpenAPI | `/openapi.json` + Swagger UI tại `/api/docs` | P1 |
+| Resource       | Endpoints                                                                                                                                                                                                                                                                                                 | Phase            |
+|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
+| system         | `GET /system/versions`, `/system/configuration[/section]`, `/system/preferences`, `/system/pipelines`, `/system/chains`                                                                                                                                                                                   | P1               |
+| domains        | `GET/POST /domains`, `GET/DELETE /domains/{host}`, `/domains/{host}/lists`, `/domains/{host}/owners`, `/domains/{host}/uris`                                                                                                                                                                              | P1               |
+| lists          | `GET/POST /lists`, `GET/DELETE /lists/{id}`, `/lists/{id}/config[/{attr}]` (GET/PUT/PATCH), `/lists/styles`, `?advertised=true`, `/lists/{id}/archivers`, `/lists/{id}/digest` (GET/POST send/bump), `/lists/{id}/uris`, `/lists/{id}/templates`                                                          | P1 (config) / P3 |
+| roster/members | `/lists/{id}/roster/{owner,moderator,member,nonmember}`, `/lists/{id}/member/{email}`, `POST /members` (subscribe, `pre_*`, `invitation`, `send_welcome_message`, `role`), `GET/PATCH/DELETE /members/{id}`, `/members/{id}/preferences`, `/members/{id}/all/preferences`, `POST /members/find`, mass ops | P1               |
+| held           | `GET /lists/{id}/held[?count&page]`, `GET /lists/{id}/held/{id}`, `POST /lists/{id}/held/{id}` (`action=accept                                                                                                                                                                                            | reject           |
+| requests       | `GET /lists/{id}/requests[?token_owner&request_type]`, `GET/POST /lists/{id}/requests/{token}` (`action=accept                                                                                                                                                                                            | reject           |
+| header-matches | `GET/POST /lists/{id}/header-matches`, `GET/PATCH/PUT/DELETE /lists/{id}/header-matches/{n}`, `DELETE` all                                                                                                                                                                                                | P2               |
+| bans           | `/bans`, `/lists/{id}/bans`, `DELETE …/{email}`                                                                                                                                                                                                                                                           | P3               |
+| users          | `GET/POST /users`, `GET/PATCH/DELETE /users/{id}`, `/users/{id}/addresses` (GET/POST), `/users/{id}/preferences`, `POST /users/{id}/login` (verify pwd — compat), `/users/{id}/all/preferences`                                                                                                           | P1               |
+| addresses      | `GET /addresses/{email}`, `POST …/verify`, `…/unverify`, `GET/POST /addresses/{email}/user`, `DELETE` unlink, `/addresses/{email}/memberships`, `/addresses/{email}/preferences`                                                                                                                          | P1               |
+| queues         | `GET /queues`, `GET /queues/{name}`, `POST /queues/{name}` (inject)                                                                                                                                                                                                                                       | P2               |
+| templates/uris | `/templates/{id}`, `/uris`, list/domain uris                                                                                                                                                                                                                                                              | P3               |
+| owners         | `GET /owners` (server owners)                                                                                                                                                                                                                                                                             | P1               |
+| plugins        | `GET /plugins` (trả rỗng/ list Rust plugins)                                                                                                                                                                                                                                                              | P6               |
+| archive (mới)  | `/api/v1/archive/...` (search, threads, mbox export)                                                                                                                                                                                                                                                      | P5               |
+| webhooks (mới) | `/api/v1/webhooks`                                                                                                                                                                                                                                                                                        | P6               |
+| Auth           | `/3.1/`: Basic (khi `compat_basic_auth`, CIDR allowlist) hoặc Bearer; `/api/v1/`: Bearer scoped token                                                                                                                                                                                                     | P1               |
+| OpenAPI        | `/openapi.json` + Swagger UI tại `/api/docs`                                                                                                                                                                                                                                                              | P1               |
 
 ### 4.11 Core — CLI (`mailman` → `listmngr`)
 
-| Mailman | listmngr | Phase |
-|---|---|---|
-| `start/stop/restart/status` | `listmngr serve` (+ systemd), `listmngr status` | P0 |
-| `conf` | `listmngr conf [--key]` | P0 |
-| `version` | `listmngr version` | P0 |
-| `info` | `listmngr info` | P0 |
-| `create`, `remove`, `lists` | `listmngr lists create/remove/ls` | P1 |
-| `addmembers`, `delmembers`, `members`, `syncmembers`, `findmember` | `listmngr members add/del/ls/sync/find` | P1 |
-| `digests` | `listmngr digests --send/--bump/--periodic` | P3 |
-| `inject`, `qfile`, `unshunt` | `listmngr queue inject/show/unshunt` | P2 |
-| `aliases` | `listmngr aliases regen` | P2 |
-| `notify` | `listmngr notify` (pending moderation reminders) | P3 |
-| `gatenews` | `listmngr nntp gate` | P6 |
-| `import21` | `listmngr import21 <list> config.pck` + `archive import mbox` | P6 |
-| `withlist`, `shell` | `listmngr shell` (REPL nhỏ với repo ops) hoặc `listmngr eval --list …` — giảm scope | P6 |
-| `reopen` | log rotation → không cần (tracing appender) | – |
-| mới | `listmngr migrate`, `listmngr user create/passwd/2fa`, `listmngr token create/revoke`, `listmngr dkim gen/rotate/dns`, `listmngr archive import/export/reindex`, `listmngr import3`, `listmngr doctor` (kiểm tra DNS/MTA/DB), `listmngr backup` | P0–P6 |
+| Mailman                                                            | listmngr                                                                                                                                                                                                                                        | Phase |
+|--------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------|
+| `start/stop/restart/status`                                        | `listmngr serve` (+ systemd), `listmngr status`                                                                                                                                                                                                 | P0    |
+| `conf`                                                             | `listmngr conf [--key]`                                                                                                                                                                                                                         | P0    |
+| `version`                                                          | `listmngr version`                                                                                                                                                                                                                              | P0    |
+| `info`                                                             | `listmngr info`                                                                                                                                                                                                                                 | P0    |
+| `create`, `remove`, `lists`                                        | `listmngr lists create/remove/ls`                                                                                                                                                                                                               | P1    |
+| `addmembers`, `delmembers`, `members`, `syncmembers`, `findmember` | `listmngr members add/del/ls/sync/find`                                                                                                                                                                                                         | P1    |
+| `digests`                                                          | `listmngr digests --send/--bump/--periodic`                                                                                                                                                                                                     | P3    |
+| `inject`, `qfile`, `unshunt`                                       | `listmngr queue inject/show/unshunt`                                                                                                                                                                                                            | P2    |
+| `aliases`                                                          | `listmngr aliases regen`                                                                                                                                                                                                                        | P2    |
+| `notify`                                                           | `listmngr notify` (pending moderation reminders)                                                                                                                                                                                                | P3    |
+| `gatenews`                                                         | `listmngr nntp gate`                                                                                                                                                                                                                            | P6    |
+| `import21`                                                         | `listmngr import21 <list> config.pck` + `archive import mbox`                                                                                                                                                                                   | P6    |
+| `withlist`, `shell`                                                | `listmngr shell` (REPL nhỏ với repo ops) hoặc `listmngr eval --list …` — giảm scope                                                                                                                                                             | P6    |
+| `reopen`                                                           | log rotation → không cần (tracing appender)                                                                                                                                                                                                     | –     |
+| mới                                                                | `listmngr migrate`, `listmngr user create/passwd/2fa`, `listmngr token create/revoke`, `listmngr dkim gen/rotate/dns`, `listmngr archive import/export/reindex`, `listmngr import3`, `listmngr doctor` (kiểm tra DNS/MTA/DB), `listmngr backup` | P0–P6 |
 
 ### 4.12 Postorius — Web UI (admin + member)
 
-| Màn hình | Nội dung | Phase |
-|---|---|---|
-| Accounts | signup + verify email, login, logout, password reset, change password, TOTP setup/recovery codes, passkeys (WebAuthn), OIDC (Google/GitHub/generic OIDC), sessions list/revoke, delete account | P4 |
-| Profile | addresses (add/verify/primary/remove), display name, locale, timezone, per-scope preferences (global / per address / per subscription), subscriptions list (đổi delivery, unsubscribe), API tokens | P4 |
-| List index | lọc advertised, theo domain, search, role badges | P4 |
-| List summary | description/info, subscribe form (anon → confirm), unsubscribe, link archive, member count, owners | P4 |
-| List create | chọn domain, style, owner, advertised, description | P4 |
-| List settings | 9 nhóm §4.1, form theo nhóm, validate inline, diff preview + audit | P4 |
-| Members | rosters (members/nonmembers/owners/moderators), search/paginate, per-member options (moderation_action, delivery, preferences), mass subscribe (textarea/file, pre_confirm/pre_approve/invite/welcome), mass removal, export CSV | P4 |
-| Held messages | list + preview (rendered + raw), reason, bulk accept/reject/discard, reject reason, forward, "moderate sender", "ban sender", "add header match" | P4 |
-| Subscription requests | pending confirm / pending approval, accept/reject/discard/defer + reason | P4 |
-| Unsubscription requests | | P4 |
-| Header filters | CRUD, order, regex test | P4 |
-| Templates | per list/domain/site, editor + preview + placeholders help, language | P4 |
-| Bans | list + global | P4 |
-| Delete list | confirm + archive policy option | P4 |
-| Domains | CRUD, owners, templates, DKIM keys + DNS record hiển thị | P4 |
-| Users admin | list/search users, edit roles, force verify, impersonate?, subscriptions | P4 |
-| System | versions, config view (masked), runner/queue status, MTA maps status, audit log viewer | P4 |
-| Bounce | member bounce info, re-enable, bounce log | P4 |
+| Màn hình                | Nội dung                                                                                                                                                                                                                         | Phase |
+|-------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------|
+| Accounts                | signup + verify email, login, logout, password reset, change password, TOTP setup/recovery codes, passkeys (WebAuthn), OIDC (Google/GitHub/generic OIDC), sessions list/revoke, delete account                                   | P4    |
+| Profile                 | addresses (add/verify/primary/remove), display name, locale, timezone, per-scope preferences (global / per address / per subscription), subscriptions list (đổi delivery, unsubscribe), API tokens                               | P4    |
+| List index              | lọc advertised, theo domain, search, role badges                                                                                                                                                                                 | P4    |
+| List summary            | description/info, subscribe form (anon → confirm), unsubscribe, link archive, member count, owners                                                                                                                               | P4    |
+| List create             | chọn domain, style, owner, advertised, description                                                                                                                                                                               | P4    |
+| List settings           | 9 nhóm §4.1, form theo nhóm, validate inline, diff preview + audit                                                                                                                                                               | P4    |
+| Members                 | rosters (members/nonmembers/owners/moderators), search/paginate, per-member options (moderation_action, delivery, preferences), mass subscribe (textarea/file, pre_confirm/pre_approve/invite/welcome), mass removal, export CSV | P4    |
+| Held messages           | list + preview (rendered + raw), reason, bulk accept/reject/discard, reject reason, forward, "moderate sender", "ban sender", "add header match"                                                                                 | P4    |
+| Subscription requests   | pending confirm / pending approval, accept/reject/discard/defer + reason                                                                                                                                                         | P4    |
+| Unsubscription requests |                                                                                                                                                                                                                                  | P4    |
+| Header filters          | CRUD, order, regex test                                                                                                                                                                                                          | P4    |
+| Templates               | per list/domain/site, editor + preview + placeholders help, language                                                                                                                                                             | P4    |
+| Bans                    | list + global                                                                                                                                                                                                                    | P4    |
+| Delete list             | confirm + archive policy option                                                                                                                                                                                                  | P4    |
+| Domains                 | CRUD, owners, templates, DKIM keys + DNS record hiển thị                                                                                                                                                                         | P4    |
+| Users admin             | list/search users, edit roles, force verify, impersonate?, subscriptions                                                                                                                                                         | P4    |
+| System                  | versions, config view (masked), runner/queue status, MTA maps status, audit log viewer                                                                                                                                           | P4    |
+| Bounce                  | member bounce info, re-enable, bounce log                                                                                                                                                                                        | P4    |
 
 ### 4.13 HyperKitty — Archive
 
-| Tính năng | Phase | Thay đổi |
-|---|---|---|
-| Archiver handler nội bộ (`to-archive` → queue → index), không cần HTTP plugin | P5 | |
-| Remote HyperKitty archiver (POST `/api/mailman/archive` key) cho ai vẫn muốn HyperKitty | P6 | |
-| Threading: `In-Reply-To` / `References` → parent; không có → thread mới; reattach thủ công | P5 | |
-| Message-ID-Hash URL `/archives/list/{list_id}/message/{hash}/`, `Archived-At` header | P5 | compat URL |
-| List overview: recent activity, active/popular threads, top posters, thread count, participants | P5 | |
-| Thread list: latest, theo năm/tháng, unread indicator (last view) | P5 | |
-| Thread page: messages, quote fold, attachments, votes ±1, tags, category, favorite, permalink, reply/new thread (web post → inject qua pipeline với address đã verify) | P5 | |
-| Sender pages, user profile (posts, votes, favorites, subscriptions) | P5 | |
-| Search: list + toàn site, facets (list, sender, date), highlight | P5 | tantivy |
-| Export mbox (thread/tháng/list, gzip) | P5 | |
-| Import mbox (`listmngr archive import`) + reindex | P5 | |
-| Private archive: auth + membership check; `never` = không lưu | P5 | |
-| Admin: delete message/thread, hide, reattach, category CRUD | P5 | |
-| Rendering: `text`/`markdown` mode, link auto, emoji, gravatar (opt-in, proxied), email obfuscate | P5 | |
-| RSS/Atom feed per list/thread | P5 | mới |
-| Attachments serve an toàn (nosniff, download disposition, riêng path) | P5 | |
+| Tính năng                                                                                                                                                              | Phase | Thay đổi   |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------|------------|
+| Archiver handler nội bộ (`to-archive` → queue → index), không cần HTTP plugin                                                                                          | P5    |            |
+| Remote HyperKitty archiver (POST `/api/mailman/archive` key) cho ai vẫn muốn HyperKitty                                                                                | P6    |            |
+| Threading: `In-Reply-To` / `References` → parent; không có → thread mới; reattach thủ công                                                                             | P5    |            |
+| Message-ID-Hash URL `/archives/list/{list_id}/message/{hash}/`, `Archived-At` header                                                                                   | P5    | compat URL |
+| List overview: recent activity, active/popular threads, top posters, thread count, participants                                                                        | P5    |            |
+| Thread list: latest, theo năm/tháng, unread indicator (last view)                                                                                                      | P5    |            |
+| Thread page: messages, quote fold, attachments, votes ±1, tags, category, favorite, permalink, reply/new thread (web post → inject qua pipeline với address đã verify) | P5    |            |
+| Sender pages, user profile (posts, votes, favorites, subscriptions)                                                                                                    | P5    |            |
+| Search: list + toàn site, facets (list, sender, date), highlight                                                                                                       | P5    | tantivy    |
+| Export mbox (thread/tháng/list, gzip)                                                                                                                                  | P5    |            |
+| Import mbox (`listmngr archive import`) + reindex                                                                                                                      | P5    |            |
+| Private archive: auth + membership check; `never` = không lưu                                                                                                          | P5    |            |
+| Admin: delete message/thread, hide, reattach, category CRUD                                                                                                            | P5    |            |
+| Rendering: `text`/`markdown` mode, link auto, emoji, gravatar (opt-in, proxied), email obfuscate                                                                       | P5    |            |
+| RSS/Atom feed per list/thread                                                                                                                                          | P5    | mới        |
+| Attachments serve an toàn (nosniff, download disposition, riêng path)                                                                                                  | P5    |            |
 
 ### 4.14 django-mailman3 / mailman-web
 
-| Tính năng | Phase |
-|---|---|
-| Account = Mailman user (không cần sync 2 chiều) | P4 |
-| Email addresses của account = addresses (verify chung) | P4 |
-| Timezone/locale profile | P4 |
-| Social login (allauth) → OIDC/OAuth2 providers | P4 |
-| `mailman-web` cli (migrate, collectstatic, qcluster) → `listmngr migrate`, không cần collectstatic/qcluster | P0 |
+| Tính năng                                                                                                   | Phase |
+|-------------------------------------------------------------------------------------------------------------|-------|
+| Account = Mailman user (không cần sync 2 chiều)                                                             | P4    |
+| Email addresses của account = addresses (verify chung)                                                      | P4    |
+| Timezone/locale profile                                                                                     | P4    |
+| Social login (allauth) → OIDC/OAuth2 providers                                                              | P4    |
+| `mailman-web` cli (migrate, collectstatic, qcluster) → `listmngr migrate`, không cần collectstatic/qcluster | P0    |
 
 ### 4.15 Cải tiến (không có trong Mailman)
 
@@ -698,60 +698,60 @@ Hai prefix: `/3.1/` (compat, JSON shape giống Mailman 3.3 để `mailmanclient
 
 ### 5.1 Auth & session
 
-| Hạng mục | Thiết kế |
-|---|---|
-| Password | Argon2id (m=64MiB, t=3, p=1), optional pepper (env), `zxcvbn` score ≥ 3, không giới hạn ký tự ngoài length ≤ 1024 |
-| Lockout | progressive delay theo (account, IP); không lộ user tồn tại |
-| 2FA | TOTP (RFC 6238, drift ±1), 10 recovery codes hashed; WebAuthn passkeys (resident/non-resident); bắt buộc cho server_owner (config) |
-| OIDC | Authorization Code + PKCE, `state`/`nonce`, email chỉ trust khi `email_verified=true`, không auto-link email chưa verify |
-| Session | `tower-sessions` DB store, cookie `__Host-lm_session`, `Secure; HttpOnly; SameSite=Lax`, rotate ID khi login/privilege change, idle 12h/absolute 7d, revoke all |
-| CSRF | double-submit token gắn session + kiểm `Sec-Fetch-Site`/`Origin`; htmx gửi `X-CSRF-Token` qua `hx-headers` global |
-| API token | `lm_<id>_<secret>`; DB lưu SHA-256(secret); scopes: `system:read`, `lists:read`, `lists:write`, `members:read`, `members:write`, `moderation`, `users:write`, `archive:write`, `admin`; giới hạn list/domain; expiry; last_used |
-| Basic compat | chỉ khi `compat_basic_auth=true` + IP trong allowlist; user/pass = token id/secret |
-| Email confirm tokens | 32 byte CSPRNG, base32 lower, lưu SHA-256, TTL `pending_request_life`, single-use, so sánh `subtle::ConstantTimeEq` |
-| `Approved:` posting key | Argon2 hash per list; strip header + dòng body; không dùng list password kiểu 2.1 |
+| Hạng mục                | Thiết kế                                                                                                                                                                                                                        |
+|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Password                | Argon2id (m=64MiB, t=3, p=1), optional pepper (env), `zxcvbn` score ≥ 3, không giới hạn ký tự ngoài length ≤ 1024                                                                                                               |
+| Lockout                 | progressive delay theo (account, IP); không lộ user tồn tại                                                                                                                                                                     |
+| 2FA                     | TOTP (RFC 6238, drift ±1), 10 recovery codes hashed; WebAuthn passkeys (resident/non-resident); bắt buộc cho server_owner (config)                                                                                              |
+| OIDC                    | Authorization Code + PKCE, `state`/`nonce`, email chỉ trust khi `email_verified=true`, không auto-link email chưa verify                                                                                                        |
+| Session                 | `tower-sessions` DB store, cookie `__Host-lm_session`, `Secure; HttpOnly; SameSite=Lax`, rotate ID khi login/privilege change, idle 12h/absolute 7d, revoke all                                                                 |
+| CSRF                    | double-submit token gắn session + kiểm `Sec-Fetch-Site`/`Origin`; htmx gửi `X-CSRF-Token` qua `hx-headers` global                                                                                                               |
+| API token               | `lm_<id>_<secret>`; DB lưu SHA-256(secret); scopes: `system:read`, `lists:read`, `lists:write`, `members:read`, `members:write`, `moderation`, `users:write`, `archive:write`, `admin`; giới hạn list/domain; expiry; last_used |
+| Basic compat            | chỉ khi `compat_basic_auth=true` + IP trong allowlist; user/pass = token id/secret                                                                                                                                              |
+| Email confirm tokens    | 32 byte CSPRNG, base32 lower, lưu SHA-256, TTL `pending_request_life`, single-use, so sánh `subtle::ConstantTimeEq`                                                                                                             |
+| `Approved:` posting key | Argon2 hash per list; strip header + dòng body; không dùng list password kiểu 2.1                                                                                                                                               |
 
 ### 5.2 Email
 
-| Hạng mục | Thiết kế |
-|---|---|
-| Inbound verify | SPF/DKIM/DMARC qua `mail-auth` → `Authentication-Results` (trusted authserv-id), lưu kết quả vào msgdata; rule `validate-authenticity` |
-| DMARC mitigation | tra `_dmarc.<from-domain>` và org domain (PSL), `p=reject/quarantine` (+ `sp=`, `pct=`) → munge_from / wrap / reject / discard |
-| Outbound DKIM | sign `From/To/Subject/Date/List-*` + body; key per domain, RSA-2048 + Ed25519 (dual), rotate, DNS record UI |
-| ARC | seal khi list sửa nội dung (subject prefix/footer/munge) → giữ được deliverability |
-| VERP | luôn có sender riêng; bounce token HMAC để chống giả mạo bounce |
-| Loop/abuse | `loop` rule, `X-Loop`, max hops, rate-limit per sender & per list (posts/hour, config) |
-| Size/DoS | reject tại LMTP nếu > `max_message_size` site-wide; MIME depth ≤ 20, parts ≤ 1000, header count ≤ 500; streaming write to store |
-| Attachments | content-type sniff, block executable ext theo list config, serve `Content-Disposition: attachment` + `nosniff` |
-| Address parse | strict RFC 5322 + IDNA, reject control chars, normalize case cho match nhưng giữ `original_email` |
+| Hạng mục         | Thiết kế                                                                                                                               |
+|------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| Inbound verify   | SPF/DKIM/DMARC qua `mail-auth` → `Authentication-Results` (trusted authserv-id), lưu kết quả vào msgdata; rule `validate-authenticity` |
+| DMARC mitigation | tra `_dmarc.<from-domain>` và org domain (PSL), `p=reject/quarantine` (+ `sp=`, `pct=`) → munge_from / wrap / reject / discard         |
+| Outbound DKIM    | sign `From/To/Subject/Date/List-*` + body; key per domain, RSA-2048 + Ed25519 (dual), rotate, DNS record UI                            |
+| ARC              | seal khi list sửa nội dung (subject prefix/footer/munge) → giữ được deliverability                                                     |
+| VERP             | luôn có sender riêng; bounce token HMAC để chống giả mạo bounce                                                                        |
+| Loop/abuse       | `loop` rule, `X-Loop`, max hops, rate-limit per sender & per list (posts/hour, config)                                                 |
+| Size/DoS         | reject tại LMTP nếu > `max_message_size` site-wide; MIME depth ≤ 20, parts ≤ 1000, header count ≤ 500; streaming write to store        |
+| Attachments      | content-type sniff, block executable ext theo list config, serve `Content-Disposition: attachment` + `nosniff`                         |
+| Address parse    | strict RFC 5322 + IDNA, reject control chars, normalize case cho match nhưng giữ `original_email`                                      |
 
 ### 5.3 Web
 
-| Hạng mục | Thiết kế |
-|---|---|
-| CSP | `default-src 'self'; script-src 'self' 'nonce-…'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'`; htmx `allowEval=false`, không `hx-on` |
-| Headers | HSTS (khi TLS), `X-Content-Type-Options`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` |
-| HTML sanitize | `ammonia` allowlist cho archive/markdown; không remote image (proxy opt-in); link `rel="noopener nofollow ugc"` |
-| Rate limit | `governor` keyed IP/account: login, signup, reset, subscribe, search, API |
-| Proxy | `trusted_proxies` CIDR mới tin `X-Forwarded-For` |
-| Privacy | `hide_address`, roster visibility, archive obfuscate `user at domain`, `anonymous_list`, robots noindex cho private |
-| Upload | mass subscribe file ≤ 5MB, parse streaming |
-| Errors | không lộ stack; error id tương quan log |
+| Hạng mục      | Thiết kế                                                                                                                                                                     |
+|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| CSP           | `default-src 'self'; script-src 'self' 'nonce-…'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'`; htmx `allowEval=false`, không `hx-on` |
+| Headers       | HSTS (khi TLS), `X-Content-Type-Options`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`                                                           |
+| HTML sanitize | `ammonia` allowlist cho archive/markdown; không remote image (proxy opt-in); link `rel="noopener nofollow ugc"`                                                              |
+| Rate limit    | `governor` keyed IP/account: login, signup, reset, subscribe, search, API                                                                                                    |
+| Proxy         | `trusted_proxies` CIDR mới tin `X-Forwarded-For`                                                                                                                             |
+| Privacy       | `hide_address`, roster visibility, archive obfuscate `user at domain`, `anonymous_list`, robots noindex cho private                                                          |
+| Upload        | mass subscribe file ≤ 5MB, parse streaming                                                                                                                                   |
+| Errors        | không lộ stack; error id tương quan log                                                                                                                                      |
 
 ### 5.4 Data & ops
 
-| Hạng mục | Thiết kế |
-|---|---|
-| Secrets | `SecretString` + `zeroize`; không Debug/log; `*_file` config; DKIM private key + TOTP secret mã hoá at rest bằng `security.master_key` (XChaCha20-Poly1305) |
-| Audit | mọi thay đổi config/roles/moderation/user data → `audit_log` (actor, ip, diff); UI xem; export |
-| Backup | `listmngr backup` (pg_dump + message store) + restore doc |
-| Supply chain | `Cargo.lock` commit, `cargo deny` (advisories, licenses, dup), `cargo audit` CI, SBOM (CycloneDX), cosign sign image, Dependabot |
-| Build | `unsafe_code = forbid`, clippy `pedantic` + `nursery` (warn), `-D warnings` CI, `overflow-checks` release |
-| Container | static musl hoặc distroless, non-root uid 1000, read-only FS, `cap_drop ALL`, healthcheck |
-| systemd | `ProtectSystem=strict`, `PrivateTmp`, `NoNewPrivileges`, `ProtectHome`, `SystemCallFilter` |
-| TLS | ưu tiên reverse proxy; option `web.tls` rustls + ACME (phase 6) |
-| Threat model | `docs/SECURITY.md`: assets, actors (anon, member, moderator, owner, server owner, MTA, attacker qua mail), STRIDE table, mitigations map |
-| Disclosure | `SECURITY.md` + `security.txt` |
+| Hạng mục     | Thiết kế                                                                                                                                                    |
+|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Secrets      | `SecretString` + `zeroize`; không Debug/log; `*_file` config; DKIM private key + TOTP secret mã hoá at rest bằng `security.master_key` (XChaCha20-Poly1305) |
+| Audit        | mọi thay đổi config/roles/moderation/user data → `audit_log` (actor, ip, diff); UI xem; export                                                              |
+| Backup       | `listmngr backup` (pg_dump + message store) + restore doc                                                                                                   |
+| Supply chain | `Cargo.lock` commit, `cargo deny` (advisories, licenses, dup), `cargo audit` CI, SBOM (CycloneDX), cosign sign image, Dependabot                            |
+| Build        | `unsafe_code = forbid`, clippy `pedantic` + `nursery` (warn), `-D warnings` CI, `overflow-checks` release                                                   |
+| Container    | static musl hoặc distroless, non-root uid 1000, read-only FS, `cap_drop ALL`, healthcheck                                                                   |
+| systemd      | `ProtectSystem=strict`, `PrivateTmp`, `NoNewPrivileges`, `ProtectHome`, `SystemCallFilter`                                                                  |
+| TLS          | ưu tiên reverse proxy; option `web.tls` rustls + ACME (phase 6)                                                                                             |
+| Threat model | `docs/SECURITY.md`: assets, actors (anon, member, moderator, owner, server owner, MTA, attacker qua mail), STRIDE table, mitigations map                    |
+| Disclosure   | `SECURITY.md` + `security.txt`                                                                                                                              |
 
 ## 6. UI/UX
 
@@ -858,7 +858,7 @@ Checkbox tick theo row ledger nêu bên cạnh; deviation của từng row vẫn
 - [x] Metrics: queue depth, deliveries, latency — P2-METRICS
 - [x] REST `/queues` — P2-QUEUES-REST
 - [x] **P2-HELD-FORWARD** (S): `forward=True&forward_to=…` trên `POST /lists/{id}/held/{id}` như Mailman/Postorius — bọc bản gốc `message/rfc822`, gửi từ `-bounces`, kết hợp mọi action kể cả `defer`; `moderation_log.forward_to` + audit.
-- [ ] **P2-E2E-ACCEPTANCE** (M): hoàn tất ma trận acceptance dưới đây trong `crates/cli/tests/mailpath_e2e.rs` (binary thật + SMTP sink). Đã có: member delivery, nonmember hold, accept-once, restart giữ intake. Còn thiếu: headers (List-*, subject prefix, footer) + DKIM verify với key test; ban → reject DSN; max-size → hold; `personalize=full` → N msg VERP đúng; kill -9 **giữa pipeline/out** → job không mất, không double-deliver.
+- [x] **P2-E2E-ACCEPTANCE** (M): ma trận acceptance dưới đây trong `crates/cli/tests/mailpath_e2e.rs` (binary thật + SMTP sink): member delivery, nonmember hold, accept-once, headers (List-*, subject prefix, footer) + DKIM `dkim=pass` với key test, ban → notice từ chối, max-size → hold, `personalize=full` + `verp_personalized_deliveries` → N msg VERP + one-click, inject khi server tắt → giao đúng 1 lần, SIGKILL giữa out (relay giữ DATA) → không mất, không double-deliver. Kill giữa stage `in` không lập lịch được trong harness; lease expiry ở đó do contract repository bao phủ.
 - Acceptance: e2e test harness = pg + smtp sink (Rust mock hoặc `mailhog`) → gửi qua LMTP → assert N member nhận, headers đúng (List-*, subject prefix, footer, DKIM verify pass với key test), held → accept → delivered; nonmember → hold; ban → reject DSN; max-size → hold; `personalize=full` → N msg riêng với VERP đúng; crash giữa pipeline → job không mất (kill -9 test).
 
 ### Phase 3 — Subscription, commands, bounces, digests (L)
@@ -897,22 +897,22 @@ template engine, i18n UI, admin đầy đủ.
 
 Work packages, theo thứ tự; mỗi ID một nhánh:
 
-| ID | Effort | Phạm vi | Acceptance riêng |
-|---|---|---|---|
-| P4-SHELL | M | askama layout + design tokens + dark mode; CSP nonce, security headers, rate limit, `trusted_proxies`; htmx vendored (hash pinned, không CDN); i18n UI bằng Fluent (`en`, `vi`, cùng catalog `listmngr_i18n`); a11y baseline (landmarks, focus, skip link); chuyển 20 route hiện có sang template | axe không critical; CSP không violation; `scripts/test-webui-browser.py` PASS không đổi hành vi |
-| P4-ACCOUNTS | M | signup + verify email, password reset qua token email, change password, sessions list/revoke, delete account (erase gốc cho P4-GDPR); addresses add/verify/primary/remove; profile (display name, locale, timezone); API tokens của user | e2e signup → verify → login → reset; mỗi write có audit |
-| P4-TOTP | S | TOTP setup/verify + recovery codes; tuỳ chọn bắt buộc cho server owner | e2e enrol → login 2 bước → recovery code |
-| P4-WEBAUTHN | M | passkeys (webauthn-rs), đăng ký/xoá key, đăng nhập không mật khẩu | Playwright virtual authenticator |
-| P4-OIDC | M | OIDC generic + presets Google/GitHub; link/unlink; JIT account với email đã verify | mock OIDC provider trong test |
-| P4-LIST-SETTINGS | L | 9 nhóm §4.1 theo form, validate inline phía server, diff preview + audit; header filters CRUD/thứ tự/regex test; bans list + site; templates editor + preview + placeholders help + language; digest; archivers; delete list (confirm + archive policy) | mỗi nhóm round-trip UI = REST cùng handler |
-| P4-MEMBERS | L | rosters 4 role, search/paginate (htmx partial + fallback), per-member options (moderation_action, delivery, preferences), mass subscribe (textarea/file, pre_*/invite/welcome), mass removal, export CSV, bounce info + re-enable | no-JS fallback test cho mọi partial |
-| P4-HELD-QUEUE | M | held list + preview (rendered + raw), bulk accept/reject/discard/defer, reject reason, forward (cần P2-HELD-FORWARD), "moderate sender", "ban sender", "add header match", keyboard shortcuts; subscription/unsubscription requests | e2e post → held → moderate |
-| P4-LIST-CREATE-INDEX | S | list create (domain, style, owner, advertised, description); list index filters (advertised/domain/search/role badges); list summary + subscribe (anon → confirm) | e2e create → subscribe |
-| P4-DOMAINS-USERS | M | domains CRUD + owners + templates + DKIM keys/DNS record; users admin (search, roles, force verify, subscriptions) | |
-| P4-SYSTEM | S | versions, config masked, runner/queue status (từ `/queues` + metrics), MTA maps status, audit log viewer | |
-| P4-MODERATION-CROSS | S | `/moderation` tổng hợp cross-list (held + requests) trên P4-HELD-QUEUE | |
-| P4-GDPR | S | export (JSON) / erase user data qua UI + CLI | |
-| P4-ACCEPTANCE | M | Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe, CSP, Lighthouse a11y ≥ 95, mobile viewport, gate trong CI | |
+| ID                   | Effort | Phạm vi                                                                                                                                                                                                                                                                                           | Acceptance riêng                                                                                |
+|----------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| P4-SHELL             | M      | askama layout + design tokens + dark mode; CSP nonce, security headers, rate limit, `trusted_proxies`; htmx vendored (hash pinned, không CDN); i18n UI bằng Fluent (`en`, `vi`, cùng catalog `listmngr_i18n`); a11y baseline (landmarks, focus, skip link); chuyển 20 route hiện có sang template | axe không critical; CSP không violation; `scripts/test-webui-browser.py` PASS không đổi hành vi |
+| P4-ACCOUNTS          | M      | signup + verify email, password reset qua token email, change password, sessions list/revoke, delete account (erase gốc cho P4-GDPR); addresses add/verify/primary/remove; profile (display name, locale, timezone); API tokens của user                                                          | e2e signup → verify → login → reset; mỗi write có audit                                         |
+| P4-TOTP              | S      | TOTP setup/verify + recovery codes; tuỳ chọn bắt buộc cho server owner                                                                                                                                                                                                                            | e2e enrol → login 2 bước → recovery code                                                        |
+| P4-WEBAUTHN          | M      | passkeys (webauthn-rs), đăng ký/xoá key, đăng nhập không mật khẩu                                                                                                                                                                                                                                 | Playwright virtual authenticator                                                                |
+| P4-OIDC              | M      | OIDC generic + presets Google/GitHub; link/unlink; JIT account với email đã verify                                                                                                                                                                                                                | mock OIDC provider trong test                                                                   |
+| P4-LIST-SETTINGS     | L      | 9 nhóm §4.1 theo form, validate inline phía server, diff preview + audit; header filters CRUD/thứ tự/regex test; bans list + site; templates editor + preview + placeholders help + language; digest; archivers; delete list (confirm + archive policy)                                           | mỗi nhóm round-trip UI = REST cùng handler                                                      |
+| P4-MEMBERS           | L      | rosters 4 role, search/paginate (htmx partial + fallback), per-member options (moderation_action, delivery, preferences), mass subscribe (textarea/file, pre_*/invite/welcome), mass removal, export CSV, bounce info + re-enable                                                                 | no-JS fallback test cho mọi partial                                                             |
+| P4-HELD-QUEUE        | M      | held list + preview (rendered + raw), bulk accept/reject/discard/defer, reject reason, forward (cần P2-HELD-FORWARD), "moderate sender", "ban sender", "add header match", keyboard shortcuts; subscription/unsubscription requests                                                               | e2e post → held → moderate                                                                      |
+| P4-LIST-CREATE-INDEX | S      | list create (domain, style, owner, advertised, description); list index filters (advertised/domain/search/role badges); list summary + subscribe (anon → confirm)                                                                                                                                 | e2e create → subscribe                                                                          |
+| P4-DOMAINS-USERS     | M      | domains CRUD + owners + templates + DKIM keys/DNS record; users admin (search, roles, force verify, subscriptions)                                                                                                                                                                                |                                                                                                 |
+| P4-SYSTEM            | S      | versions, config masked, runner/queue status (từ `/queues` + metrics), MTA maps status, audit log viewer                                                                                                                                                                                          |                                                                                                 |
+| P4-MODERATION-CROSS  | S      | `/moderation` tổng hợp cross-list (held + requests) trên P4-HELD-QUEUE                                                                                                                                                                                                                            |                                                                                                 |
+| P4-GDPR              | S      | export (JSON) / erase user data qua UI + CLI                                                                                                                                                                                                                                                      |                                                                                                 |
+| P4-ACCEPTANCE        | M      | Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe, CSP, Lighthouse a11y ≥ 95, mobile viewport, gate trong CI                                                                                                                                                    |                                                                                                 |
 
 - Acceptance: Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe a11y không lỗi critical, CSP không violation, Lighthouse a11y ≥ 95, mobile viewport pass.
 
@@ -924,16 +924,16 @@ thích HyperKitty, `Archived-At`, archive đọc SSR cơ bản
 P2-DSN-INSPECTION. Chưa có index/search, UI đầy đủ, votes/tags, import mbox,
 remote archivers. UI theo cùng kiến trúc Phase 4 (askama + htmx).
 
-| ID | Effort | Phạm vi | Acceptance riêng |
-|---|---|---|---|
-| P5-RENDER | M | sender + threading hoàn chỉnh (In-Reply-To/References, reattach thủ công), attachments store + serve an toàn (nosniff, download disposition, path riêng), text/markdown render + sanitize, quote folding, email obfuscate, gravatar opt-in proxied | snapshot threading vs HyperKitty import cùng mbox |
-| P5-SEARCH | M | tantivy index (list, subject, body, sender, date, thread; facets), commit batching, `listmngr archive reindex` | search p95 < 100ms trên 100k msg |
-| P5-UI | L | overview (recent activity, active/popular threads, top posters), thread lists (latest, năm/tháng, unread/last-view), thread page, sender/user pages, search UI với highlight, RSS/Atom | axe/CSP như Phase 4 |
-| P5-INTERACTIONS | S | votes ±1, tags, categories, favorites, last-view | |
-| P5-WEB-POST | M | reply/new thread → inject pipeline (rule kiểu `approved` cho web user đã verify) | e2e web post → delivered + archived |
-| P5-MBOX | M | `listmngr archive import` (100k msg < 10 phút máy dev) + export mbox (thread/tháng/list, gzip); `archive_policy=never`; private archive auth + membership check | |
-| P5-ADMIN | S | delete/hide message/thread, reattach, category CRUD | |
-| P5-REMOTE-ARCHIVERS | S | `mail-archive.com`, `mhonarc` (exec), `prototype` (maildir) cho parity `archivers` | |
+| ID                  | Effort | Phạm vi                                                                                                                                                                                                                                            | Acceptance riêng                                  |
+|---------------------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|
+| P5-RENDER           | M      | sender + threading hoàn chỉnh (In-Reply-To/References, reattach thủ công), attachments store + serve an toàn (nosniff, download disposition, path riêng), text/markdown render + sanitize, quote folding, email obfuscate, gravatar opt-in proxied | snapshot threading vs HyperKitty import cùng mbox |
+| P5-SEARCH           | M      | tantivy index (list, subject, body, sender, date, thread; facets), commit batching, `listmngr archive reindex`                                                                                                                                     | search p95 < 100ms trên 100k msg                  |
+| P5-UI               | L      | overview (recent activity, active/popular threads, top posters), thread lists (latest, năm/tháng, unread/last-view), thread page, sender/user pages, search UI với highlight, RSS/Atom                                                             | axe/CSP như Phase 4                               |
+| P5-INTERACTIONS     | S      | votes ±1, tags, categories, favorites, last-view                                                                                                                                                                                                   |                                                   |
+| P5-WEB-POST         | M      | reply/new thread → inject pipeline (rule kiểu `approved` cho web user đã verify)                                                                                                                                                                   | e2e web post → delivered + archived               |
+| P5-MBOX             | M      | `listmngr archive import` (100k msg < 10 phút máy dev) + export mbox (thread/tháng/list, gzip); `archive_policy=never`; private archive auth + membership check                                                                                    |                                                   |
+| P5-ADMIN            | S      | delete/hide message/thread, reattach, category CRUD                                                                                                                                                                                                |                                                   |
+| P5-REMOTE-ARCHIVERS | S      | `mail-archive.com`, `mhonarc` (exec), `prototype` (maildir) cho parity `archivers`                                                                                                                                                                 |                                                   |
 
 - Acceptance: import 100k msg mbox (Mailman list public) < 10 phút máy dev, search p95 < 100ms, URL hash trùng HyperKitty với cùng Message-ID, threading snapshot so với HyperKitty import cùng mbox.
 
@@ -960,53 +960,53 @@ remote archivers. UI theo cùng kiến trúc Phase 4 (askama + htmx).
 
 ## 8. Testing strategy
 
-| Loại | Công cụ | Phạm vi |
-|---|---|---|
-| Unit | `cargo test` | rules, handlers (message in → out), VERP, hash, templates, preferences layering, bounce detectors (fixture corpus), digest builders (snapshot `insta`) |
-| Property | `proptest` | VERP encode/decode, address normalize, token, chunking |
-| Integration | `testcontainers` (pg), sqlite in-memory | repos, REST (axum `oneshot`), migrations up/down, queue claim concurrency (N workers không double-claim) |
-| E2E mail | harness: pg + LMTP client + SMTP sink (Rust) | flow §7 P2/P3 |
-| E2E web | Playwright (Node dev-only, CI) | flows §7 P4/P5 |
-| Compat | Python `mailmanclient` test script trong CI (docker) | REST `/3.1/` shape |
-| Fuzz | `cargo-fuzz` | parsers |
-| Security | `cargo audit/deny`, ZAP baseline scan CI (P7), CSP report endpoint | |
-| Perf | criterion (rules/pipeline), k6 (HTTP), custom (LMTP→SMTP throughput) | P7 |
-| Test data | corpus mbox public (Mailman/Python lists), flufl.bounce fixtures, DMARC DNS mock (hickory test resolver) | |
+| Loại        | Công cụ                                                                                                  | Phạm vi                                                                                                                                                |
+|-------------|----------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Unit        | `cargo test`                                                                                             | rules, handlers (message in → out), VERP, hash, templates, preferences layering, bounce detectors (fixture corpus), digest builders (snapshot `insta`) |
+| Property    | `proptest`                                                                                               | VERP encode/decode, address normalize, token, chunking                                                                                                 |
+| Integration | `testcontainers` (pg), sqlite in-memory                                                                  | repos, REST (axum `oneshot`), migrations up/down, queue claim concurrency (N workers không double-claim)                                               |
+| E2E mail    | harness: pg + LMTP client + SMTP sink (Rust)                                                             | flow §7 P2/P3                                                                                                                                          |
+| E2E web     | Playwright (Node dev-only, CI)                                                                           | flows §7 P4/P5                                                                                                                                         |
+| Compat      | Python `mailmanclient` test script trong CI (docker)                                                     | REST `/3.1/` shape                                                                                                                                     |
+| Fuzz        | `cargo-fuzz`                                                                                             | parsers                                                                                                                                                |
+| Security    | `cargo audit/deny`, ZAP baseline scan CI (P7), CSP report endpoint                                       |                                                                                                                                                        |
+| Perf        | criterion (rules/pipeline), k6 (HTTP), custom (LMTP→SMTP throughput)                                     | P7                                                                                                                                                     |
+| Test data   | corpus mbox public (Mailman/Python lists), flufl.bounce fixtures, DMARC DNS mock (hickory test resolver) |                                                                                                                                                        |
 
 ## 9. Migration từ Mailman
 
-| Nguồn | Cách | Ghi chú |
-|---|---|---|
-| Mailman 2.1 | `listmngr import21 <list_id> /path/config.pck` + `archive import --mbox` | map settings 2.1 → 3 giống Mailman `import21` (bảng mapping trong `docs/MIGRATION.md`); password 2.1 (sha/plain) → bắt reset |
-| Mailman 3 Core | `listmngr import3 --db postgres://…` (hoặc `--rest URL`) | copy domains/lists/settings/members/preferences/templates/bans/header_matches/held/pendings; user passwords (passlib pbkdf2/sha512_crypt) → verify legacy on login rồi rehash Argon2 |
-| HyperKitty | `listmngr import3 --hyperkitty-db …` | threads/votes/tags/categories/favorites; hoặc import mbox + rebuild (mất votes/tags) |
-| Postorius/allauth | user emails/social accounts → `users`/`addresses`/`user_oidc` | |
-| URL compat | `/archives/list/{list}/message/{hash}/` giữ nguyên; redirect map cho `/hyperkitty/…` và `/postorius/…` → path mới | |
-| MTA | thay transport LMTP port; alias/transport regen | |
-| Rollback | song song: listmngr đọc DB riêng; giữ Mailman standby; cutover đổi transport map | |
+| Nguồn             | Cách                                                                                                              | Ghi chú                                                                                                                                                                              |
+|-------------------|-------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Mailman 2.1       | `listmngr import21 <list_id> /path/config.pck` + `archive import --mbox`                                          | map settings 2.1 → 3 giống Mailman `import21` (bảng mapping trong `docs/MIGRATION.md`); password 2.1 (sha/plain) → bắt reset                                                         |
+| Mailman 3 Core    | `listmngr import3 --db postgres://…` (hoặc `--rest URL`)                                                          | copy domains/lists/settings/members/preferences/templates/bans/header_matches/held/pendings; user passwords (passlib pbkdf2/sha512_crypt) → verify legacy on login rồi rehash Argon2 |
+| HyperKitty        | `listmngr import3 --hyperkitty-db …`                                                                              | threads/votes/tags/categories/favorites; hoặc import mbox + rebuild (mất votes/tags)                                                                                                 |
+| Postorius/allauth | user emails/social accounts → `users`/`addresses`/`user_oidc`                                                     |                                                                                                                                                                                      |
+| URL compat        | `/archives/list/{list}/message/{hash}/` giữ nguyên; redirect map cho `/hyperkitty/…` và `/postorius/…` → path mới |                                                                                                                                                                                      |
+| MTA               | thay transport LMTP port; alias/transport regen                                                                   |                                                                                                                                                                                      |
+| Rollback          | song song: listmngr đọc DB riêng; giữ Mailman standby; cutover đổi transport map                                  |                                                                                                                                                                                      |
 
 ## 10. Quyết định cần chốt
 
-| # | Câu hỏi | Khuyến nghị |
-|---|---|---|
-| 1 | License | **Đã chốt: AGPL-3.0-or-later**; xem ADR-0003 và `LICENSE`. |
-| 2 | DB | Postgres-first, SQLite hỗ trợ đầy đủ nhưng single-node. Query viết portable, dùng `sqlx::query` runtime + test cả 2 backend (không dùng macro compile-time để tránh 2 bộ query). |
-| 3 | Frontend | SSR askama + htmx (khuyến nghị) vs Leptos/Dioxus. SSR: đơn giản, CSP strict, không WASM bundle, dễ i18n. |
-| 4 | Tên | crate prefix `listmngr-*`, binary `listmngr`, env `LISTMNGR__*`, header `X-Listmngr-*`. Có cần alias `X-Mailman-*` cho compat? (khuyến nghị: emit cả 2 trong P2, config tắt). |
-| 5 | REST compat depth | `/3.1/` đủ để `mailmanclient` chạy; không mô phỏng `/3.0/`. |
-| 6 | Deploy target | Docker + systemd binary. Helm ở P7. |
-| 7 | Templates i18n | import `.po` Mailman (GPL) — cần xác nhận license cho phép nếu chọn non-GPL. Nếu không: chỉ `en`/`vi` ban đầu + cộng đồng dịch. |
-| 8 | Built-in inbound SMTP | experimental P6, không phải mục tiêu chính. |
-| 9 | Python `mailmanclient` compat test trong CI | có (docker python), chi phí CI thấp, đảm bảo wire-compat. |
+| # | Câu hỏi                                     | Khuyến nghị                                                                                                                                                                      |
+|---|---------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | License                                     | **Đã chốt: AGPL-3.0-or-later**; xem ADR-0003 và `LICENSE`.                                                                                                                       |
+| 2 | DB                                          | Postgres-first, SQLite hỗ trợ đầy đủ nhưng single-node. Query viết portable, dùng `sqlx::query` runtime + test cả 2 backend (không dùng macro compile-time để tránh 2 bộ query). |
+| 3 | Frontend                                    | SSR askama + htmx (khuyến nghị) vs Leptos/Dioxus. SSR: đơn giản, CSP strict, không WASM bundle, dễ i18n.                                                                         |
+| 4 | Tên                                         | crate prefix `listmngr-*`, binary `listmngr`, env `LISTMNGR__*`, header `X-Listmngr-*`. Có cần alias `X-Mailman-*` cho compat? (khuyến nghị: emit cả 2 trong P2, config tắt).    |
+| 5 | REST compat depth                           | `/3.1/` đủ để `mailmanclient` chạy; không mô phỏng `/3.0/`.                                                                                                                      |
+| 6 | Deploy target                               | Docker + systemd binary. Helm ở P7.                                                                                                                                              |
+| 7 | Templates i18n                              | import `.po` Mailman (GPL) — cần xác nhận license cho phép nếu chọn non-GPL. Nếu không: chỉ `en`/`vi` ban đầu + cộng đồng dịch.                                                  |
+| 8 | Built-in inbound SMTP                       | experimental P6, không phải mục tiêu chính.                                                                                                                                      |
+| 9 | Python `mailmanclient` compat test trong CI | có (docker python), chi phí CI thấp, đảm bảo wire-compat.                                                                                                                        |
 
 ## 11. Rủi ro
 
-| Rủi ro | Giảm thiểu |
-|---|---|
-| Parity list quá dài, dễ sót | `FEATURE_PARITY.md` là checklist sống, mỗi PR tick; đối chiếu bằng cách chạy `mailmanclient` test suite. |
-| Bounce detection heuristics khó port | dùng fixture corpus flufl.bounce làm oracle; ưu tiên DSN chuẩn, heuristics sau. |
-| Deliverability (DKIM/ARC/DMARC sai) | test với key thật + `mail-tester`, `dkimvalidator`; e2e verify bằng `mail-auth`. |
-| SQLite + Postgres divergence | test matrix cả 2; hạn chế SQL đặc thù, wrap ở repo layer. |
-| `sqlx 0.9` / `askama 0.16` API mới | pin version, ADR ghi lý do; upgrade theo phase. |
-| Scope UI lớn | dùng component partial dùng lại; ưu tiên moderation & settings trước, "nice-to-have" (command palette) sau. |
-| Import 2.1 pickle | `serde-pickle` + fixture `config.pck` thật; fallback: script Python export JSON. |
+| Rủi ro                               | Giảm thiểu                                                                                                  |
+|--------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| Parity list quá dài, dễ sót          | `FEATURE_PARITY.md` là checklist sống, mỗi PR tick; đối chiếu bằng cách chạy `mailmanclient` test suite.    |
+| Bounce detection heuristics khó port | dùng fixture corpus flufl.bounce làm oracle; ưu tiên DSN chuẩn, heuristics sau.                             |
+| Deliverability (DKIM/ARC/DMARC sai)  | test với key thật + `mail-tester`, `dkimvalidator`; e2e verify bằng `mail-auth`.                            |
+| SQLite + Postgres divergence         | test matrix cả 2; hạn chế SQL đặc thù, wrap ở repo layer.                                                   |
+| `sqlx 0.9` / `askama 0.16` API mới   | pin version, ADR ghi lý do; upgrade theo phase.                                                             |
+| Scope UI lớn                         | dùng component partial dùng lại; ưu tiên moderation & settings trước, "nice-to-have" (command palette) sau. |
+| Import 2.1 pickle                    | `serde-pickle` + fixture `config.pck` thật; fallback: script Python export JSON.                            |
