@@ -1,7 +1,9 @@
-//! List-scoped ban resources for posting/public join; global administration is not exposed.
+//! Ban resources for posting/public join: per list, and Mailman's site-wide
+//! `/bans` for unbound tokens.
 use crate::{
-    ApiResult, AppState, BanPageResponse, ErrorResponse, JsonOrForm, PageQuery, audit_context,
-    authorize_list, page_response, page_window, parse_list_path, peer,
+    ApiError, ApiResult, AppState, BanPageResponse, ErrorResponse, JsonOrForm, PageQuery,
+    audit_context, authenticate_for_authorization, authorize_list, finish_authorization,
+    is_unbound, page_response, page_window, parse_list_path, peer,
 };
 use axum::{
     Json, Router,
@@ -31,11 +33,21 @@ pub struct BanResponse {
 /// The list-scoped ban routes, mounted under both API prefixes.
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/bans", routing::get(site_list).post(site_create))
+        .route("/bans/{email}", routing::get(site_get).delete(site_delete))
         .route("/lists/{id}/bans", routing::get(list).post(create))
         .route("/lists/{id}/bans/{email}", routing::get(get).delete(delete))
 }
 
 fn value(state: &AppState, id: &listmngr_core::ListId, email: &str) -> Value {
+    value_at(state, &format!("lists/{id}/bans"), email)
+}
+
+fn site_value(state: &AppState, email: &str) -> Value {
+    value_at(state, "bans", email)
+}
+
+fn value_at(state: &AppState, collection: &str, email: &str) -> Value {
     let query = serde_urlencoded::to_string([("email", email)]).expect("string query");
     let encoded = query
         .strip_prefix("email=")
@@ -47,8 +59,101 @@ fn value(state: &AppState, id: &listmngr_core::ListId, email: &str) -> Value {
     };
     json!(BanResponse {
         email: email.into(),
-        self_link: format!("{prefix}/lists/{id}/bans/{encoded}")
+        self_link: format!("{prefix}/{collection}/{encoded}")
     })
+}
+
+/// Site-wide bans are server administration: the scope must be held by a
+/// token bound to no list or domain.
+async fn authorize_site(
+    state: &AppState,
+    headers: &HeaderMap,
+    addr: SocketAddr,
+    scope: &str,
+) -> ApiResult<listmngr_db::TokenAuth> {
+    let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
+    if !is_unbound(&auth) {
+        return Err(ApiError(Error::Forbidden(scope.into())));
+    }
+    finish_authorization(state, auth).await
+}
+
+#[utoipa::path(get, path = "/api/v1/bans/{email}", params(("email" = String, Path, description = "Percent-encoded stored mailbox or regex")),
+    responses((status = 200, description = "Stored site-wide ban", body = BanResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope or bound token", body = ErrorResponse), (status = 404, description = "Ban missing", body = ErrorResponse), (status = 409, description = "Conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)), security(("bearerAuth" = [])))]
+pub async fn site_get(
+    State(s): State<AppState>,
+    Path(email): Path<String>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<Json<Value>> {
+    authorize_site(&s, &h, peer(c), "lists:read").await?;
+    let email = s.db.bans().site_get(&email).await?;
+    Ok(Json(site_value(&s, &email)))
+}
+
+#[utoipa::path(get, path = "/api/v1/bans", params(PageQuery),
+    responses((status = 200, description = "Bounded site-wide ban collection", body = BanPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope or bound token", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)), security(("bearerAuth" = [])))]
+pub async fn site_list(
+    State(s): State<AppState>,
+    Query(q): Query<PageQuery>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<Json<Value>> {
+    authorize_site(&s, &h, peer(c), "lists:read").await?;
+    let total = usize::try_from(s.db.bans().site_count().await?)
+        .map_err(|_| Error::Validation("ban count exceeds platform range".into()))?;
+    let (start, end) = page_window(total, &q)?;
+    let offset = i64::try_from(start).map_err(|_| Error::Validation("offset too large".into()))?;
+    let rows = if end == start {
+        Vec::new()
+    } else {
+        s.db.bans()
+            .site_list(i64::try_from(end - start).expect("bounded page"), offset)
+            .await?
+    };
+    let entries: Vec<Value> = rows.iter().map(|email| site_value(&s, email)).collect();
+    Ok(Json(page_response(s.flavor, &entries, start, total)))
+}
+
+#[utoipa::path(post, path = "/api/v1/bans",
+    request_body(content((BanInput = "application/json"), (BanInput = "application/x-www-form-urlencoded"))),
+    responses((status = 201, description = "Site-wide ban created", body = BanResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope or bound token", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Ban exists", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)), security(("bearerAuth" = [])))]
+pub async fn site_create(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    JsonOrForm(input): JsonOrForm<BanInput>,
+) -> ApiResult<Response> {
+    let addr = peer(c);
+    let auth = authorize_site(&s, &h, addr, "lists:write").await?;
+    let email =
+        s.db.bans()
+            .site_create(&input.email, &audit_context(&auth, addr))
+            .await?;
+    let body = site_value(&s, &email);
+    let location = body["self_link"].as_str().expect("link string").to_owned();
+    Ok((
+        StatusCode::CREATED,
+        [(header::LOCATION, location)],
+        Json(body),
+    )
+        .into_response())
+}
+
+#[utoipa::path(delete, path = "/api/v1/bans/{email}", params(("email" = String, Path, description = "Percent-encoded mailbox or regex")),
+    responses((status = 204, description = "Site-wide ban removed"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope or bound token", body = ErrorResponse), (status = 404, description = "Ban missing", body = ErrorResponse), (status = 409, description = "Conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)), security(("bearerAuth" = [])))]
+pub async fn site_delete(
+    State(s): State<AppState>,
+    Path(email): Path<String>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<StatusCode> {
+    let addr = peer(c);
+    let auth = authorize_site(&s, &h, addr, "lists:write").await?;
+    s.db.bans()
+        .site_delete(&email, &audit_context(&auth, addr))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(get, path = "/api/v1/lists/{id}/bans/{email}", params(("id" = String, Path), ("email" = String, Path, description = "Percent-encoded stored mailbox or regex")),
