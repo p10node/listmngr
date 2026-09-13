@@ -92,6 +92,10 @@ pub enum EmailCommand {
     Leave,
     Confirm(String),
     Help,
+    /// Mailman's `echo`: answer with the text that followed the verb.
+    Echo(String),
+    /// Mailman's `end`/`stop`: nothing after this line is a command.
+    End,
 }
 
 macro_rules! uuid_id {
