@@ -55,24 +55,29 @@ async fn mailmanclient_admin_roles_do_not_require_or_imply_address_verification(
             Some(&serde_json::Value::Null)
         );
     }
-    for prefix in ["/api/v1", "/3.1"] {
-        for role in ["member", "nonmember"] {
-            let body = format!(
-                r#"{{"list_id":"test.roles.example","subscriber":"unconfirmed@roles.example","role":"{role}"}}"#
-            );
-            assert_eq!(
-                call(
-                    &app,
-                    "POST",
-                    &format!("{prefix}/members"),
-                    Some(&token),
-                    Some(&body)
-                )
-                .await
-                .status(),
-                StatusCode::BAD_REQUEST
-            );
-        }
+    // A member without workflow flags is a subscription request (the list
+    // confirms by default); a nonmember is a role record, created outright.
+    for (prefix, role, expected) in [
+        ("/api/v1", "member", StatusCode::ACCEPTED),
+        ("/3.1", "member", StatusCode::ACCEPTED),
+        ("/api/v1", "nonmember", StatusCode::CREATED),
+    ] {
+        let body = format!(
+            r#"{{"list_id":"test.roles.example","subscriber":"unconfirmed-{role}@roles.example","role":"{role}"}}"#
+        );
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                &format!("{prefix}/members"),
+                Some(&token),
+                Some(&body)
+            )
+            .await
+            .status(),
+            expected,
+            "{prefix} {role}"
+        );
     }
     let body = r#"{"list_id":"test.roles.example","subscriber":"unauthorized@roles.example","role":"owner"}"#;
     assert_eq!(
@@ -85,7 +90,8 @@ async fn mailmanclient_admin_roles_do_not_require_or_imply_address_verification(
         call(&app, "POST", "/api/v1/members", Some(&token), Some(body))
             .await
             .status(),
-        StatusCode::BAD_REQUEST
+        StatusCode::CREATED,
+        "role records need no workflow flags on either flavour"
     );
     let invitation = r#"{"list_id":"test.roles.example","subscriber":"invite@roles.example","role":"owner","invitation":true}"#;
     assert_eq!(

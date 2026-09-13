@@ -23,6 +23,8 @@ use std::net::SocketAddr;
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct RequestResponse {
     pub email: String,
+    /// Empty for a public request; set when an operator supplied one.
+    pub display_name: String,
     pub list_id: String,
     pub token: String,
     pub token_owner: String,
@@ -90,6 +92,7 @@ fn value(state: &AppState, request: &PendingRequest) -> Value {
     );
     json!(RequestResponse {
         email: request.email.clone(),
+        display_name: request.display_name.clone(),
         list_id: request.list_id.to_string(),
         token: request.id.clone(),
         token_owner: token_owner.into(),

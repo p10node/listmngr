@@ -2376,7 +2376,9 @@ async fn insert_mass_members(
         sqlx::query("INSERT INTO members(id,list_id,role,address_id,user_id,subscription_mode,display_name,preferences_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
             .bind(member_id.to_string()).bind(list.as_str()).bind(role.to_string())
             .bind(address_id).bind(user_id).bind(mode_for_new.to_string())
-            .bind("").bind(preferences_id.to_string()).bind(now())
+            // Mass operations build addresses without one; a workflow
+            // carries the display name the operator supplied.
+            .bind(&address.display_name).bind(preferences_id.to_string()).bind(now())
             .execute(&mut **tx).await.map_err(db_error)?;
         workflows::welcome_new_member(tx, db, member_id).await?;
     }

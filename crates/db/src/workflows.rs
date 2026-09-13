@@ -68,9 +68,45 @@ pub struct PendingRequest {
     pub list_id: ListId,
     /// The mailbox as the requester wrote it.
     pub email: String,
+    /// The display name an operator supplied; empty for a public request.
+    pub display_name: String,
     pub action: SubscriptionAction,
     pub token_owner: TokenOwner,
     pub requested_at: i64,
+}
+
+/// An operator subscribing somebody through the API, with Mailman's three
+/// "already done" flags and its invitation switch.
+///
+/// The flags stay separate booleans because they are Mailman's own REST
+/// field names, each supplying one independent step of the workflow.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Copy, Debug)]
+pub struct AdminSubscription<'a> {
+    pub list: &'a ListId,
+    pub email: &'a str,
+    pub display_name: &'a str,
+    /// The address is known to belong to the subscriber.
+    pub pre_verified: bool,
+    /// The subscriber has already asked to join.
+    pub pre_confirmed: bool,
+    /// A moderator has already approved.
+    pub pre_approved: bool,
+    /// Invite instead of subscribing: the address must accept, and the
+    /// invitation itself is the owner's approval.
+    pub invitation: bool,
+}
+
+/// What an administrative subscription did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SubscriptionOutcome {
+    /// The member exists now.
+    Subscribed,
+    /// A request is waiting; `token` addresses it (`/requests/{token}`).
+    Held {
+        token: String,
+        token_owner: TokenOwner,
+    },
 }
 
 /// Which pending requests to list; `None` means every value.
@@ -246,15 +282,7 @@ impl<'a> WorkflowRepo<'a> {
         started: std::time::Instant,
     ) -> Result<()> {
         let address = Address::new(email, String::new())?;
-        // Support ASCII dot-atom mailboxes only: no SMTPUTF8 or quoted locals.
-        let local = email.split_once('@').map_or("", |(local, _)| local);
-        if !email.is_ascii()
-            || !local
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b".!#$%&'*+-/=?^_`{|}~".contains(&b))
-        {
-            return Err(Error::Validation("unsupported notice mailbox".into()));
-        }
+        notice_mailbox(email)?;
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
         lock(&mut tx).await?;
         let now_ms = if lease.is_some() {
@@ -318,7 +346,7 @@ impl<'a> WorkflowRepo<'a> {
             "moderate" => "pending_moderation",
             _ => "pending_confirmation",
         };
-        sqlx::query("INSERT INTO subscription_workflows(id,list_id,email,action,token_hash,created_at,expires_at,original_email,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
+        sqlx::query("INSERT INTO subscription_workflows(id,list_id,email,action,token_hash,created_at,expires_at,original_email,state,display_name,pre_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'',0)")
             .bind(&id).bind(list.as_str()).bind(&address.email).bind(action.name()).bind(hash).bind(now_ms).bind(expires).bind(&address.original_email).bind(state).execute(&mut *tx).await.map_err(db_error)?;
         if state != "pending_confirmation" {
             record_unconfirmed(
@@ -336,7 +364,16 @@ impl<'a> WorkflowRepo<'a> {
             .await?;
             return self.commit_command(tx, lease, now_ms).await;
         }
-        enqueue_confirmation(&mut tx, self.db, list, &address, action, &token, now_ms).await?;
+        enqueue_confirmation(
+            &mut tx,
+            self.db,
+            list,
+            &address,
+            confirmation_template(action, false),
+            &token,
+            now_ms,
+        )
+        .await?;
         Database::record_tx_with_context(
             &mut tx,
             &AuditContext::system(),
@@ -437,7 +474,7 @@ impl<'a> WorkflowRepo<'a> {
         let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
         let now_ms = now_ms.saturating_add(elapsed);
         let now_ms = self.command_time(&mut tx, lease, now_ms).await?;
-        let row=sqlx::query("UPDATE subscription_workflows SET consumed=1 WHERE list_id=$1 AND token_hash=$2 AND consumed=0 AND expires_at>$3 RETURNING id,email,original_email,action")
+        let row=sqlx::query("UPDATE subscription_workflows SET consumed=1 WHERE list_id=$1 AND token_hash=$2 AND consumed=0 AND expires_at>$3 RETURNING id,email,original_email,display_name,action,pre_approved")
             .bind(list.as_str()).bind(hash).bind(now_ms).fetch_optional(&mut *tx).await.map_err(db_error)?.ok_or_else(invalid_token)?;
         let email: String = row.try_get("email").map_err(db_error)?;
         let action: String = row.try_get("action").map_err(db_error)?;
@@ -447,8 +484,10 @@ impl<'a> WorkflowRepo<'a> {
         }
 
         let id: String = row.try_get("id").map_err(db_error)?;
+        let display_name: String = row.try_get("display_name").map_err(db_error)?;
+        let pre_approved: i64 = row.try_get("pre_approved").map_err(db_error)?;
         let action = SubscriptionAction::parse(&action)?;
-        let address = Address::new(&original_email, String::new())?;
+        let address = Address::new(&original_email, display_name)?;
         if address.email != email {
             return Err(Error::Validation(
                 "workflow mailbox identity mismatch".into(),
@@ -456,7 +495,8 @@ impl<'a> WorkflowRepo<'a> {
         }
         // `confirm_then_moderate` proves the address here and hands the
         // decision to a moderator; the token is spent either way.
-        let moderated = policy_of(&mut tx, list, action).await? == "confirm_then_moderate";
+        let moderated =
+            pre_approved == 0 && policy_of(&mut tx, list, action).await? == "confirm_then_moderate";
         let state = if moderated {
             "pending_moderation"
         } else {
@@ -492,6 +532,119 @@ impl<'a> WorkflowRepo<'a> {
         self.commit_command(tx, lease, now_ms).await
     }
 
+    /// Subscribe `request.email` the way Mailman's registrar does: the
+    /// list's `subscription_policy` decides what is still missing, and each
+    /// `pre_*` flag supplies one of those steps in advance. An invitation
+    /// always asks the address to accept, and counts as the approval.
+    /// # Errors
+    /// Returns `NotFound` for an unknown list, a validation error for an
+    /// invalid or banned address, and database errors.
+    pub async fn subscribe(
+        &self,
+        request: &AdminSubscription<'_>,
+        context: &AuditContext,
+        now_ms: i64,
+    ) -> Result<SubscriptionOutcome> {
+        let address = Address::new(request.email, request.display_name.to_owned())?;
+        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        lock(&mut tx).await?;
+        let policy: Option<String> =
+            sqlx::query_scalar("SELECT subscription_policy FROM mailing_lists WHERE list_id=$1")
+                .bind(request.list.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_error)?;
+        let policy = policy.ok_or_else(|| Error::NotFound("list".into()))?;
+        if crate::bans::is_banned(&mut *tx, request.list, &address.original_email).await? {
+            return Err(Error::Validation("address is banned".into()));
+        }
+        cleanup_expired(&mut tx, now_ms).await?;
+        let confirming = matches!(policy.as_str(), "confirm" | "confirm_then_moderate");
+        let needs_token =
+            request.invitation || !request.pre_verified || (confirming && !request.pre_confirmed);
+        let needs_moderation = !request.invitation
+            && !request.pre_approved
+            && matches!(policy.as_str(), "moderate" | "confirm_then_moderate");
+        if !needs_token && !needs_moderation {
+            apply_membership(
+                &mut tx,
+                self.db,
+                request.list,
+                &address,
+                SubscriptionAction::Join,
+            )
+            .await?;
+            Database::record_tx_with_context(
+                &mut tx,
+                context,
+                "subscription.subscribe",
+                "list",
+                request.list.as_str(),
+                serde_json::json!({"policy":policy}),
+            )
+            .await?;
+            tx.commit().await.map_err(db_error)?;
+            return Ok(SubscriptionOutcome::Subscribed);
+        }
+        let mut secret = [0_u8; 32];
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut secret)
+            .map_err(db_error)?;
+        let token = URL_SAFE_NO_PAD.encode(secret);
+        let hash = format!("{:x}", Sha256::digest(secret));
+        let id = Uuid::now_v7().to_string();
+        let expires = now_ms
+            .checked_add(86_400_000)
+            .ok_or_else(|| Error::Validation("invalid time".into()))?;
+        let token_owner = if needs_token {
+            TokenOwner::Subscriber
+        } else {
+            TokenOwner::Moderator
+        };
+        // An approval already given (explicitly, or implied by inviting)
+        // must survive the confirmation the subscriber still owes.
+        let approved = i64::from(request.pre_approved || request.invitation || !needs_moderation);
+        sqlx::query("INSERT INTO subscription_workflows(id,list_id,email,action,token_hash,created_at,expires_at,original_email,state,display_name,pre_approved) VALUES($1,$2,$3,'join',$4,$5,$6,$7,$8,$9,$10)")
+            .bind(&id).bind(request.list.as_str()).bind(&address.email).bind(hash).bind(now_ms).bind(expires)
+            .bind(&address.original_email).bind(token_owner.state()).bind(&address.display_name).bind(approved)
+            .execute(&mut *tx).await.map_err(db_error)?;
+        if needs_token {
+            enqueue_confirmation(
+                &mut tx,
+                self.db,
+                request.list,
+                &address,
+                confirmation_template(SubscriptionAction::Join, request.invitation),
+                &token,
+                now_ms,
+            )
+            .await?;
+        }
+        Database::record_tx_with_context(
+            &mut tx,
+            context,
+            if request.invitation {
+                "subscription.invite"
+            } else {
+                "subscription.request"
+            },
+            "list",
+            request.list.as_str(),
+            serde_json::json!({
+                "workflow_id": id,
+                "action": "join",
+                "policy": policy,
+                "token_owner": token_owner,
+            }),
+        )
+        .await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(SubscriptionOutcome::Held {
+            token: id,
+            token_owner,
+        })
+    }
+
     /// Undecided subscription requests on `list`, oldest first, narrowed by
     /// `filter`.
     /// # Errors
@@ -501,7 +654,7 @@ impl<'a> WorkflowRepo<'a> {
         list: &ListId,
         filter: RequestFilter,
     ) -> Result<Vec<PendingRequest>> {
-        let rows = sqlx::query("SELECT id,list_id,original_email,action,state,created_at FROM subscription_workflows WHERE list_id=$1 AND state IN ('pending_confirmation','pending_moderation') AND ($2='' OR state=$2) AND ($3='' OR action=$3) ORDER BY created_at,id")
+        let rows = sqlx::query("SELECT id,list_id,original_email,display_name,action,state,created_at FROM subscription_workflows WHERE list_id=$1 AND state IN ('pending_confirmation','pending_moderation') AND ($2='' OR state=$2) AND ($3='' OR action=$3) ORDER BY created_at,id")
             .bind(list.as_str())
             .bind(filter.token_owner.map_or("", TokenOwner::state))
             .bind(filter.action.map_or("", SubscriptionAction::name))
@@ -515,7 +668,7 @@ impl<'a> WorkflowRepo<'a> {
     /// # Errors
     /// Returns `NotFound` when no undecided request has that id.
     pub async fn get(&self, id: &str) -> Result<PendingRequest> {
-        let row = sqlx::query("SELECT id,list_id,original_email,action,state,created_at FROM subscription_workflows WHERE id=$1 AND state IN ('pending_confirmation','pending_moderation')")
+        let row = sqlx::query("SELECT id,list_id,original_email,display_name,action,state,created_at FROM subscription_workflows WHERE id=$1 AND state IN ('pending_confirmation','pending_moderation')")
             .bind(id)
             .fetch_optional(self.db.pool())
             .await
@@ -1377,19 +1530,24 @@ async fn record_unconfirmed(
 
 /// The confirmation mail carrying the token. Its Subject must stay exactly
 /// `confirm TOKEN`: replying with it intact is the email confirmation path.
+/// Mailman's template for the mail that carries a confirmation token.
+const fn confirmation_template(action: SubscriptionAction, invitation: bool) -> &'static str {
+    match (action, invitation) {
+        (_, true) => "list:user:action:invite",
+        (SubscriptionAction::Join, false) => "list:user:action:subscribe",
+        (SubscriptionAction::Leave, false) => "list:user:action:unsubscribe",
+    }
+}
+
 async fn enqueue_confirmation(
     tx: &mut Transaction<'_, Any>,
     db: &Database,
     list: &ListId,
     address: &Address,
-    action: SubscriptionAction,
+    template: &str,
     token: &str,
     now_ms: i64,
 ) -> Result<()> {
-    let template = match action {
-        SubscriptionAction::Join => "list:user:action:subscribe",
-        SubscriptionAction::Leave => "list:user:action:unsubscribe",
-    };
     let confirm_address = list.address_with_suffix("confirm");
     let confirm_uri = format!("/api/v1/public/lists/{list}/confirm");
     let user_email = address.original_email.clone();
@@ -1425,8 +1583,23 @@ fn pending_row(row: &sqlx::any::AnyRow) -> Result<PendingRequest> {
             .map_err(db_error)?
             .parse()?,
         email: row.try_get("original_email").map_err(db_error)?,
+        display_name: row.try_get("display_name").map_err(db_error)?,
         action: SubscriptionAction::parse(&row.try_get::<String, _>("action").map_err(db_error)?)?,
         token_owner: TokenOwner::from_state(&row.try_get::<String, _>("state").map_err(db_error)?)?,
         requested_at: row.try_get("created_at").map_err(db_error)?,
     })
+}
+
+/// Support ASCII dot-atom mailboxes only for notices: no SMTPUTF8, no
+/// quoted local parts.
+fn notice_mailbox(email: &str) -> Result<()> {
+    let local = email.split_once('@').map_or("", |(local, _)| local);
+    if !email.is_ascii()
+        || !local
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".!#$%&'*+-/=?^_`{|}~".contains(&b))
+    {
+        return Err(Error::Validation("unsupported notice mailbox".into()));
+    }
+    Ok(())
 }

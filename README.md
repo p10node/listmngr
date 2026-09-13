@@ -660,11 +660,28 @@ GET  /lists/{id}/requests/{token}
 POST /lists/{id}/requests/{token}    action=accept|reject|discard|defer [&reason=…]
 ```
 
-Entries carry `email`, `list_id`, `token` (the request id), `token_owner`,
-`type`, `request_date`, `self_link` and `http_etag`. A moderator may act on a
-request that still waits for the subscriber's confirmation: accepting it
-applies the change and spends the token. See `P3-SUBSCRIPTION-REQUESTS-REST`
-in `docs/FEATURE_PARITY.md`.
+Entries carry `email`, `display_name`, `list_id`, `token` (the request id),
+`token_owner`, `type`, `request_date`, `self_link` and `http_etag`. A
+moderator may act on a request that still waits for the subscriber's
+confirmation: accepting it applies the change and spends the token. See
+`P3-SUBSCRIPTION-REQUESTS-REST` in `docs/FEATURE_PARITY.md`.
+
+`POST /members` is Mailman's registrar. For `role=member` the list's
+`subscription_policy` decides what the subscription still needs, and the
+flags supply those steps in advance:
+
+| Request | Result |
+|---|---|
+| `pre_verified`+`pre_confirmed`+`pre_approved` | `201` with the member |
+| address not yet proven, or the list confirms | `202` `{token, token_owner: "subscriber"}` and a confirmation mail |
+| confirmed but the list moderates | `202` `{token, token_owner: "moderator"}`, no mail |
+| `invitation=true` | `202`, an invitation mail; accepting it subscribes, no moderator |
+
+The `token` is the request's REST handle (`/requests/{token}`), never the
+secret in the mail. An approval given up front survives the confirmation the
+subscriber still owes. `role=owner`, `moderator` and `nonmember` are role
+records: created outright, with no workflow and no flags. See
+`P3-ADMIN-SUBSCRIBE` in `docs/FEATURE_PARITY.md`.
 
 ## LMTP size and body parameters — bounded acceptance verified
 

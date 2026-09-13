@@ -2267,7 +2267,8 @@ async fn member_value(state: &AppState, member: &listmngr_core::Member) -> Resul
 }
 #[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
 struct WorkflowInput {
-    #[serde(default)]
+    /// Mailman's clients send booleans as `True`/`False` strings on forms.
+    #[serde(default, deserialize_with = "mailman_bool")]
     invitation: bool,
 }
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -2337,17 +2338,53 @@ async fn members_create(
     let auth = authorize_list(&s, &h, addr, "members:write", &v.list_id).await?;
     // mailmanclient's administrative role methods omit subscription workflow
     // flags. Role assignment does not itself verify ownership of an address.
-    let administrative_role = matches!(s.flavor, ApiFlavor::Compat31)
-        && matches!(v.role, MemberRole::Owner | MemberRole::Moderator);
-    if v.workflow.invitation
-        || (!administrative_role
-            && (!v.confirmation.pre_verified
-                || !v.confirmation.pre_confirmed
-                || !v.confirmation.pre_approved))
-    {
-        return Err(ApiError(Error::Validation(
-            "Phase 1 subscriptions require pre_verified, pre_confirmed and pre_approved".into(),
-        )));
+    // Owner, moderator and nonmember are role records, not subscriptions:
+    // no workflow, no confirmation flags, exactly as mailmanclient's
+    // administrative helpers post them.
+    let administrative_role = !matches!(v.role, MemberRole::Member);
+    if administrative_role {
+        if v.workflow.invitation {
+            return Err(ApiError(Error::Validation(
+                "an invitation subscribes a member, not an owner or moderator".into(),
+            )));
+        }
+    } else {
+        // Mailman's registrar: the list's policy decides what is still
+        // missing and each flag supplies one of those steps in advance.
+        let outcome =
+            s.db.workflows()
+                .subscribe(
+                    &listmngr_db::workflows::AdminSubscription {
+                        list: &v.list_id,
+                        email: &v.subscriber,
+                        display_name: &v.display_name,
+                        pre_verified: v.confirmation.pre_verified,
+                        pre_confirmed: v.confirmation.pre_confirmed,
+                        pre_approved: v.confirmation.pre_approved,
+                        invitation: v.workflow.invitation,
+                    },
+                    &audit_context(&auth, addr),
+                    chrono::Utc::now().timestamp_millis(),
+                )
+                .await?;
+        if let listmngr_db::workflows::SubscriptionOutcome::Held { token, token_owner } = outcome {
+            let token_owner = match token_owner {
+                listmngr_db::workflows::TokenOwner::Subscriber => "subscriber",
+                listmngr_db::workflows::TokenOwner::Moderator => "moderator",
+            };
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(json!({
+                    "token": token,
+                    "token_owner": token_owner,
+                    "http_etag": format!("{:x}", Sha256::digest(&token)),
+                })),
+            )
+                .into_response());
+        }
+        let member = subscribed_member(&s, &v.list_id, &v.subscriber).await?;
+        let value = member_value(&s, &member).await?;
+        return Ok(created_member(s.flavor, &member, value));
     }
     let member =
         s.db.members()
@@ -2364,7 +2401,25 @@ async fn members_create(
             )
             .await?;
     let value = member_value(&s, &member).await?;
-    let response = match s.flavor {
+    Ok(created_member(s.flavor, &member, value))
+}
+
+/// The member a just-completed subscription created.
+async fn subscribed_member(
+    s: &AppState,
+    list: &ListId,
+    email: &str,
+) -> ApiResult<listmngr_core::Member> {
+    s.db.members()
+        .find(email)
+        .await?
+        .into_iter()
+        .find(|member| member.list_id == *list && member.role == MemberRole::Member)
+        .ok_or_else(|| ApiError(Error::NotFound("member".into())))
+}
+
+fn created_member(flavor: ApiFlavor, member: &listmngr_core::Member, value: Value) -> Response {
+    match flavor {
         ApiFlavor::Compat31 => (
             StatusCode::CREATED,
             [(header::LOCATION, format!("/3.1/members/{}", member.id))],
@@ -2372,8 +2427,7 @@ async fn members_create(
         )
             .into_response(),
         ApiFlavor::V1 => (StatusCode::CREATED, Json(value)).into_response(),
-    };
-    Ok(response)
+    }
 }
 #[utoipa::path(
     get,

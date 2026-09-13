@@ -22,6 +22,8 @@ mod requests;
 mod smtp_bounces;
 #[path = "rest/subject_prefix.rs"]
 mod subject_prefix;
+#[path = "rest/subscribe.rs"]
+mod subscribe;
 #[path = "rest/template_uris.rs"]
 mod template_uris;
 #[path = "rest/welcome.rs"]
