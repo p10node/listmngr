@@ -1,3 +1,6 @@
+#[path = "held/rejection_notice.rs"]
+mod rejection_notice;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
@@ -34,6 +37,15 @@ async fn fixture_with_db(db: Database) -> Fixture {
             display_name: "Dev".into(),
             style: "legacy-default".into(),
         })
+        .await
+        .unwrap();
+    // These fixtures exercise moderation, not hold notices: keep the queue
+    // limited to the posts and the notices under test.
+    db.lists()
+        .update(
+            &list_id,
+            &serde_json::json!({"respond_to_post_requests": false, "admin_immed_notify": false}),
+        )
         .await
         .unwrap();
     db.members()
@@ -356,6 +368,61 @@ async fn postgres_isolated_held_review_contract() {
     result.unwrap();
 }
 
+#[tokio::test]
+async fn held_page_never_reads_message_bodies_outside_the_selected_window() {
+    let f = fixture().await;
+    seed_held(&f.db, &f.list_id, "one@example.invalid", "First").await;
+    seed_held(&f.db, &f.list_id, "two@example.invalid", "Second").await;
+    let pending = f.db.moderation().list_pending(&f.list_id).await.unwrap();
+    let first = &pending[0];
+    let corrupt = &pending[1];
+    // SQLite-only fixture sabotage: invalid binary storage must stay isolated
+    // to its own page. No live/development data or transport is involved.
+    sqlx::query("UPDATE message_blobs SET raw=7 WHERE store_key=(SELECT store_key FROM messages WHERE id=$1)")
+        .bind(corrupt.message_id.0.to_string()).execute(f.db.pool()).await.unwrap();
+    assert!(f.db.mail_queue().message(corrupt.message_id).await.is_err());
+    for prefix in ["/api/v1", "/3.1"] {
+        let uri = format!("{prefix}/lists/{}/held?count=1&page=1", f.list_id);
+        let response = get(&f.app, &uri, &f.admin_token).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "off-page MIME must not be loaded"
+        );
+        let body = json_body(response).await;
+        let entries = if prefix == "/3.1" {
+            &body["entries"]
+        } else {
+            &body["items"]
+        };
+        assert_eq!(entries.as_array().unwrap().len(), 1);
+        assert_eq!(entries[0]["request_id"], first.id.0.to_string());
+        assert_eq!(
+            body[if prefix == "/3.1" {
+                "total_size"
+            } else {
+                "total"
+            }],
+            2
+        );
+        let count = get(
+            &f.app,
+            &format!("{prefix}/lists/{}/held/count", f.list_id),
+            &f.admin_token,
+        )
+        .await;
+        assert_eq!(json_body(count).await["count"], 2);
+        let empty = get(
+            &f.app,
+            &format!("{prefix}/lists/{}/held?page=50&count=1", f.list_id),
+            &f.admin_token,
+        )
+        .await;
+        assert_eq!(empty.status(), StatusCode::OK);
+        assert_eq!(json_body(empty).await["count"], 0);
+    }
+}
+
 async fn json_body(response: Response) -> Value {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&bytes).unwrap()
@@ -539,7 +606,7 @@ async fn accept_delivers_to_resolved_members_and_replay_never_duplicates() {
 }
 
 #[tokio::test]
-async fn reject_and_discard_record_disposition_and_create_no_delivery() {
+async fn reject_notifies_author_while_discard_and_original_posts_have_no_delivery() {
     let f = fixture().await;
     let rejected = seed_held(&f.db, &f.list_id, "bad@example.invalid", "Spam").await;
     let discarded = seed_held(&f.db, &f.list_id, "spammer@example.invalid", "Junk").await;
@@ -574,7 +641,16 @@ async fn reject_and_discard_record_disposition_and_create_no_delivery() {
         .fetch_one(f.db.pool())
         .await
         .unwrap();
-    assert_eq!(out_jobs, 0);
+    assert_eq!(out_jobs, 1, "only the rejection notice may be published");
+    let recipients: Vec<String> =
+        sqlx::query_scalar("SELECT email FROM delivery_recipients ORDER BY email")
+            .fetch_all(f.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(recipients, ["bad@example.invalid"]);
+    let original_children: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM queue_jobs q JOIN held_messages h ON h.message_id=q.message_id WHERE q.queue!='in'")
+        .fetch_one(f.db.pool()).await.unwrap();
+    assert_eq!(original_children, 0, "neither original post may fan out");
 }
 
 #[tokio::test]

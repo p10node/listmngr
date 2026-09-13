@@ -17,7 +17,7 @@ async fn receive_data_with_barrier(
     let mut reader = BufReader::new(reader);
     writer.write_all(b"220 sink\r\n").await.unwrap();
     for (prefix, reply) in [
-        ("EHLO", "250 sink\r\n"),
+        ("EHLO", "250-sink\r\n250 8BITMIME\r\n"),
         ("MAIL", "250 ok\r\n"),
         ("RCPT", "250 ok\r\n"),
         ("DATA", "354 go\r\n"),
@@ -267,7 +267,7 @@ async fn reservation_audit_failure_fences_smtp_and_rolls_back() {
 #[tokio::test]
 async fn reserved_mixed_results_retry_only_known_transient_and_fence_old_lease() {
     let recipients: Vec<String> = (0..4).map(|n| format!("r{n}@example.invalid")).collect();
-    let (db, lease, _, _) = fixture_at(
+    let (db, lease, role, _) = fixture_at(
         "sqlite::memory:",
         "{}",
         b"Subject: test\r\n\r\nbody",
@@ -281,6 +281,7 @@ async fn reserved_mixed_results_retry_only_known_transient_and_fence_old_lease()
         .unwrap();
     finish_delivery(
         &db,
+        &role,
         &lease,
         &recipients,
         &[

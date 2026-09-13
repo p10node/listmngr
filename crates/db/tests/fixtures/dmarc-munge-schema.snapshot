@@ -1,0 +1,2 @@
+C|mailing_lists|dmarc_mitigate_action|text|required|no_mitigation
+C|mailing_lists|dmarc_mitigate_unconditionally|integer|required|0

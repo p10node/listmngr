@@ -1,0 +1,2 @@
+C|subscription_workflows|display_name|text|required|-
+C|subscription_workflows|pre_approved|integer|required|0

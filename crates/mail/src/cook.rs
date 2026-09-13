@@ -1,9 +1,12 @@
 use crate::{Error, Result};
+use mail_builder::encoders::Base64Encoder;
 
 /// Locate the header/body boundary: the byte range of the first blank line.
+///
 /// Returns `(blank_line_start, body_start)`. The header block is
 /// `raw[..blank_line_start]`; the body (untouched) is `raw[body_start..]`.
-fn header_body_split(raw: &[u8]) -> Option<(usize, usize)> {
+#[must_use]
+pub fn header_body_split(raw: &[u8]) -> Option<(usize, usize)> {
     let mut cursor = 0usize;
     for line in raw.split_inclusive(|b| *b == b'\n') {
         let end = cursor + line.len();
@@ -30,12 +33,69 @@ fn is_safe_header_name(name: &str) -> bool {
     !name.is_empty() && name.bytes().all(|b| (33..=126).contains(&b) && b != b':')
 }
 
-fn newline_style(header_block: &[u8]) -> &'static [u8] {
+pub fn newline_style(header_block: &[u8]) -> &'static [u8] {
     if header_block.contains(&b'\r') {
         b"\r\n"
     } else {
         b"\n"
     }
+}
+
+// Only the Unicode-prefix path decodes/re-encodes Subject. Other fields and
+// the MIME body are never rendered through the MIME builder.
+fn rewrite_unicode_subject(header_block: &[u8], prefix: &str, newline: &[u8]) -> Result<Vec<u8>> {
+    let mut output = Vec::with_capacity(header_block.len());
+    let mut lines = header_block.split_inclusive(|b| *b == b'\n').peekable();
+    while let Some(line) = lines.next() {
+        if !line
+            .get(..8)
+            .is_some_and(|h| h.eq_ignore_ascii_case(b"subject:"))
+        {
+            output.extend_from_slice(line);
+            continue;
+        }
+        let mut field = line.to_vec();
+        while lines
+            .peek()
+            .is_some_and(|l| l.starts_with(b" ") || l.starts_with(b"\t"))
+        {
+            field.extend_from_slice(lines.next().unwrap());
+        }
+        let parsed = mail_parser::MessageParser::default()
+            .parse_headers(&field)
+            .ok_or(Error::UnsafeHeaderContent)?;
+        let existing = parsed.subject().unwrap_or("");
+        let subject = if existing.starts_with(prefix) {
+            existing.to_owned()
+        } else {
+            format!("{prefix}{existing}")
+        };
+        let mut generated = b"Subject: ".to_vec();
+        // Text::write_header's Q encoding can exceed RFC2047's 75-byte word
+        // limit at multibyte boundaries. Use the pinned builder's base64 codec
+        // with UTF-8-aligned chunks: 42 bytes -> at most 68 bytes per word,
+        // 77 including "Subject: ", 69 on continuation lines (excluding CRLF).
+        let mut rest = subject.as_str();
+        while !rest.is_empty() {
+            let mut end = rest.len().min(42);
+            while !rest.is_char_boundary(end) {
+                end -= 1;
+            }
+            generated.extend_from_slice(b"=?utf-8?B?");
+            Base64Encoder::new().encode_to_writer(&rest.as_bytes()[..end], &mut generated)?;
+            generated.extend_from_slice(b"?=\r\n");
+            rest = &rest[end..];
+            if !rest.is_empty() {
+                generated.push(b'\t');
+            }
+        }
+        if newline == b"\n" {
+            output.extend(generated.into_iter().filter(|b| *b != b'\r'));
+        } else {
+            output.extend_from_slice(&generated);
+        }
+    }
+    Ok(output)
 }
 
 /// Prepend `prefix` to an existing, single-line `Subject:` header value, unless
@@ -82,10 +142,255 @@ fn rewrite_subject(header_block: &[u8], prefix: &str, newline: &[u8]) -> Vec<u8>
     output
 }
 
-/// Splice `additions` header lines just before the terminating blank line.
+/// Signature fields that redistribution invalidates: header removal/addition
+/// and subject rewriting break the original DKIM/ARC signatures, so they are
+/// dropped rather than left to fail verification downstream.
+fn is_signature_header(name: &str) -> bool {
+    matches!(
+        name,
+        "dkim-signature"
+            | "domainkey-signature"
+            | "arc-seal"
+            | "arc-message-signature"
+            | "arc-authentication-results"
+    )
+}
+
+/// List controls, private recipients and moderator-only fields that must not
+/// travel to subscribers.
+fn is_control_header(name: &str) -> bool {
+    name.starts_with("list-")
+        || matches!(
+            name,
+            "x-beenthere"
+                | "bcc"
+                | "resent-bcc"
+                | "approved"
+                | "approve"
+                | "x-approved"
+                | "x-approve"
+                | "x-list-received-date"
+                | "x-mailman-approved-at"
+                | "precedence"
+                | "return-path"
+                | "x-approval"
+                | "x-confirm"
+                | "x-list-administrivia"
+                | "x-mailman-version"
+        )
+}
+
+/// Remove whole fields (including every folded continuation) whose lowercased
+/// name satisfies `drop`, never touching MIME bytes.
+pub fn strip_fields(header_block: &[u8], drop: impl Fn(&str) -> bool) -> Vec<u8> {
+    let mut output = Vec::with_capacity(header_block.len());
+    let mut keep = false;
+    for line in header_block.split_inclusive(|b| *b == b'\n') {
+        if !line.starts_with(b" ") && !line.starts_with(b"\t") {
+            let name = line.split(|b| *b == b':').next().unwrap_or_default();
+            let name = String::from_utf8_lossy(name).to_ascii_lowercase();
+            keep = !drop(&name);
+        }
+        if keep {
+            output.extend_from_slice(line);
+        }
+    }
+    output
+}
+
+/// Remove whole fields, including every folded continuation, never MIME bytes.
+/// Redistribution replaces list controls and conservatively drops old DKIM/ARC
+/// signatures: header removal/addition and subject rewriting can invalidate them.
+/// Callers must inspect loop markers before cooking and carry validated history
+/// forward explicitly in additions.
+fn redistribution_headers(header_block: &[u8]) -> Vec<u8> {
+    strip_fields(header_block, |name| {
+        is_control_header(name) || is_signature_header(name)
+    })
+}
+
+/// Remove whole fields whose lowercased name and unfolded value satisfy
+/// `drop`, folded continuations included, never touching MIME bytes.
+pub fn strip_fields_where(header_block: &[u8], drop: impl Fn(&str, &str) -> bool) -> Vec<u8> {
+    // First pass: decide per field on the unfolded value.
+    let mut decisions: Vec<bool> = Vec::new();
+    let mut current: Option<(String, String)> = None;
+    let flush = |current: &mut Option<(String, String)>, decisions: &mut Vec<bool>| {
+        if let Some((name, value)) = current.take() {
+            decisions.push(!drop(&name, value.trim()));
+        }
+    };
+    for line in header_block.split_inclusive(|b| *b == b'\n') {
+        let text = String::from_utf8_lossy(line);
+        let text = text.trim_end_matches(['\r', '\n']);
+        if line.starts_with(b" ") || line.starts_with(b"\t") {
+            if let Some((_, value)) = current.as_mut() {
+                value.push(' ');
+                value.push_str(text.trim());
+            }
+            continue;
+        }
+        flush(&mut current, &mut decisions);
+        let (name, value) = text.split_once(':').unwrap_or((text, ""));
+        current = Some((name.to_ascii_lowercase(), value.to_owned()));
+    }
+    flush(&mut current, &mut decisions);
+    // Second pass: copy the kept fields.
+    let mut output = Vec::with_capacity(header_block.len());
+    let mut field = 0usize;
+    let mut keep = true;
+    let mut first = true;
+    for line in header_block.split_inclusive(|b| *b == b'\n') {
+        if !line.starts_with(b" ") && !line.starts_with(b"\t") {
+            if !first {
+                field += 1;
+            }
+            first = false;
+            keep = decisions.get(field).copied().unwrap_or(true);
+        }
+        if keep {
+            output.extend_from_slice(line);
+        }
+    }
+    output
+}
+
+/// Pipeline primitive: drop the named fields (lower-case names), every
+/// folded continuation included, never touching the body.
+/// # Errors
+/// Returns an error if `raw` has no header/body boundary.
+pub fn strip_named_headers(raw: &[u8], names: &[&str]) -> Result<Vec<u8>> {
+    let (blank_start, _) = header_body_split(raw).ok_or(Error::InvalidMessageId)?;
+    let mut output = strip_fields(&raw[..blank_start], |name| names.contains(&name));
+    output.extend_from_slice(&raw[blank_start..]);
+    Ok(output)
+}
+
+/// RFC 2047 `B` encoded words for a non-ASCII phrase; an ASCII phrase is
+/// quoted when it carries specials, else written bare.
+#[must_use]
+pub fn phrase(text: &str) -> String {
+    if text.is_ascii() {
+        // Python's `formataddr` quotes a phrase only when it carries specials.
+        if !text
+            .chars()
+            .any(|c| "()<>[]:;@\\,.\"".contains(c) || c.is_control())
+        {
+            return text.to_owned();
+        }
+        let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+        return format!("\"{escaped}\"");
+    }
+    let mut words = Vec::new();
+    let mut chunk = String::new();
+    for character in text.chars() {
+        if chunk.len() + character.len_utf8() > 33 {
+            words.push(encoded_word(&chunk));
+            chunk.clear();
+        }
+        chunk.push(character);
+    }
+    if !chunk.is_empty() {
+        words.push(encoded_word(&chunk));
+    }
+    words.join(" ")
+}
+
+fn encoded_word(chunk: &str) -> String {
+    let mut encoded = Vec::new();
+    let _ = Base64Encoder::new().encode_to_writer(chunk.as_bytes(), &mut encoded);
+    format!("=?utf-8?B?{}?=", String::from_utf8_lossy(&encoded))
+}
+
+/// `Name <address>` with the name as a phrase, or the bare address.
+#[must_use]
+pub fn format_mailbox(name: Option<&str>, address: &str) -> String {
+    name.map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map_or_else(
+            || address.to_owned(),
+            |name| format!("{} <{address}>", phrase(name)),
+        )
+}
+
+/// Pipeline primitive: drop list controls, private recipients and
+/// moderator-only fields (the `cleanse` handler).
+/// # Errors
+/// Returns an error if `raw` has no header/body boundary.
+pub fn strip_control_headers(raw: &[u8]) -> Result<Vec<u8>> {
+    let (blank_start, _) = header_body_split(raw).ok_or(Error::InvalidMessageId)?;
+    let mut output = strip_fields(&raw[..blank_start], is_control_header);
+    output.extend_from_slice(&raw[blank_start..]);
+    Ok(output)
+}
+
+/// Pipeline primitive: drop the original DKIM/ARC signatures (the
+/// `cleanse-dkim` handler).
+/// # Errors
+/// Returns an error if `raw` has no header/body boundary.
+pub fn strip_signature_headers(raw: &[u8]) -> Result<Vec<u8>> {
+    let (blank_start, _) = header_body_split(raw).ok_or(Error::InvalidMessageId)?;
+    let mut output = strip_fields(&raw[..blank_start], is_signature_header);
+    output.extend_from_slice(&raw[blank_start..]);
+    Ok(output)
+}
+
+/// Pipeline primitive: prepend `prefix` to `Subject:` once (the
+/// `subject-prefix` handler). A missing subject stays missing.
+/// # Errors
+/// Returns an error for a prefix carrying CR/LF or a message with no boundary.
+pub fn prefix_subject(raw: &[u8], prefix: &str) -> Result<Vec<u8>> {
+    if !is_safe_value(prefix) {
+        return Err(Error::UnsafeHeaderContent);
+    }
+    let (blank_start, body_start) = header_body_split(raw).ok_or(Error::InvalidMessageId)?;
+    if prefix.is_empty() {
+        return Ok(raw.to_vec());
+    }
+    let newline = newline_style(&raw[..body_start]);
+    let header_block = if prefix.is_ascii() {
+        rewrite_subject(&raw[..blank_start], prefix, newline)
+    } else {
+        rewrite_unicode_subject(&raw[..blank_start], prefix, newline)?
+    };
+    let mut output = Vec::with_capacity(raw.len() + prefix.len());
+    output.extend_from_slice(&header_block);
+    output.extend_from_slice(&raw[blank_start..]);
+    Ok(output)
+}
+
+/// Pipeline primitive: splice `additions` before the blank line without
+/// touching existing fields or the body.
+/// # Errors
+/// Returns an error for an unsafe name/value or a message with no boundary.
+pub fn append_headers(raw: &[u8], additions: &[(String, String)]) -> Result<Vec<u8>> {
+    if additions
+        .iter()
+        .any(|(name, value)| !is_safe_header_name(name) || !is_safe_value(value))
+    {
+        return Err(Error::UnsafeHeaderContent);
+    }
+    let (blank_start, body_start) = header_body_split(raw).ok_or(Error::InvalidMessageId)?;
+    let newline = newline_style(&raw[..body_start]);
+    let mut output = Vec::with_capacity(raw.len() + additions.len() * 64);
+    output.extend_from_slice(&raw[..blank_start]);
+    for (name, value) in additions {
+        output.extend_from_slice(name.as_bytes());
+        output.extend_from_slice(b": ");
+        output.extend_from_slice(value.as_bytes());
+        output.extend_from_slice(newline);
+    }
+    output.extend_from_slice(&raw[blank_start..]);
+    Ok(output)
+}
+
+/// Sanitize redistribution headers, then splice `additions` before the blank line.
 ///
-/// If present and not already prefixed, also prepends `subject_prefix` to a
-/// single-line `Subject:` header. The message body is copied byte-for-byte.
+/// If present and not already prefixed, also prepends `subject_prefix` to
+/// `Subject:`. Non-ASCII prefixes use decoded prefix matching and RFC2047
+/// encoding of the complete (possibly folded) subject; ASCII prefixes retain
+/// the legacy byte-splicing behavior. Missing subjects stay missing. The
+/// message body is copied byte-for-byte.
 ///
 /// # Errors
 /// Returns an error if `raw` has no header/body boundary (already rejected at
@@ -108,13 +413,16 @@ pub fn cook_headers(
     }
     let (blank_start, body_start) = header_body_split(raw).ok_or(Error::InvalidMessageId)?;
     let header_block = &raw[..blank_start];
-    let newline = newline_style(header_block);
-    let header_block = subject_prefix
-        .filter(|prefix| !prefix.is_empty())
-        .map_or_else(
-            || header_block.to_vec(),
-            |prefix| rewrite_subject(header_block, prefix, newline),
-        );
+    let newline = newline_style(&raw[..body_start]);
+    let filtered = redistribution_headers(header_block);
+    let header_block = filtered.as_slice();
+    let header_block = match subject_prefix.filter(|prefix| !prefix.is_empty()) {
+        Some(prefix) if !prefix.is_ascii() => {
+            rewrite_unicode_subject(header_block, prefix, newline)?
+        }
+        Some(prefix) => rewrite_subject(header_block, prefix, newline),
+        None => header_block.to_vec(),
+    };
     let mut output = Vec::with_capacity(raw.len() + additions.len() * 64);
     output.extend_from_slice(&header_block);
     for (name, value) in additions {
@@ -126,4 +434,56 @@ pub fn cook_headers(
     output.extend_from_slice(&raw[blank_start..body_start]);
     output.extend_from_slice(&raw[body_start..]);
     Ok(output)
+}
+
+/// Retain only presentation/MIME structure for anonymous redistribution.
+/// Free-form subject and MIME/body content are not anonymized: this is header
+/// identity suppression, not a guarantee against authors identifying themselves.
+pub fn anonymous_message(raw: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(raw.len());
+    let mut keep = false;
+    let mut in_body = false;
+    for line in raw.split_inclusive(|b| *b == b'\n') {
+        if line == b"\r\n" || line == b"\n" {
+            in_body = true;
+        }
+        if !in_body && !line.starts_with(b" ") && !line.starts_with(b"\t") {
+            let name = line.split(|b| *b == b':').next().unwrap_or_default();
+            keep = [
+                b"subject".as_slice(),
+                b"date",
+                b"mime-version",
+                b"content-type",
+                b"content-transfer-encoding",
+                b"content-disposition",
+                b"content-language",
+            ]
+            .iter()
+            .any(|allowed| name.eq_ignore_ascii_case(allowed));
+        }
+        if in_body || keep {
+            output.extend_from_slice(line);
+        }
+    }
+    output
+}
+
+/// Cook a post for publication (archive copy): everything the pipeline does
+/// before `to-archive`, so no delivery-only DMARC rewriting.
+/// # Errors
+/// Returns invalid header errors or a pipeline refusal.
+pub fn cook_post(raw: &[u8], list: &listmngr_core::MailingList, identity: &str) -> Result<Vec<u8>> {
+    crate::handlers::cook_for(crate::handlers::Target::Archive, raw, list, identity)
+}
+
+/// Cook a post for individual delivery: everything before `to-outgoing`,
+/// including delivery-only DMARC From mitigation.
+/// # Errors
+/// Rejects unsupported mitigation settings and unsafe headers.
+pub fn cook_individual_post(
+    raw: &[u8],
+    list: &listmngr_core::MailingList,
+    identity: &str,
+) -> Result<Vec<u8>> {
+    crate::handlers::cook_for(crate::handlers::Target::Out, raw, list, identity)
 }

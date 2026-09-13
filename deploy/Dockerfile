@@ -4,12 +4,16 @@ RUN apk add --no-cache musl=1.2.5-r12 musl-dev=1.2.5-r12
 WORKDIR /src
 COPY . .
 RUN cargo build --locked --release -p listmngr \
-    && mkdir -p /runtime/var/lib/listmngr /runtime/tmp \
+    && mkdir -p /runtime/var/lib/listmngr/mta /runtime/tmp \
     && cp /src/target/release/listmngr /runtime/listmngr \
     && chmod 0755 /runtime/listmngr
 
 FROM scratch
 COPY --from=builder /runtime/ /
+# The state directory is the service account's: the MTA map generations
+# (`[mta] map_directory`) are published there, and a named volume mounted on
+# it inherits this ownership.
+COPY --from=builder --chown=1000:1000 /runtime/var/lib/listmngr /var/lib/listmngr
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 WORKDIR /var/lib/listmngr

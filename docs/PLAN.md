@@ -3,7 +3,21 @@
 > Mailman 3 alternative (Core + Postorius + HyperKitty + mailman-web + django-mailman3 + mailmanclient) viết bằng Rust.
 > Single binary, feature parity, UI hiện đại, security-first.
 
-## Implementation status — development checkpoint (2026-09-06)
+## Verification update — bounded acknowledgement (2026-09-07)
+
+The historical checkpoint below is not the latest implementation inventory.
+`P3-BOUNCE-ACK` in `FEATURE_PARITY.md` records the current bounded CLI operator
+acknowledgement and SQL-filtered backlog: workspace 457/0/30 ignored, full static
+checks and fresh security checks passed (deny required an isolated-fetch retry).
+The canonical `scripts/test-postgres.sh` gate passed 13 tests on an owned,
+disposable PostgreSQL 14.24 cluster; a separate real CLI/PG acknowledgement,
+retained-raw and audit tracer also passed. Fixtures were stopped and removed.
+This supersedes the historical "no current PostgreSQL PASS" below only for that
+explicit scope. Other server versions, PG acknowledgement contention, live MTA,
+full bounce correlation/scoring and production replacement remain unverified.
+The normative phase requirements and checkboxes are unchanged.
+
+## Historical implementation checkpoint (2026-09-06)
 
 This document is the **normative product contract and future roadmap**, not an
 inventory of delivered features. Its original requirements, examples, phase
@@ -329,10 +343,21 @@ lmtp_listen = "127.0.0.1:8024"
 smtp_relay = "127.0.0.1:25"
 smtp_tls = "opportunistic"
 max_recipients = 500
+max_recipients_per_transaction = 500 # Mailman max_recipients: recipients per outgoing SMTP transaction
+authenticity_checks = false          # SPF/DKIM/DMARC via the system resolver; Authentication-Results; conditional DMARC mitigation
+retry_initial_secs = 10              # transient delivery failures back off 10s, 20s, 40s ... with jitter
+retry_max_secs = 3600
 max_sessions_per_connection = 0
-postfix_map_dir = "data/postfix"
+map_directory = "data/mta"           # generation-* directories + `current` symlink, at startup and after list changes
+lmtp_map_target = "127.0.0.1:8024"   # host:port the MTA uses for LMTP; defaults to lmtp_listen
+transport_file_type = "regex"        # Postfix regex (read directly) | hash (postmap_command)
+postmap_command = "/usr/sbin/postmap"
+map_permissions = "group"            # owner | group | world
+map_generations_kept = 5
 verp_delimiter = "+"
 verp_format = "{bounces}+{local}={domain}"
+verp_personalized_deliveries = false # personalized copies get per-recipient VERP envelopes
+verp_delivery_interval = 0           # every Nth post is delivered per recipient with VERP; 0 never
 
 [web]
 listen = "127.0.0.1:8000"
@@ -357,6 +382,11 @@ default_member_action = "defer"
 default_nonmember_action = "hold"
 noreply_address = "noreply"
 site_owner_notify = true
+filtered_messages_are_preservable = false # filter_action = preserve keeps a copy in the shunt store
+bounce_probes = true                     # probe at the bounce threshold; false disables at once
+bounce_probe_lifetime_secs = 604800
+run_tasks_every_secs = 3600              # task runner: expire tokens/probes, collect finished jobs, stale bounce reset
+finished_job_retention_secs = 604800     # how long finished queue jobs and their messages stay
 
 [archive]
 enabled = true
@@ -382,8 +412,8 @@ metrics = true
 
 | MTA | Inbound | Maps sinh tự động |
 |---|---|---|
-| Postfix (khuyến nghị) | `transport_maps`, `local_recipient_maps`, `relay_domains` → LMTP `:8024` | `data/postfix/transport`, `virtual`, `domains` + auto `postmap` (hoặc `regex:`/`hash:`), chạy khi tạo/xoá list & `listmngr aliases regen` |
-| Exim 4 | router query REST `/3.1/lists/<addr>` giống Mailman 3 | snippet trong `deploy/exim/` |
+| Postfix (khuyến nghị) | `transport_maps`, `relay_recipient_maps`, `relay_domains` → LMTP `:8024` | `data/mta/current/{domains,recipients,transport}.regexp` (hoặc `hash:` `postfix_domains`/`postfix_lmtp` + `postmap`), chạy khi start, tạo/xoá list & `listmngr aliases regen` |
+| Exim 4 | router `manualroute` + `lsearch` giống Mailman 3 | `data/mta/current/exim_{domains,recipients}` + snippet trong `deploy/exim/` |
 | Built-in SMTP (phase 6, experimental) | listmngr nhận `:25` trực tiếp | không cần map |
 
 Outbound: SMTP relay (Postfix localhost hoặc external có AUTH/STARTTLS/implicit TLS), chunk theo `max_recipients`, `MAIL FROM = list-bounces+VERP@host`, DKIM sign per domain, `List-*` headers.
@@ -783,7 +813,7 @@ Mục tiêu: tạo domain/list/user/member qua REST + CLI; `mailmanclient` subse
 
 Mục tiêu: gửi thư vào list → member nhận; hold/accept qua REST.
 
-Current bounded status (not completion of the checkboxes below): database raw
+Historical bounded checkpoint (2026-09-06; not completion of the checkboxes below): database raw
 intake, claim/lease/retry/shunt, standalone filesystem storage, CLI
 `queue inject/show/ls`, heartbeat, repository `unshunt`, atomic child handoff,
 opt-in supervisor and LMTP/inbound/outbound workers, held REST, and durable
@@ -797,29 +827,29 @@ P2-STORE/P2-QUEUE/P2-CLI/P2-RUNTIME, held, and O2/O3 evidence.
 
 - [ ] Message store (fs, db) + `messages` index + `Message-ID-Hash`
 - [ ] Queue (`queue_jobs`) + claim/backoff/shunt + runner supervisor + graceful shutdown
-- [ ] LMTP server (RFC 2033: LHLO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, PIPELINING, SIZE, 8BITMIME, per-recipient status), sub-address routing, early reject
+- [x] LMTP server (RFC 2033: LHLO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, PIPELINING, SIZE, 8BITMIME, per-recipient status), sub-address routing, early reject
 - [ ] `in` runner + chains + 15 rules (§4.3 trừ news/digests) + header-match chain + DMARC lookup + `munge_from`
 - [ ] Held messages: DB, notices (owner/user), REST held endpoints + actions
 - [ ] Pipeline runner + handlers §4.4 (trừ to-usenet, arc-sign): mime-delete đầy đủ, decorate + placeholders, personalize, VERP
 - [ ] Templates engine (built-in `mailman:///` bodies port từ Mailman en) + loader DB/file/http
 - [ ] `out` runner: `mail-send`, chunk, TLS, DKIM sign (dkim_keys + CLI `dkim gen/dns`), `retry`, `virgin`, `bad`
 - [ ] RFC 2369/8058 headers + HTTP one-click unsubscribe endpoint (token HMAC)
-- [ ] Postfix map generation + `aliases regen`; docker-compose thêm postfix
+- [x] Postfix/Exim map generation + `aliases regen`; docker-compose thêm postfix
 - [ ] CLI `queue inject/show/unshunt`, `status`
-- [ ] Metrics: queue depth, deliveries, latency
+- [x] Metrics: queue depth, deliveries, latency
 - Acceptance: e2e test harness = pg + smtp sink (Rust mock hoặc `mailhog`) → gửi qua LMTP → assert N member nhận, headers đúng (List-*, subject prefix, footer, DKIM verify pass với key test), held → accept → delivered; nonmember → hold; ban → reject DSN; max-size → hold; `personalize=full` → N msg riêng với VERP đúng; crash giữa pipeline → job không mất (kill -9 test).
 
 ### Phase 3 — Subscription, commands, bounces, digests (L)
 
 Mục tiêu: parity Core hoàn chỉnh (trừ NNTP/DMARC wrap).
 
-- [ ] Subscription/unsubscription workflow state machine + pendings + tokens + policies + invitations + moderation requests + REST `requests`
-- [ ] Email command runner: `confirm`, `join/subscribe`, `leave/unsubscribe`, `help`, `echo`, `end/stop`; `-request/-join/-leave/-confirm` routing; autoresponder + grace period; administrivia
+- [x] Subscription/unsubscription workflow state machine + pendings + tokens + policies + invitations + moderation requests + REST `requests`
+- [ ] Email command runner: `confirm`, `join/subscribe`, `leave/unsubscribe`, `help`, `echo`, `end/stop` (done); `-request/-join/-leave/-confirm` routing (done); autoresponder + grace period (done); administrivia (done)
 - [ ] Welcome/goodbye/invite/hold/refuse/rejected/warning/probe notices; template scopes + language fallback; REST templates/uris; ban REST
-- [ ] Bounce runner: VERP decode, detectors port + fixture corpus (từ flufl.bounce test data), events, scoring, stale, warnings, disable, removal, probes, owner notices, forward unrecognized
-- [ ] Digest runner: mbox append, thresholds/periodic, MIME + RFC1153 builders, volume/number, masthead/header/footer, CLI `digests`
-- [ ] `task` runner: expire pendings/workflows, cleanup orphan messages (refcount), stale bounce reset
-- [ ] `notify` (pending reminders), `admin_notify_mchanges`, `admin_immed_notify`
+- [ ] Bounce runner: VERP decode (done), DSN + ENVID (done), events/scoring/stale/disable/owner notices (done), forward unrecognized (done); detectors port + fixture corpus (done, synthetic corpus); warnings + removal (done, maintenance sweep); probes (done)
+- [x] Digest runner: durable collection (DB, not mbox), thresholds/periodic, MIME + RFC1153 builders, volume/number rollover, masthead/header/footer, CLI `digests`
+- [x] `task` runner: expire pendings/workflows, cleanup orphan messages (refcount), stale bounce reset
+- [ ] `notify` (pending reminders) (done), `admin_notify_mchanges`, `admin_immed_notify` (done for held posts)
 - [ ] i18n framework (fluent) + `en`, `vi`; import `.po` Mailman templates (tooling) → P6
 - [ ] SQLite parity test suite chạy song song pg
 - Acceptance: full `mailmanclient` doctest-equivalent suite pass; bounce corpus detection ≥ flufl.bounce; digest snapshot tests (insta) so với Mailman output; subscription flow e2e qua email (confirm token round-trip).

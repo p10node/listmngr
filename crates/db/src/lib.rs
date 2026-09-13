@@ -2,8 +2,28 @@
 
 //! Portable PostgreSQL/SQLite repositories for the Phase 1 model.
 
+pub mod archive;
+pub mod autoresponse;
+pub mod bans;
+pub mod bounce_maintenance;
+pub mod bounce_processing;
+pub mod bounces;
+pub mod digests;
+pub mod header_matches;
+pub use header_matches::HeaderMatchRow;
+pub mod delivery;
 pub mod mail_queue;
 pub mod moderation;
+pub mod notices;
+pub mod one_click;
+pub mod owner_mail;
+pub mod queue_operations;
+mod smtp_bounces;
+pub mod tasks;
+pub mod templates;
+pub mod web_admin;
+pub mod web_sessions;
+pub mod workflows;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -65,6 +85,19 @@ pub struct Database {
     pool: AnyPool,
     argon2: Argon2Config,
     password_min_score: u8,
+    /// `site.default_language`: the last resort when neither a recipient nor
+    /// a list states a language, and the system layer of preference
+    /// resolution.
+    default_language: String,
+    /// `site.base_url`: the public web origin the mail layer may point at
+    /// (`List-Archive`, `Archived-At`). Empty when unknown.
+    base_url: String,
+    /// `[mailman] bounce_probes`: probe at the threshold instead of
+    /// disabling at once, and how long the probe's bounce counts. Off by
+    /// default here; `serve` applies the configuration.
+    bounce_probes: Option<i64>,
+    /// `[mta] verp_format` / `verp_delimiter`, for the probe's own sender.
+    verp_format: String,
 }
 
 impl Database {
@@ -98,7 +131,57 @@ impl Database {
             pool,
             argon2: security.argon2.clone(),
             password_min_score: security.password_min_score,
+            default_language: "en".into(),
+            base_url: String::new(),
+            bounce_probes: None,
+            verp_format: listmngr_core::verp::DEFAULT_FORMAT.into(),
         })
+    }
+    /// Carry `[mailman] bounce_probes` / `bounce_probe_lifetime_secs` and the
+    /// `[mta] verp_format` the probe sender must follow.
+    #[must_use]
+    pub fn with_bounce_probes(
+        mut self,
+        enabled: bool,
+        lifetime_secs: u32,
+        verp_format: &str,
+    ) -> Self {
+        self.bounce_probes = enabled.then_some(i64::from(lifetime_secs).saturating_mul(1000));
+        verp_format.clone_into(&mut self.verp_format);
+        self
+    }
+    /// The probe lifetime in milliseconds when probes are on.
+    #[must_use]
+    pub const fn bounce_probe_lifetime_ms(&self) -> Option<i64> {
+        self.bounce_probes
+    }
+    /// The VERP format probes are addressed with.
+    #[must_use]
+    pub fn verp_format(&self) -> &str {
+        &self.verp_format
+    }
+    /// Carry `site.default_language` so notices and preference resolution
+    /// fall back to the operator's choice rather than English.
+    #[must_use]
+    pub fn with_default_language(mut self, language: &str) -> Self {
+        language.trim().clone_into(&mut self.default_language);
+        self
+    }
+    /// The site default language.
+    #[must_use]
+    pub fn default_language(&self) -> &str {
+        &self.default_language
+    }
+    /// Carry `site.base_url` so cooked posts can advertise the archive.
+    #[must_use]
+    pub fn with_base_url(mut self, base_url: &str) -> Self {
+        base_url.trim().clone_into(&mut self.base_url);
+        self
+    }
+    /// The site's public base URL, when configured.
+    #[must_use]
+    pub fn base_url(&self) -> Option<&str> {
+        (!self.base_url.is_empty()).then_some(self.base_url.as_str())
     }
     /// # Errors
     ///
@@ -141,6 +224,14 @@ impl Database {
     #[must_use]
     pub const fn audit(&self) -> AuditRepo<'_> {
         AuditRepo { db: self }
+    }
+    #[must_use]
+    pub const fn header_matches(&self) -> header_matches::HeaderMatchRepo<'_> {
+        header_matches::HeaderMatchRepo { db: self }
+    }
+    #[must_use]
+    pub const fn templates(&self) -> templates::TemplateRepo<'_> {
+        templates::TemplateRepo { db: self }
     }
 
     async fn record_tx_with_context(
@@ -303,14 +394,13 @@ impl TokenAuth {
 
     #[must_use]
     pub fn allows_domain(&self, domain: DomainId) -> bool {
-        self.scopes.contains("admin") || self.domain_id.is_none_or(|bound| bound == domain)
+        self.domain_id.is_none_or(|bound| bound == domain)
     }
 
     #[must_use]
     pub fn allows_list(&self, list: &ListId, domain: DomainId) -> bool {
-        self.scopes.contains("admin")
-            || (self.list_id.as_ref().is_none_or(|bound| bound == list)
-                && self.domain_id.is_none_or(|bound| bound == domain))
+        self.list_id.as_ref().is_none_or(|bound| bound == list)
+            && self.domain_id.is_none_or(|bound| bound == domain)
     }
 }
 
@@ -503,7 +593,7 @@ pub struct UserRepo<'a> {
     db: &'a Database,
 }
 impl UserRepo<'_> {
-    fn password_hasher(self) -> Result<Argon2<'static>> {
+    pub(crate) fn password_hasher(self) -> Result<Argon2<'static>> {
         let params = Params::new(
             self.db.argon2.memory_kib,
             self.db.argon2.iterations,
@@ -951,6 +1041,24 @@ impl AddressRepo<'_> {
         if changed == 0 {
             return Err(Error::NotFound(email.into()));
         }
+        // Membership identity is live ownership for both subscription modes:
+        // preference resolution consumes it, so it must not retain the former owner.
+        // Keep subscription mode, address, and historical audit attribution intact.
+        sqlx::query("UPDATE members SET user_id=$1 WHERE address_id=(SELECT id FROM addresses WHERE email=$2)")
+            .bind(user.map(|value| value.to_string()))
+            .bind(email.to_ascii_lowercase())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        // Relink away and back must not resurrect a previously selected delivery plan.
+        sqlx::query("UPDATE preferences SET delivery_generation=delivery_generation+1 WHERE id IN (SELECT m.preferences_id FROM members m JOIN addresses a ON a.id=m.address_id WHERE a.email=$1)")
+            .bind(email.to_ascii_lowercase()).execute(&mut *tx).await.map_err(db_error)?;
+        sqlx::query("UPDATE users SET preferred_address_id=NULL WHERE preferred_address_id=(SELECT id FROM addresses WHERE email=$1) AND id<>COALESCE($2, '')")
+            .bind(email.to_ascii_lowercase())
+            .bind(user.map(|value| value.to_string()))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
         Database::record_tx_with_context(
             &mut tx,
             context,
@@ -987,6 +1095,15 @@ fn address_from_row(row: &sqlx::any::AnyRow) -> Result<Address> {
     })
 }
 
+/// What a config patch does to the write-only `moderator_password` column.
+#[derive(Debug, Clone)]
+pub(crate) enum PasswordChange {
+    Unchanged,
+    Clear,
+    /// Argon2id PHC string, hashed before the transaction began.
+    Set(String),
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ListRepo<'a> {
     db: &'a Database,
@@ -1016,8 +1133,8 @@ impl ListRepo<'_> {
             .ok_or_else(|| Error::Validation(format!("unknown style: {}", new.style)))?;
         style.apply(&mut list);
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        sqlx::query("INSERT INTO mailing_lists(list_id,list_name,mail_host,display_name,description,info,subject_prefix,advertised,preferred_language,anonymous_list,created_at,post_id,volume,next_digest_number,digest_last_sent_at,emergency,archive_policy,archive_rendering_mode,style_name) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)")
-            .bind(list.id.to_string()).bind(list.id.list_name()).bind(list.id.mail_host()).bind(&list.display_name).bind(&list.description).bind(&list.info).bind(&list.subject_prefix).bind(i64::from(list.advertised)).bind(&list.preferred_language).bind(i64::from(list.anonymous_list)).bind(list.created_at.to_rfc3339()).bind(list.post_id).bind(list.volume).bind(list.next_digest_number).bind(list.digest_last_sent_at.map(|value| value.to_rfc3339())).bind(i64::from(list.emergency)).bind(list.archive_policy.to_string()).bind(list.archive_rendering_mode.to_string()).bind(&list.style_name).execute(&mut *tx).await.map_err(db_error)?;
+        sqlx::query("INSERT INTO mailing_lists(delivery_incarnation,list_id,list_name,mail_host,display_name,description,info,subject_prefix,advertised,preferred_language,anonymous_list,created_at,post_id,volume,next_digest_number,digest_last_sent_at,emergency,archive_policy,archive_rendering_mode,style_name,default_member_action,default_nonmember_action) VALUES($22,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)")
+            .bind(list.id.to_string()).bind(list.id.list_name()).bind(list.id.mail_host()).bind(&list.display_name).bind(&list.description).bind(&list.info).bind(&list.subject_prefix).bind(i64::from(list.advertised)).bind(&list.preferred_language).bind(i64::from(list.anonymous_list)).bind(list.created_at.to_rfc3339()).bind(list.post_id).bind(list.volume).bind(list.next_digest_number).bind(list.digest_last_sent_at.map(|value| value.to_rfc3339())).bind(i64::from(list.emergency)).bind(list.archive_policy.to_string()).bind(list.archive_rendering_mode.to_string()).bind(&list.style_name).bind(list.default_member_action.map(|value| value.to_string())).bind(list.default_nonmember_action.map(|value| value.to_string())).bind(Uuid::now_v7().to_string()).execute(&mut *tx).await.map_err(db_error)?;
         Database::record_tx_with_context(
             &mut tx,
             context,
@@ -1088,96 +1205,599 @@ impl ListRepo<'_> {
         patch: &serde_json::Value,
         context: &AuditContext,
     ) -> Result<MailingList> {
-        let mut list = self.get(id).await?;
+        // Hash outside the transaction: Argon2 is deliberately slow and must
+        // not hold the list row lock while it runs.
+        let password = match patch.get("moderator_password") {
+            Some(value) => self.moderator_password_change(value)?,
+            None => PasswordChange::Unchanged,
+        };
+        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let list = Self::update_tx_with_password(&mut tx, id, patch, context, password).await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(list)
+    }
+
+    fn posting_limit(value: &serde_json::Value, key: &str) -> Result<u32> {
+        value
+            .as_u64()
+            .filter(|number| *number <= 2_147_483_647)
+            .and_then(|number| u32::try_from(number).ok())
+            .ok_or_else(|| Error::Validation(key.into()))
+    }
+
+    fn patch_dmarc(
+        settings: &mut listmngr_core::DmarcSettings,
+        object: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<()> {
+        if let Some(value) = object.get("dmarc_mitigate_action") {
+            settings.action = serde_json::from_value(value.clone())
+                .map_err(|_| Error::Validation("dmarc_mitigate_action".into()))?;
+        }
+        if let Some(value) = object.get("dmarc_mitigate_unconditionally") {
+            settings.unconditional = value
+                .as_bool()
+                .ok_or_else(|| Error::Validation("dmarc_mitigate_unconditionally".into()))?;
+        }
+        Ok(())
+    }
+
+    fn patch_boolean(list: &mut MailingList, key: &str, value: &serde_json::Value) -> Result<()> {
+        let target = match key {
+            "advertised" => &mut list.advertised,
+            "anonymous_list" => &mut list.anonymous_list,
+            "send_welcome_message" => &mut list.send_welcome_message,
+            "send_goodbye_message" => &mut list.send_goodbye_message,
+            "bounce_notify_owner_on_removal" => &mut list.bounce_notify_owner_on_removal,
+            "process_bounces" => &mut list.process_bounces,
+            "bounce_notify_owner_on_disable" => &mut list.bounce_notify_owner_on_disable,
+            "bounce_notify_owner_on_bounce_increment" => {
+                &mut list.bounce_notify_owner_on_bounce_increment
+            }
+            "emergency" => &mut list.emergency,
+            "administrivia" => &mut list.administrivia,
+            "require_explicit_destination" => &mut list.require_explicit_destination,
+            "respond_to_post_requests" => &mut list.respond_to_post_requests,
+            "admin_immed_notify" => &mut list.admin_immed_notify,
+            "digests_enabled" => &mut list.digests_enabled,
+            "digest_send_periodic" => &mut list.digest_send_periodic,
+            "filter_content" => &mut list.alter_messages.filter_content,
+            "collapse_alternatives" => &mut list.alter_messages.collapse_alternatives,
+            "convert_html_to_plaintext" => &mut list.alter_messages.convert_html_to_plaintext,
+            "include_rfc2369_headers" => &mut list.alter_messages.include_rfc2369_headers,
+            "allow_list_posts" => &mut list.alter_messages.allow_list_posts,
+            "first_strip_reply_to" => &mut list.alter_messages.first_strip_reply_to,
+            "include_sender_header" => &mut list.alter_messages.include_sender_header,
+            "topics_enabled" => &mut list.topics_enabled,
+            _ => return Err(Error::Validation(key.into())),
+        };
+        *target = value
+            .as_bool()
+            .ok_or_else(|| Error::Validation(key.into()))?;
+        Ok(())
+    }
+
+    /// The Alter Messages, Member Policy, DMARC text and bounce-forwarding
+    /// settings: enums by wire name, bounded text, validated token lists.
+    fn patch_alter_messages(
+        list: &mut MailingList,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
+        let invalid = || Error::Validation(key.to_owned());
+        let messages = &mut list.alter_messages;
+        match key {
+            "filter_types" => messages.filter_types = parse_token_list(key, value, true)?,
+            "pass_types" => messages.pass_types = parse_token_list(key, value, true)?,
+            "filter_extensions" => {
+                messages.filter_extensions = parse_token_list(key, value, false)?;
+            }
+            "pass_extensions" => messages.pass_extensions = parse_token_list(key, value, false)?,
+            "filter_action" => messages.filter_action = parse_enum(key, value)?,
+            "reply_goes_to_list" => messages.reply_goes_to_list = parse_enum(key, value)?,
+            "personalize" => messages.personalize = parse_enum(key, value)?,
+            "reply_to_address" => {
+                let text = value.as_str().ok_or_else(invalid)?;
+                if !text.is_empty() {
+                    listmngr_core::Address::new(text, String::new()).map_err(|_| invalid())?;
+                }
+                messages.reply_to_address = text.into();
+            }
+            "subscription_policy" => {
+                list.member_policy.subscription_policy = parse_enum(key, value)?;
+            }
+            "unsubscription_policy" => {
+                list.member_policy.unsubscription_policy = parse_enum(key, value)?;
+            }
+            "member_roster_visibility" => {
+                list.member_policy.member_roster_visibility = parse_enum(key, value)?;
+            }
+            "forward_unrecognized_bounces_to" => {
+                list.forward_unrecognized_bounces_to = parse_enum(key, value)?;
+            }
+            "autorespond_owner" => {
+                list.automatic_responses.autorespond_owner = parse_enum(key, value)?;
+            }
+            "autorespond_postings" => {
+                list.automatic_responses.autorespond_postings = parse_enum(key, value)?;
+            }
+            "autorespond_requests" => {
+                list.automatic_responses.autorespond_requests = parse_enum(key, value)?;
+            }
+            "autoresponse_owner_text"
+            | "autoresponse_postings_text"
+            | "autoresponse_request_text" => {
+                let text = value
+                    .as_str()
+                    .filter(|text| text.len() <= SETTING_TEXT_BYTES)
+                    .ok_or_else(invalid)?;
+                let responses = &mut list.automatic_responses;
+                match key {
+                    "autoresponse_owner_text" => responses.autoresponse_owner_text = text.into(),
+                    "autoresponse_postings_text" => {
+                        responses.autoresponse_postings_text = text.into();
+                    }
+                    _ => responses.autoresponse_request_text = text.into(),
+                }
+            }
+            "autoresponse_grace_period" => {
+                list.automatic_responses.autoresponse_grace_period = value
+                    .as_i64()
+                    .filter(|days| (0..=3650).contains(days))
+                    .and_then(|days| i32::try_from(days).ok())
+                    .ok_or_else(invalid)?;
+            }
+            "dmarc_addresses" => list.dmarc.dmarc_addresses = parse_address_list(key, value)?,
+            "topics_bodylines_limit" => {
+                list.topics_bodylines_limit = value
+                    .as_i64()
+                    .filter(|limit| (-1..=10_000).contains(limit))
+                    .and_then(|limit| i32::try_from(limit).ok())
+                    .ok_or_else(invalid)?;
+            }
+            "topics" => list.topics = parse_topics(value)?,
+            "dmarc_moderation_notice" | "dmarc_wrapped_message_text" => {
+                let text = value
+                    .as_str()
+                    .filter(|text| text.len() <= SETTING_TEXT_BYTES)
+                    .ok_or_else(invalid)?;
+                if key == "dmarc_moderation_notice" {
+                    list.dmarc.dmarc_moderation_notice = text.into();
+                } else {
+                    list.dmarc.dmarc_wrapped_message_text = text.into();
+                }
+            }
+            _ => return Err(invalid()),
+        }
+        Ok(())
+    }
+
+    fn patch_address_list(
+        list: &mut MailingList,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
+        let parsed = parse_address_list(key, value)?;
+        let target = match key {
+            "acceptable_aliases" => &mut list.acceptable_aliases,
+            "accept_these_nonmembers" => &mut list.accept_these_nonmembers,
+            "hold_these_nonmembers" => &mut list.hold_these_nonmembers,
+            "reject_these_nonmembers" => &mut list.reject_these_nonmembers,
+            "discard_these_nonmembers" => &mut list.discard_these_nonmembers,
+            _ => return Err(Error::Validation(key.into())),
+        };
+        *target = parsed;
+        Ok(())
+    }
+
+    /// Hash a new `Approved:` posting key, or clear it with an empty string.
+    fn moderator_password_change(self, value: &serde_json::Value) -> Result<PasswordChange> {
+        let invalid = || Error::Validation("moderator_password".into());
+        let plaintext = value.as_str().ok_or_else(invalid)?;
+        if plaintext.is_empty() {
+            return Ok(PasswordChange::Clear);
+        }
+        if plaintext.len() > 1024 {
+            return Err(invalid());
+        }
+        let hasher = self.db.users().password_hasher()?;
+        let salt = SaltString::generate(&mut OsRng);
+        Ok(PasswordChange::Set(
+            hasher
+                .hash_password(plaintext.as_bytes(), &salt)
+                .map_err(db_error)?
+                .to_string(),
+        ))
+    }
+
+    fn patch_posting_pipeline(list: &mut MailingList, value: &serde_json::Value) -> Result<()> {
+        let name = value
+            .as_str()
+            .ok_or_else(|| Error::Validation("posting_pipeline".into()))?;
+        let registry = listmngr_mail::handlers::builtin_registry();
+        let pipeline = registry
+            .pipeline(name)
+            .ok_or_else(|| Error::Validation(format!("unknown posting pipeline: {name}")))?;
+        if !registry.is_executable(pipeline) || !pipeline.delivers_posts() {
+            return Err(Error::Validation(format!(
+                "{name} cannot deliver list posts"
+            )));
+        }
+        list.posting_pipeline = name.into();
+        Ok(())
+    }
+
+    fn patch_text(list: &mut MailingList, key: &str, value: &serde_json::Value) -> Result<()> {
+        let target = match key {
+            "display_name" => &mut list.display_name,
+            "description" => &mut list.description,
+            "info" => &mut list.info,
+            _ => &mut list.subject_prefix,
+        };
+        *target = value
+            .as_str()
+            .filter(|text| key != "subject_prefix" || !text.contains(['\r', '\n']))
+            .ok_or_else(|| Error::Validation(key.into()))?
+            .into();
+        Ok(())
+    }
+
+    /// Apply one patch key to the in-memory list. `moderator_password` is
+    /// only checked for presence here: the caller hashed it before the
+    /// transaction began.
+    fn apply_patch_key(
+        list: &mut MailingList,
+        key: &str,
+        value: &serde_json::Value,
+        password: &PasswordChange,
+    ) -> Result<()> {
+        match key {
+            "moderator_password" => {
+                if matches!(password, PasswordChange::Unchanged) {
+                    return Err(Error::Validation(key.into()));
+                }
+            }
+            "acceptable_aliases"
+            | "accept_these_nonmembers"
+            | "hold_these_nonmembers"
+            | "reject_these_nonmembers"
+            | "discard_these_nonmembers" => Self::patch_address_list(list, key, value)?,
+            "posting_pipeline" => Self::patch_posting_pipeline(list, value)?,
+            "display_name" | "description" | "info" | "subject_prefix" => {
+                Self::patch_text(list, key, value)?;
+            }
+            "default_member_action" | "default_nonmember_action" => {
+                let action = serde_json::from_value(value.clone())
+                    .map_err(|_| Error::Validation(key.into()))?;
+                if key == "default_member_action" {
+                    list.default_member_action = action;
+                } else {
+                    list.default_nonmember_action = action;
+                }
+            }
+            "advertised"
+            | "anonymous_list"
+            | "send_welcome_message"
+            | "send_goodbye_message"
+            | "bounce_notify_owner_on_removal"
+            | "process_bounces"
+            | "bounce_notify_owner_on_disable"
+            | "bounce_notify_owner_on_bounce_increment"
+            | "emergency"
+            | "administrivia"
+            | "require_explicit_destination"
+            | "respond_to_post_requests"
+            | "admin_immed_notify"
+            | "digests_enabled"
+            | "digest_send_periodic"
+            | "filter_content"
+            | "collapse_alternatives"
+            | "convert_html_to_plaintext"
+            | "include_rfc2369_headers"
+            | "allow_list_posts"
+            | "first_strip_reply_to"
+            | "include_sender_header"
+            | "topics_enabled" => Self::patch_boolean(list, key, value)?,
+            "filter_types"
+            | "pass_types"
+            | "filter_extensions"
+            | "pass_extensions"
+            | "filter_action"
+            | "reply_goes_to_list"
+            | "reply_to_address"
+            | "personalize"
+            | "subscription_policy"
+            | "unsubscription_policy"
+            | "member_roster_visibility"
+            | "forward_unrecognized_bounces_to"
+            | "dmarc_addresses"
+            | "dmarc_moderation_notice"
+            | "dmarc_wrapped_message_text"
+            | "topics_bodylines_limit"
+            | "autorespond_owner"
+            | "autorespond_postings"
+            | "autorespond_requests"
+            | "autoresponse_owner_text"
+            | "autoresponse_postings_text"
+            | "autoresponse_request_text"
+            | "autoresponse_grace_period"
+            | "topics" => Self::patch_alter_messages(list, key, value)?,
+            "preferred_language" => {
+                let language = value
+                    .as_str()
+                    .filter(|language| !language.trim().is_empty())
+                    .ok_or_else(|| Error::Validation(key.into()))?;
+                list.preferred_language = language.into();
+            }
+            "dmarc_mitigate_action" | "dmarc_mitigate_unconditionally" => {}
+            "next_digest_number" | "digest_size_threshold" | "digest_volume_frequency" => {
+                Self::patch_digest_setting(list, key, value)?;
+            }
+            "bounce_you_are_disabled_warnings"
+            | "bounce_you_are_disabled_warnings_interval"
+            | "bounce_score_threshold"
+            | "bounce_info_stale_after" => Self::patch_bounce_setting(list, key, value)?,
+            "max_message_size" => list.max_message_size = Self::posting_limit(value, key)?,
+            "max_num_recipients" => list.max_num_recipients = Self::posting_limit(value, key)?,
+            "archive_policy" => list.archive_policy = parse_enum(key, value)?,
+            "archive_rendering_mode" => list.archive_rendering_mode = parse_enum(key, value)?,
+            _ => {
+                return Err(Error::Validation(format!(
+                    "read-only or unknown list setting: {key}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    async fn persist_alter_messages(
+        tx: &mut Transaction<'_, Any>,
+        list: &MailingList,
+    ) -> Result<()> {
+        let encode = |entries: &Vec<String>| {
+            serde_json::to_string(entries).expect("string vector serializes")
+        };
+        let messages = &list.alter_messages;
+        sqlx::query("UPDATE mailing_lists SET filter_content=$1,filter_types=$2,pass_types=$3,filter_extensions=$4,pass_extensions=$5,collapse_alternatives=$6,convert_html_to_plaintext=$7,filter_action=$8,include_rfc2369_headers=$9,allow_list_posts=$10,reply_goes_to_list=$11,reply_to_address=$12,first_strip_reply_to=$13,personalize=$14,include_sender_header=$15,subscription_policy=$16,unsubscription_policy=$17,member_roster_visibility=$18,dmarc_addresses=$19,dmarc_moderation_notice=$20,dmarc_wrapped_message_text=$21,forward_unrecognized_bounces_to=$22 WHERE list_id=$23")
+            .bind(i64::from(messages.filter_content))
+            .bind(encode(&messages.filter_types))
+            .bind(encode(&messages.pass_types))
+            .bind(encode(&messages.filter_extensions))
+            .bind(encode(&messages.pass_extensions))
+            .bind(i64::from(messages.collapse_alternatives))
+            .bind(i64::from(messages.convert_html_to_plaintext))
+            .bind(messages.filter_action.as_str())
+            .bind(i64::from(messages.include_rfc2369_headers))
+            .bind(i64::from(messages.allow_list_posts))
+            .bind(messages.reply_goes_to_list.as_str())
+            .bind(&messages.reply_to_address)
+            .bind(i64::from(messages.first_strip_reply_to))
+            .bind(messages.personalize.as_str())
+            .bind(i64::from(messages.include_sender_header))
+            .bind(list.member_policy.subscription_policy.as_str())
+            .bind(list.member_policy.unsubscription_policy.as_str())
+            .bind(list.member_policy.member_roster_visibility.as_str())
+            .bind(encode(&list.dmarc.dmarc_addresses))
+            .bind(&list.dmarc.dmarc_moderation_notice)
+            .bind(&list.dmarc.dmarc_wrapped_message_text)
+            .bind(list.forward_unrecognized_bounces_to.as_str())
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        let responses = &list.automatic_responses;
+        sqlx::query("UPDATE mailing_lists SET autorespond_owner=$1,autoresponse_owner_text=$2,autorespond_postings=$3,autoresponse_postings_text=$4,autorespond_requests=$5,autoresponse_request_text=$6,autoresponse_grace_period=$7 WHERE list_id=$8")
+            .bind(responses.autorespond_owner.as_str())
+            .bind(&responses.autoresponse_owner_text)
+            .bind(responses.autorespond_postings.as_str())
+            .bind(&responses.autoresponse_postings_text)
+            .bind(responses.autorespond_requests.as_str())
+            .bind(&responses.autoresponse_request_text)
+            .bind(i64::from(responses.autoresponse_grace_period))
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        sqlx::query("UPDATE mailing_lists SET topics_enabled=$1,topics_bodylines_limit=$2,topics=$3 WHERE list_id=$4")
+            .bind(i64::from(list.topics_enabled))
+            .bind(i64::from(list.topics_bodylines_limit))
+            .bind(serde_json::to_string(&list.topics).expect("topics serialize"))
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        Ok(())
+    }
+
+    fn patch_digest_setting(
+        list: &mut MailingList,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
+        match key {
+            "next_digest_number" => {
+                list.next_digest_number = value
+                    .as_i64()
+                    .filter(|number| *number >= 1)
+                    .ok_or_else(|| Error::Validation(key.into()))?;
+            }
+            "digest_size_threshold" => {
+                list.digest_size_threshold = value
+                    .as_f64()
+                    .filter(|kib| kib.is_finite() && (0.0..=1_048_576.0).contains(kib))
+                    .ok_or_else(|| Error::Validation(key.into()))?;
+            }
+            _ => list.digest_volume_frequency = parse_enum(key, value)?,
+        }
+        Ok(())
+    }
+
+    async fn persist_acceptance(tx: &mut Transaction<'_, Any>, list: &MailingList) -> Result<()> {
+        let encode = |entries: &Vec<String>| {
+            serde_json::to_string(entries).expect("string vector serializes")
+        };
+        sqlx::query("UPDATE mailing_lists SET digests_enabled=$1,digest_size_threshold=$2,digest_send_periodic=$3,digest_volume_frequency=$4 WHERE list_id=$5")
+            .bind(i64::from(list.digests_enabled))
+            .bind(list.digest_size_threshold)
+            .bind(i64::from(list.digest_send_periodic))
+            .bind(list.digest_volume_frequency.as_str())
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        sqlx::query("UPDATE mailing_lists SET administrivia=$1,require_explicit_destination=$2,acceptable_aliases=$3,accept_these_nonmembers=$4,hold_these_nonmembers=$5,reject_these_nonmembers=$6,discard_these_nonmembers=$7,posting_pipeline=$9,respond_to_post_requests=$10,admin_immed_notify=$11 WHERE list_id=$8")
+            .bind(i64::from(list.administrivia))
+            .bind(i64::from(list.require_explicit_destination))
+            .bind(encode(&list.acceptable_aliases))
+            .bind(encode(&list.accept_these_nonmembers))
+            .bind(encode(&list.hold_these_nonmembers))
+            .bind(encode(&list.reject_these_nonmembers))
+            .bind(encode(&list.discard_these_nonmembers))
+            .bind(list.id.as_str())
+            .bind(&list.posting_pipeline)
+            .bind(i64::from(list.respond_to_post_requests))
+            .bind(i64::from(list.admin_immed_notify))
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        Ok(())
+    }
+
+    /// Whether `candidate` is the list's `Approved:` posting key. A list with
+    /// no key never verifies. Comparison is Argon2's constant-time verify.
+    /// # Errors
+    /// Returns a database error or not-found for the list.
+    pub async fn verify_moderator_password(&self, id: &ListId, candidate: &str) -> Result<bool> {
+        let stored: Option<Option<String>> =
+            sqlx::query_scalar("SELECT moderator_password FROM mailing_lists WHERE list_id=$1")
+                .bind(id.as_str())
+                .fetch_optional(&self.db.pool)
+                .await
+                .map_err(db_error)?;
+        let Some(stored) = stored else {
+            return Err(Error::NotFound(id.to_string()));
+        };
+        let Some(hash) = stored else {
+            return Ok(false);
+        };
+        if candidate.is_empty() || candidate.len() > 1024 {
+            return Ok(false);
+        }
+        let parsed = PasswordHash::new(&hash).map_err(db_error)?;
+        Ok(Argon2::default()
+            .verify_password(candidate.as_bytes(), &parsed)
+            .is_ok())
+    }
+
+    async fn persist_lifecycle(tx: &mut Transaction<'_, Any>, list: &MailingList) -> Result<()> {
+        sqlx::query("UPDATE mailing_lists SET send_welcome_message=$1, max_num_recipients=$3, send_goodbye_message=$4 WHERE list_id=$2")
+            .bind(i64::from(list.send_welcome_message))
+            .bind(list.id.as_str())
+            .bind(i64::from(list.max_num_recipients))
+            .bind(i64::from(list.send_goodbye_message))
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        Ok(())
+    }
+
+    async fn persist_maintenance(tx: &mut Transaction<'_, Any>, list: &MailingList) -> Result<()> {
+        sqlx::query("UPDATE mailing_lists SET bounce_you_are_disabled_warnings=$1,bounce_you_are_disabled_warnings_interval=$2,bounce_notify_owner_on_removal=$3 WHERE list_id=$4")
+            .bind(i64::from(list.bounce_you_are_disabled_warnings)).bind(i64::from(list.bounce_you_are_disabled_warnings_interval)).bind(i64::from(list.bounce_notify_owner_on_removal)).bind(list.id.as_str()).execute(&mut **tx).await.map_err(db_error)?;
+        Ok(())
+    }
+
+    fn patch_bounce_setting(
+        list: &mut MailingList,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
+        if matches!(
+            key,
+            "bounce_you_are_disabled_warnings" | "bounce_you_are_disabled_warnings_interval"
+        ) {
+            let (target, max) = if key == "bounce_you_are_disabled_warnings" {
+                (&mut list.bounce_you_are_disabled_warnings, 100)
+            } else {
+                (&mut list.bounce_you_are_disabled_warnings_interval, 36500)
+            };
+            *target = value
+                .as_u64()
+                .filter(|n| *n <= max)
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| Error::Validation(key.into()))?;
+        } else if key == "bounce_score_threshold" {
+            list.bounce_score_threshold = value
+                .as_f64()
+                .filter(|n| n.is_finite() && *n > 0.0 && *n <= 1_000_000.0)
+                .ok_or_else(|| Error::Validation(key.into()))?;
+        } else {
+            list.bounce_info_stale_after = value
+                .as_u64()
+                .filter(|n| (1..=3650).contains(n))
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| Error::Validation(key.into()))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn update_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        id: &ListId,
+        patch: &serde_json::Value,
+        context: &AuditContext,
+    ) -> Result<MailingList> {
+        Self::update_tx_with_password(tx, id, patch, context, PasswordChange::Unchanged).await
+    }
+
+    /// `password` is the pre-hashed `moderator_password` change when the
+    /// patch carried one; the patch itself is audited with that key redacted.
+    pub(crate) async fn update_tx_with_password(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        id: &ListId,
+        patch: &serde_json::Value,
+        context: &AuditContext,
+        password: PasswordChange,
+    ) -> Result<MailingList> {
+        let mut list = lock_list_for_patch(tx, id).await?;
         let object = patch
             .as_object()
             .ok_or_else(|| Error::Validation("config patch must be an object".into()))?;
         for (key, value) in object {
-            match key.as_str() {
-                "display_name" => {
-                    list.display_name = value
-                        .as_str()
-                        .ok_or_else(|| Error::Validation(key.clone()))?
-                        .into();
-                }
-                "description" => {
-                    list.description = value
-                        .as_str()
-                        .ok_or_else(|| Error::Validation(key.clone()))?
-                        .into();
-                }
-                "info" => {
-                    list.info = value
-                        .as_str()
-                        .ok_or_else(|| Error::Validation(key.clone()))?
-                        .into();
-                }
-                "subject_prefix" => {
-                    list.subject_prefix = value
-                        .as_str()
-                        .ok_or_else(|| Error::Validation(key.clone()))?
-                        .into();
-                }
-                "advertised" => {
-                    list.advertised = value
-                        .as_bool()
-                        .ok_or_else(|| Error::Validation(key.clone()))?;
-                }
-                "preferred_language" => {
-                    let language = value
-                        .as_str()
-                        .filter(|language| !language.trim().is_empty())
-                        .ok_or_else(|| Error::Validation(key.clone()))?;
-                    list.preferred_language = language.into();
-                }
-                "anonymous_list" => {
-                    list.anonymous_list = value
-                        .as_bool()
-                        .ok_or_else(|| Error::Validation(key.clone()))?;
-                }
-                "next_digest_number" => {
-                    list.next_digest_number = value
-                        .as_i64()
-                        .filter(|number| *number >= 1)
-                        .ok_or_else(|| Error::Validation(key.clone()))?;
-                }
-                "emergency" => {
-                    list.emergency = value
-                        .as_bool()
-                        .ok_or_else(|| Error::Validation(key.clone()))?;
-                }
-                "archive_policy" => {
-                    list.archive_policy = value
-                        .as_str()
-                        .ok_or_else(|| Error::Validation(key.clone()))?
-                        .parse()?;
-                }
-                "archive_rendering_mode" => {
-                    list.archive_rendering_mode = value
-                        .as_str()
-                        .ok_or_else(|| Error::Validation(key.clone()))?
-                        .parse()?;
-                }
-                _ => {
-                    return Err(Error::Validation(format!(
-                        "read-only or unknown list setting: {key}"
-                    )));
-                }
-            }
+            Self::apply_patch_key(&mut list, key, value, &password)?;
         }
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        sqlx::query("UPDATE mailing_lists SET display_name=$1,description=$2,info=$3,subject_prefix=$4,advertised=$5,preferred_language=$6,anonymous_list=$7,next_digest_number=$8,emergency=$9,archive_policy=$10,archive_rendering_mode=$11 WHERE list_id=$12")
-            .bind(&list.display_name).bind(&list.description).bind(&list.info).bind(&list.subject_prefix).bind(i64::from(list.advertised)).bind(&list.preferred_language).bind(i64::from(list.anonymous_list)).bind(list.next_digest_number).bind(i64::from(list.emergency)).bind(list.archive_policy.to_string()).bind(list.archive_rendering_mode.to_string()).bind(id.as_str()).execute(&mut *tx).await.map_err(db_error)?;
-        Database::record_tx_with_context(
-            &mut tx,
-            context,
-            "list.config",
-            "list",
-            id.as_str(),
-            patch.clone(),
-        )
-        .await?;
-        tx.commit().await.map_err(db_error)?;
+        Self::patch_dmarc(&mut list.dmarc, object)?;
+        Self::persist_maintenance(tx, &list).await?;
+        Self::persist_acceptance(tx, &list).await?;
+        Self::persist_alter_messages(tx, &list).await?;
+        if !matches!(password, PasswordChange::Unchanged) {
+            let column = match password {
+                PasswordChange::Set(hash) => Some(hash),
+                PasswordChange::Clear | PasswordChange::Unchanged => None,
+            };
+            sqlx::query("UPDATE mailing_lists SET moderator_password=$1 WHERE list_id=$2")
+                .bind(column)
+                .bind(id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(db_error)?;
+        }
+        sqlx::query("UPDATE mailing_lists SET process_bounces=$1,bounce_info_stale_after=$2,bounce_score_threshold=$4,bounce_notify_owner_on_disable=$5,bounce_notify_owner_on_bounce_increment=$6 WHERE list_id=$3")
+            .bind(i64::from(list.process_bounces)).bind(i64::from(list.bounce_info_stale_after)).bind(id.as_str()).bind(list.bounce_score_threshold).bind(i64::from(list.bounce_notify_owner_on_disable)).bind(i64::from(list.bounce_notify_owner_on_bounce_increment)).execute(&mut **tx).await.map_err(db_error)?;
+        Self::persist_lifecycle(tx, &list).await?;
+        sqlx::query("UPDATE mailing_lists SET display_name=$1,description=$2,info=$3,subject_prefix=$4,advertised=$5,preferred_language=$6,anonymous_list=$7,next_digest_number=$8,emergency=$9,archive_policy=$10,archive_rendering_mode=$11,default_member_action=$13,default_nonmember_action=$14,max_message_size=$15,dmarc_mitigate_action=$16,dmarc_mitigate_unconditionally=$17 WHERE list_id=$12")
+            .bind(&list.display_name).bind(&list.description).bind(&list.info).bind(&list.subject_prefix).bind(i64::from(list.advertised)).bind(&list.preferred_language).bind(i64::from(list.anonymous_list)).bind(list.next_digest_number).bind(i64::from(list.emergency)).bind(list.archive_policy.to_string()).bind(list.archive_rendering_mode.to_string()).bind(id.as_str()).bind(list.default_member_action.map(|value| value.to_string())).bind(list.default_nonmember_action.map(|value| value.to_string())).bind(i64::from(list.max_message_size)).bind(serde_json::to_value(list.dmarc.action).expect("serialize action").as_str().expect("action string")).bind(i64::from(list.dmarc.unconditional)).execute(&mut **tx).await.map_err(db_error)?;
+        let mut audited = patch.clone();
+        if let Some(object) = audited.as_object_mut()
+            && object.contains_key("moderator_password")
+        {
+            // Never persist the plaintext or the hash in the audit trail.
+            object.insert(
+                "moderator_password".into(),
+                serde_json::Value::String("[redacted]".into()),
+            );
+        }
+        Database::record_tx_with_context(tx, context, "list.config", "list", id.as_str(), audited)
+            .await?;
         Ok(list)
     }
     /// # Errors
@@ -1217,6 +1837,7 @@ impl ListRepo<'_> {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(db_error)?;
 
+        digests::delete_list(&mut tx, id).await?;
         for table in ["list_archivers", "header_matches", "bans"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE list_id=$1"))
                 .bind(id.as_str())
@@ -1229,11 +1850,14 @@ impl ListRepo<'_> {
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
-        sqlx::query("DELETE FROM members WHERE list_id=$1")
+        let member_ids: Vec<String> = sqlx::query_scalar("SELECT id FROM members WHERE list_id=$1")
             .bind(id.as_str())
-            .execute(&mut *tx)
+            .fetch_all(&mut *tx)
             .await
             .map_err(db_error)?;
+        for member_id in member_ids {
+            workflows::delete_member_with_goodbye(&mut tx, self.db, &member_id).await?;
+        }
         for preference_id in preference_ids {
             sqlx::query("DELETE FROM preferences WHERE id=$1")
                 .bind(preference_id)
@@ -1318,6 +1942,10 @@ impl ListRepo<'_> {
     /// # Errors
     ///
     /// Returns an error for invalid list data, missing/conflicting records, or database/audit transaction failure.
+    /// Store an inline list-scoped template body. See
+    /// [`crate::templates::TemplateRepo::set_body`].
+    /// # Errors
+    /// Returns validation errors, not-found, or a database/audit failure.
     pub async fn set_template(
         &self,
         id: &ListId,
@@ -1328,12 +1956,9 @@ impl ListRepo<'_> {
         self.set_template_with_context(id, name, language, body, &AuditContext::system())
             .await
     }
-
-    /// Sets a list template attributed to the supplied audit context.
-    ///
+    /// See [`Self::set_template`].
     /// # Errors
-    ///
-    /// Returns an error if the list is missing or the database/audit transaction fails.
+    /// Returns validation errors, not-found, or a database/audit failure.
     pub async fn set_template_with_context(
         &self,
         id: &ListId,
@@ -1342,25 +1967,19 @@ impl ListRepo<'_> {
         body: &str,
         context: &AuditContext,
     ) -> Result<()> {
-        self.get(id).await?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        sqlx::query("INSERT INTO templates(id,name,scope,scope_id,language,body) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name,scope,scope_id,language) DO UPDATE SET body=excluded.body")
-            .bind(Uuid::now_v7().to_string()).bind(name).bind("list").bind(id.as_str()).bind(language).bind(body).execute(&mut *tx).await.map_err(db_error)?;
-        Database::record_tx_with_context(
-            &mut tx,
-            context,
-            "list.template.set",
-            "list",
-            id.as_str(),
-            serde_json::json!({"name":name,"language":language}),
-        )
-        .await?;
-        tx.commit().await.map_err(db_error)
+        self.db
+            .templates()
+            .set_body_with_context(
+                &crate::templates::Scope::List(id.clone()),
+                name,
+                language,
+                body,
+                context,
+            )
+            .await
     }
-
     /// # Errors
-    ///
-    /// Returns an error for invalid list data, missing/conflicting records, or database/audit transaction failure.
+    /// Returns not-found or a database error.
     pub async fn templates(&self, id: &ListId) -> Result<Vec<Template>> {
         self.get(id).await?;
         let rows = sqlx::query("SELECT id,name,scope,scope_id,language,uri,body FROM templates WHERE scope='list' AND scope_id=$1 ORDER BY name,language")
@@ -1380,7 +1999,55 @@ impl ListRepo<'_> {
             .collect()
     }
 }
+async fn lock_list_for_patch(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    id: &ListId,
+) -> Result<MailingList> {
+    // Writer reservation precedes the snapshot: a waiter must not restore
+    // stale unrelated fields that committed while it was waiting for a lock.
+    let locked = sqlx::query("UPDATE mailing_lists SET list_id=list_id WHERE list_id=$1")
+        .bind(id.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?
+        .rows_affected();
+    if locked != 1 {
+        return Err(Error::NotFound(id.to_string()));
+    }
+    let row = sqlx::query("SELECT * FROM mailing_lists WHERE list_id=$1")
+        .bind(id.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    list_from_row(&row)
+}
+
+fn row_u32(row: &sqlx::any::AnyRow, key: &str) -> Result<u32> {
+    u32::try_from(row.try_get::<i64, _>(key).map_err(db_error)?).map_err(db_error)
+}
+
+fn automatic_responses_from_row(
+    row: &sqlx::any::AnyRow,
+) -> Result<listmngr_core::AutomaticResponses> {
+    Ok(listmngr_core::AutomaticResponses {
+        autorespond_owner: enum_column(row, "autorespond_owner")?,
+        autoresponse_owner_text: row.try_get("autoresponse_owner_text").map_err(db_error)?,
+        autorespond_postings: enum_column(row, "autorespond_postings")?,
+        autoresponse_postings_text: row
+            .try_get("autoresponse_postings_text")
+            .map_err(db_error)?,
+        autorespond_requests: enum_column(row, "autorespond_requests")?,
+        autoresponse_request_text: row.try_get("autoresponse_request_text").map_err(db_error)?,
+        autoresponse_grace_period: i32::try_from(
+            row.try_get::<i64, _>("autoresponse_grace_period")
+                .map_err(db_error)?,
+        )
+        .unwrap_or(90),
+    })
+}
+
 fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
+    let bounce_flags = bounce_flags_from_row(row)?;
     Ok(MailingList {
         id: row
             .try_get::<String, _>("list_id")
@@ -1393,6 +2060,30 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
         advertised: row.try_get::<i64, _>("advertised").map_err(db_error)? != 0,
         preferred_language: row.try_get("preferred_language").map_err(db_error)?,
         anonymous_list: row.try_get::<i64, _>("anonymous_list").map_err(db_error)? != 0,
+        send_welcome_message: row
+            .try_get::<i64, _>("send_welcome_message")
+            .map_err(db_error)?
+            != 0,
+        bounce_notify_owner_on_disable: bounce_flags.1,
+        bounce_you_are_disabled_warnings: row_u32(row, "bounce_you_are_disabled_warnings")?,
+        bounce_you_are_disabled_warnings_interval: row_u32(
+            row,
+            "bounce_you_are_disabled_warnings_interval",
+        )?,
+        bounce_notify_owner_on_removal: bounce_flags.3,
+        process_bounces: bounce_flags.0,
+        bounce_notify_owner_on_bounce_increment: bounce_flags.2,
+        bounce_score_threshold: row.try_get("bounce_score_threshold").map_err(db_error)?,
+        bounce_info_stale_after: u32::try_from(
+            row.try_get::<i64, _>("bounce_info_stale_after")
+                .map_err(db_error)?,
+        )
+        .map_err(|_| Error::Validation("bounce_info_stale_after".into()))?,
+        send_goodbye_message: row
+            .try_get::<i64, _>("send_goodbye_message")
+            .map_err(db_error)?
+            != 0,
+        dmarc: dmarc_from_row(row)?,
         created_at: parse_time(&row.try_get::<String, _>("created_at").map_err(db_error)?)?,
         last_post_at: row
             .try_get::<Option<String>, _>("last_post_at")
@@ -1407,7 +2098,21 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
             .map_err(db_error)?
             .map(|value| parse_time(&value))
             .transpose()?,
+        digests_enabled: flag_column(row, "digests_enabled")?,
+        digest_size_threshold: row.try_get("digest_size_threshold").map_err(db_error)?,
+        digest_send_periodic: flag_column(row, "digest_send_periodic")?,
+        digest_volume_frequency: enum_column(row, "digest_volume_frequency")?,
         emergency: row.try_get::<i64, _>("emergency").map_err(db_error)? != 0,
+        max_message_size: row
+            .try_get::<i64, _>("max_message_size")
+            .map_err(db_error)?
+            .try_into()
+            .map_err(db_error)?,
+        max_num_recipients: row
+            .try_get::<i64, _>("max_num_recipients")
+            .map_err(db_error)?
+            .try_into()
+            .map_err(db_error)?,
         archive_policy: row
             .try_get::<String, _>("archive_policy")
             .map_err(db_error)?
@@ -1417,7 +2122,243 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
             .map_err(db_error)?
             .parse()?,
         style_name: row.try_get("style_name").map_err(db_error)?,
+        default_member_action: optional_enum_column(row, "default_member_action")?,
+        default_nonmember_action: optional_enum_column(row, "default_nonmember_action")?,
+        administrivia: flag_column(row, "administrivia")?,
+        require_explicit_destination: flag_column(row, "require_explicit_destination")?,
+        acceptable_aliases: address_list_column(row, "acceptable_aliases")?,
+        accept_these_nonmembers: address_list_column(row, "accept_these_nonmembers")?,
+        hold_these_nonmembers: address_list_column(row, "hold_these_nonmembers")?,
+        reject_these_nonmembers: address_list_column(row, "reject_these_nonmembers")?,
+        discard_these_nonmembers: address_list_column(row, "discard_these_nonmembers")?,
+        posting_pipeline: row.try_get("posting_pipeline").map_err(db_error)?,
+        respond_to_post_requests: flag_column(row, "respond_to_post_requests")?,
+        admin_immed_notify: flag_column(row, "admin_immed_notify")?,
+        automatic_responses: automatic_responses_from_row(row)?,
+        alter_messages: alter_messages_from_row(row)?,
+        member_policy: listmngr_core::MemberPolicy {
+            subscription_policy: enum_column(row, "subscription_policy")?,
+            unsubscription_policy: enum_column(row, "unsubscription_policy")?,
+            member_roster_visibility: enum_column(row, "member_roster_visibility")?,
+        },
+        forward_unrecognized_bounces_to: enum_column(row, "forward_unrecognized_bounces_to")?,
+        topics_enabled: flag_column(row, "topics_enabled")?,
+        topics_bodylines_limit: topics_limit_column(row)?,
+        topics: topics_column(row)?,
     })
+}
+
+fn optional_enum_column<T: std::str::FromStr<Err = Error>>(
+    row: &sqlx::any::AnyRow,
+    column: &str,
+) -> Result<Option<T>> {
+    row.try_get::<Option<String>, _>(column)
+        .map_err(db_error)?
+        .map(|value| value.parse())
+        .transpose()
+}
+
+fn topics_limit_column(row: &sqlx::any::AnyRow) -> Result<i32> {
+    row.try_get::<i64, _>("topics_bodylines_limit")
+        .map_err(db_error)?
+        .try_into()
+        .map_err(|_| Error::Validation("corrupt topics_bodylines_limit".into()))
+}
+
+fn topics_column(row: &sqlx::any::AnyRow) -> Result<Vec<listmngr_core::Topic>> {
+    let text: String = row.try_get("topics").map_err(db_error)?;
+    serde_json::from_str(&text).map_err(|_| Error::Validation("corrupt topics".into()))
+}
+
+fn alter_messages_from_row(row: &sqlx::any::AnyRow) -> Result<listmngr_core::AlterMessages> {
+    Ok(listmngr_core::AlterMessages {
+        filter_content: flag_column(row, "filter_content")?,
+        filter_types: address_list_column(row, "filter_types")?,
+        pass_types: address_list_column(row, "pass_types")?,
+        filter_extensions: address_list_column(row, "filter_extensions")?,
+        pass_extensions: address_list_column(row, "pass_extensions")?,
+        collapse_alternatives: flag_column(row, "collapse_alternatives")?,
+        convert_html_to_plaintext: flag_column(row, "convert_html_to_plaintext")?,
+        filter_action: enum_column(row, "filter_action")?,
+        include_rfc2369_headers: flag_column(row, "include_rfc2369_headers")?,
+        allow_list_posts: flag_column(row, "allow_list_posts")?,
+        reply_goes_to_list: enum_column(row, "reply_goes_to_list")?,
+        reply_to_address: row.try_get("reply_to_address").map_err(db_error)?,
+        first_strip_reply_to: flag_column(row, "first_strip_reply_to")?,
+        personalize: enum_column(row, "personalize")?,
+        include_sender_header: flag_column(row, "include_sender_header")?,
+    })
+}
+
+/// A TEXT column holding one of a `string_enum`'s wire values.
+fn enum_column<T: std::str::FromStr<Err = Error>>(
+    row: &sqlx::any::AnyRow,
+    column: &str,
+) -> Result<T> {
+    row.try_get::<String, _>(column)
+        .map_err(db_error)?
+        .parse()
+        .map_err(|_| Error::Validation(format!("corrupt {column}")))
+}
+
+fn flag_column(row: &sqlx::any::AnyRow, column: &str) -> Result<bool> {
+    Ok(row.try_get::<i64, _>(column).map_err(db_error)? != 0)
+}
+
+fn bounce_flags_from_row(row: &sqlx::any::AnyRow) -> Result<(bool, bool, bool, bool)> {
+    let flag = |column: &str| -> Result<bool> {
+        Ok(row.try_get::<i64, _>(column).map_err(db_error)? != 0)
+    };
+    Ok((
+        flag("process_bounces")?,
+        flag("bounce_notify_owner_on_disable")?,
+        flag("bounce_notify_owner_on_bounce_increment")?,
+        flag("bounce_notify_owner_on_removal")?,
+    ))
+}
+
+fn dmarc_from_row(row: &sqlx::any::AnyRow) -> Result<listmngr_core::DmarcSettings> {
+    Ok(listmngr_core::DmarcSettings {
+        action: serde_json::from_value(serde_json::Value::String(
+            row.try_get("dmarc_mitigate_action").map_err(db_error)?,
+        ))
+        .map_err(db_error)?,
+        unconditional: row
+            .try_get::<i64, _>("dmarc_mitigate_unconditionally")
+            .map_err(db_error)?
+            != 0,
+        dmarc_addresses: address_list_column(row, "dmarc_addresses")?,
+        dmarc_moderation_notice: row.try_get("dmarc_moderation_notice").map_err(db_error)?,
+        dmarc_wrapped_message_text: row
+            .try_get("dmarc_wrapped_message_text")
+            .map_err(db_error)?,
+    })
+}
+
+/// A JSON-array column of exact addresses or `^`-anchored regexes.
+fn address_list_column(row: &sqlx::any::AnyRow, column: &str) -> Result<Vec<String>> {
+    let text: String = row.try_get(column).map_err(db_error)?;
+    serde_json::from_str(&text).map_err(|_| Error::Validation(format!("corrupt {column}")))
+}
+
+/// Longest single entry and longest list accepted for an address list.
+const ADDRESS_LIST_ENTRY_BYTES: usize = 1024;
+const ADDRESS_LIST_MAX_ENTRIES: usize = 10_000;
+/// Longest free-text setting (DMARC notice and wrapper text).
+const SETTING_TEXT_BYTES: usize = 65_536;
+/// Longest MIME type or extension token and longest token list.
+const TOKEN_BYTES: usize = 255;
+const TOKEN_LIST_MAX_ENTRIES: usize = 1000;
+
+const TOPIC_MAX_ENTRIES: usize = 1000;
+const TOPIC_NAME_BYTES: usize = 64;
+const TOPIC_PATTERN_BYTES: usize = 4096;
+const TOPIC_DESCRIPTION_BYTES: usize = 1024;
+
+/// A JSON array of `{name, pattern, description}` topics: unique
+/// single-line names, patterns whose every line compiles as the matcher
+/// will run it, bounded description text.
+fn parse_topics(value: &serde_json::Value) -> Result<Vec<listmngr_core::Topic>> {
+    let invalid = |detail: &str| Error::Validation(format!("topics: {detail}"));
+    let topics: Vec<listmngr_core::Topic> =
+        serde_json::from_value(value.clone()).map_err(|_| invalid("expected a list of topics"))?;
+    if topics.len() > TOPIC_MAX_ENTRIES {
+        return Err(invalid("too many topics"));
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for topic in &topics {
+        let name = topic.name.trim();
+        if name.is_empty()
+            || name.len() > TOPIC_NAME_BYTES
+            || name.chars().any(char::is_control)
+            || !names.insert(name.to_ascii_lowercase())
+        {
+            return Err(invalid(
+                "topic names must be unique, single-line and at most 64 bytes",
+            ));
+        }
+        if topic.pattern.trim().is_empty() || topic.pattern.len() > TOPIC_PATTERN_BYTES {
+            return Err(invalid(
+                "topic patterns must be non-empty and at most 4096 bytes",
+            ));
+        }
+        listmngr_pipeline::topics::compile_topic_pattern(&topic.pattern)
+            .map_err(|error| invalid(&format!("topic {name}: {error}")))?;
+        if topic.description.len() > TOPIC_DESCRIPTION_BYTES
+            || topic.description.contains(['\r', '\n'])
+        {
+            return Err(invalid(
+                "topic descriptions must be single-line and at most 1024 bytes",
+            ));
+        }
+    }
+    Ok(topics)
+}
+
+/// One of a `string_enum`'s wire values, as a JSON string.
+fn parse_enum<T: std::str::FromStr<Err = Error>>(
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<T> {
+    value
+        .as_str()
+        .and_then(|text| text.parse().ok())
+        .ok_or_else(|| Error::Validation(key.to_owned()))
+}
+
+/// A JSON array of MIME types (`type` or `type/subtype`) or of file-name
+/// extensions: printable ASCII tokens without whitespace, stored lowercase
+/// as Mailman compares them.
+fn parse_token_list(key: &str, value: &serde_json::Value, mime: bool) -> Result<Vec<String>> {
+    let invalid = || Error::Validation(key.to_owned());
+    let entries = value.as_array().ok_or_else(invalid)?;
+    if entries.len() > TOKEN_LIST_MAX_ENTRIES {
+        return Err(invalid());
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            let text = entry.as_str().ok_or_else(invalid)?;
+            let ok = !text.is_empty()
+                && text.len() <= TOKEN_BYTES
+                && text
+                    .bytes()
+                    .all(|byte| byte.is_ascii_graphic() && byte != b'"' && byte != b'\\')
+                && if mime {
+                    text.matches('/').count() <= 1 && !text.starts_with('/') && !text.ends_with('/')
+                } else {
+                    !text.contains(['/', '.'])
+                };
+            ok.then(|| text.to_ascii_lowercase()).ok_or_else(invalid)
+        })
+        .collect()
+}
+
+/// Validate one address-list setting: a JSON array of non-empty single-line
+/// strings, each either an address or a `^`-anchored regex that compiles.
+fn parse_address_list(key: &str, value: &serde_json::Value) -> Result<Vec<String>> {
+    let invalid = || Error::Validation(key.to_owned());
+    let entries = value.as_array().ok_or_else(invalid)?;
+    if entries.len() > ADDRESS_LIST_MAX_ENTRIES {
+        return Err(invalid());
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            let text = entry.as_str().ok_or_else(invalid)?.trim();
+            if text.is_empty()
+                || text.len() > ADDRESS_LIST_ENTRY_BYTES
+                || text.chars().any(|c| c.is_control() || c.is_whitespace())
+            {
+                return Err(invalid());
+            }
+            if let Some(pattern) = text.strip_prefix('^') {
+                listmngr_pipeline::compile_header_pattern(&format!("^{pattern}"))
+                    .map_err(|_| invalid())?;
+            }
+            Ok(text.to_owned())
+        })
+        .collect()
 }
 
 type ExistingRoleMembers = HashMap<String, (String, String)>;
@@ -1513,14 +2454,11 @@ fn mass_removals(
 
 async fn delete_mass_members(
     tx: &mut Transaction<'_, Any>,
+    db: &Database,
     removed: &[(String, String)],
 ) -> Result<()> {
     for (member_id, preferences_id) in removed {
-        sqlx::query("DELETE FROM members WHERE id=$1")
-            .bind(member_id)
-            .execute(&mut **tx)
-            .await
-            .map_err(db_error)?;
+        workflows::delete_member_with_goodbye(tx, db, member_id).await?;
         sqlx::query("DELETE FROM preferences WHERE id=$1")
             .bind(preferences_id)
             .execute(&mut **tx)
@@ -1547,6 +2485,7 @@ fn mass_additions<'a>(
 
 async fn insert_mass_members(
     tx: &mut Transaction<'_, Any>,
+    db: &Database,
     list: &ListId,
     role: MemberRole,
     mode_for_new: SubscriptionMode,
@@ -1581,8 +2520,11 @@ async fn insert_mass_members(
         sqlx::query("INSERT INTO members(id,list_id,role,address_id,user_id,subscription_mode,display_name,preferences_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
             .bind(member_id.to_string()).bind(list.as_str()).bind(role.to_string())
             .bind(address_id).bind(user_id).bind(mode_for_new.to_string())
-            .bind("").bind(preferences_id.to_string()).bind(now())
+            // Mass operations build addresses without one; a workflow
+            // carries the display name the operator supplied.
+            .bind(&address.display_name).bind(preferences_id.to_string()).bind(now())
             .execute(&mut **tx).await.map_err(db_error)?;
+        workflows::welcome_new_member(tx, db, member_id).await?;
     }
     Ok(())
 }
@@ -1680,9 +2622,9 @@ impl MemberRepo<'_> {
         preflight_mass_operation(operation, &addresses, &existing)?;
 
         let removed = mass_removals(operation, &addresses, &existing);
-        delete_mass_members(&mut tx, &removed).await?;
+        delete_mass_members(&mut tx, self.db, &removed).await?;
         let additions = mass_additions(operation, &addresses, &existing);
-        insert_mass_members(&mut tx, list, role, mode_for_new, &additions).await?;
+        insert_mass_members(&mut tx, self.db, list, role, mode_for_new, &additions).await?;
         let result = MemberMassResult {
             added: additions.len(),
             removed: removed.len(),
@@ -1749,6 +2691,8 @@ impl MemberRepo<'_> {
             moderation_action: None,
             display_name: new.display_name,
             preferences_id: pref,
+            bounce_score: 0.0,
+            last_bounce_received: None,
             created_at: Utc::now(),
         };
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
@@ -1778,6 +2722,7 @@ impl MemberRepo<'_> {
             serde_json::json!({"list_id":member.list_id,"role":member.role,"verified":verified}),
         )
         .await?;
+        workflows::welcome_new_member(&mut tx, self.db, member.id).await?;
         tx.commit().await.map_err(db_error)?;
         Ok(member)
     }
@@ -1889,7 +2834,8 @@ impl MemberRepo<'_> {
             })
             .transpose()?
             .unwrap_or(current.subscription_mode);
-        let mut preferences = self.db.preferences().get(current.preferences_id).await?;
+        // PATCH omission must not replay a pre-transaction preference snapshot.
+        let mut preferences = Preferences::default();
         if let Some(value) = object.get("delivery_mode") {
             preferences.delivery_mode = Some(
                 value
@@ -1915,7 +2861,15 @@ impl MemberRepo<'_> {
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
-        PreferencesRepo::set_tx(&mut tx, current.preferences_id, &preferences).await?;
+        if preferences.delivery_mode.is_some() || preferences.delivery_status.is_some() {
+            // Member UPDATE above is the shared scorer boundary. Only requested
+            // fields are changed, using the current row after any preference wait.
+            sqlx::query("UPDATE preferences SET delivery_mode=COALESCE($1,delivery_mode),delivery_status=COALESCE($2,delivery_status),delivery_generation=delivery_generation+1 WHERE id=$3")
+                .bind(preferences.delivery_mode.map(|v| v.to_string()))
+                .bind(preferences.delivery_status.map(|v| v.to_string()))
+                .bind(current.preferences_id.to_string())
+                .execute(&mut *tx).await.map_err(db_error)?;
+        }
         Database::record_tx_with_context(
             &mut tx,
             context,
@@ -1950,13 +2904,9 @@ impl MemberRepo<'_> {
         let Some(preferences_id) = preferences_id else {
             return Err(Error::NotFound(id.to_string()));
         };
-        let changed = sqlx::query("DELETE FROM members WHERE id=$1")
-            .bind(id.to_string())
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?
-            .rows_affected();
-        debug_assert_eq!(changed, 1);
+        if !workflows::delete_member_with_goodbye(&mut tx, self.db, &id.to_string()).await? {
+            return Err(Error::NotFound(id.to_string()));
+        }
         sqlx::query("DELETE FROM preferences WHERE id=$1")
             .bind(preferences_id)
             .execute(&mut *tx)
@@ -1976,6 +2926,12 @@ impl MemberRepo<'_> {
 }
 fn member_from_row(row: &sqlx::any::AnyRow) -> Result<Member> {
     Ok(Member {
+        bounce_score: row.try_get("bounce_score").map_err(db_error)?,
+        last_bounce_received: row
+            .try_get::<Option<String>, _>("last_bounce_received")
+            .map_err(db_error)?
+            .map(|v| parse_time(&v))
+            .transpose()?,
         id: parse_uuid(row.try_get::<String, _>("id").map_err(db_error)?.as_str())?,
         list_id: row
             .try_get::<String, _>("list_id")
@@ -2024,7 +2980,7 @@ impl PreferencesRepo<'_> {
         id: PreferencesId,
         p: &Preferences,
     ) -> Result<()> {
-        sqlx::query("UPDATE preferences SET acknowledge_posts=$1,hide_address=$2,preferred_language=$3,receive_list_copy=$4,receive_own_postings=$5,delivery_mode=$6,delivery_status=$7 WHERE id=$8").bind(p.acknowledge_posts.map(i64::from)).bind(p.hide_address.map(i64::from)).bind(&p.preferred_language).bind(p.receive_list_copy.map(i64::from)).bind(p.receive_own_postings.map(i64::from)).bind(p.delivery_mode.map(|v|v.to_string())).bind(p.delivery_status.map(|v|v.to_string())).bind(id.to_string()).execute(&mut **tx).await.map_err(db_error)?;
+        sqlx::query("UPDATE preferences SET acknowledge_posts=$1,hide_address=$2,preferred_language=$3,receive_list_copy=$4,receive_own_postings=$5,delivery_mode=$6,delivery_status=$7,delivery_generation=delivery_generation+1 WHERE id=$8").bind(p.acknowledge_posts.map(i64::from)).bind(p.hide_address.map(i64::from)).bind(&p.preferred_language).bind(p.receive_list_copy.map(i64::from)).bind(p.receive_own_postings.map(i64::from)).bind(p.delivery_mode.map(|v|v.to_string())).bind(p.delivery_status.map(|v|v.to_string())).bind(id.to_string()).execute(&mut **tx).await.map_err(db_error)?;
         Ok(())
     }
     async fn set(&self, id: PreferencesId, p: &Preferences, context: &AuditContext) -> Result<()> {
@@ -2138,13 +3094,13 @@ impl PreferencesRepo<'_> {
         context: &AuditContext,
     ) -> Result<()> {
         let address = self.db.addresses().get(email).await?;
+        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
         let existing: Option<String> =
-            sqlx::query_scalar("SELECT preferences_id FROM addresses WHERE id=$1")
+            sqlx::query_scalar("UPDATE addresses SET preferences_id=preferences_id WHERE id=$1 RETURNING preferences_id")
                 .bind(address.id.to_string())
-                .fetch_one(&self.db.pool)
+                .fetch_one(&mut *tx)
                 .await
                 .map_err(db_error)?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
         let preference_id = if let Some(id) = existing {
             parse_uuid(&id)?
         } else {
@@ -2354,6 +3310,10 @@ impl TokenRepo<'_> {
             "archive:write",
             "admin",
         ];
+        if input.scopes.contains(&"admin") && (input.list_id.is_some() || input.domain_id.is_some())
+        {
+            return Err(Error::Validation("admin tokens must be unbound".into()));
+        }
         if input.scopes.iter().any(|scope| !allowed.contains(scope)) {
             return Err(Error::Validation("unknown token scope".into()));
         }

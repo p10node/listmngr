@@ -87,9 +87,44 @@ async fn internal_api_errors_are_correlated_and_hide_database_details() {
     }
 }
 
+async fn enqueue_in_job(db: &Database, external_id: &str) {
+    db.mail_queue()
+        .enqueue(
+            listmngr_db::mail_queue::NewMessage {
+                raw: b"Subject: metrics\r\n\r\nbody\r\n".to_vec(),
+                external_id: external_id.into(),
+                context: "{}".into(),
+                queue: listmngr_db::mail_queue::Queue::In,
+                max_attempts: 3,
+            },
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn metrics_are_valid_prometheus_text_not_a_status_placeholder() {
-    let (app, _, _) = app_and_token(Config::default()).await;
+    let (app, db, _) = app_and_token(Config::default()).await;
+    // Two ready `in` jobs and one shunted job show up as queue gauges.
+    for n in 0..3 {
+        enqueue_in_job(&db, &format!("<metrics-{n}@example.invalid>")).await;
+    }
+    let lease = db
+        .mail_queue()
+        .claim(
+            listmngr_db::mail_queue::Queue::In,
+            "metrics",
+            chrono::Utc::now().timestamp_millis(),
+            60_000,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    db.mail_queue()
+        .shunt(&lease, chrono::Utc::now().timestamp_millis(), "fixture")
+        .await
+        .unwrap();
     let response = oneshot(&app, "/metrics").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -100,11 +135,57 @@ async fn metrics_are_valid_prometheus_text_not_a_status_placeholder() {
     let text = std::str::from_utf8(&body).unwrap();
     let scrape = prometheus_parse::Scrape::parse(text.lines().map(|line| Ok(line.to_owned())))
         .expect("metrics endpoint must parse as Prometheus exposition text");
-    assert!(
+    let sample = |metric: &str, label: Option<(&str, &str)>| {
         scrape
             .samples
             .iter()
-            .any(|sample| sample.metric == "listmngr_up")
+            .find(|sample| {
+                sample.metric == metric
+                    && label.is_none_or(|(key, value)| sample.labels.get(key) == Some(value))
+            })
+            .map(|sample| match sample.value {
+                prometheus_parse::Value::Gauge(v)
+                | prometheus_parse::Value::Counter(v)
+                | prometheus_parse::Value::Untyped(v) => v,
+                _ => f64::NAN,
+            })
+    };
+    assert_eq!(sample("listmngr_up", None), Some(1.0));
+    assert_eq!(
+        sample("listmngr_queue_jobs", Some(("queue", "in"))),
+        Some(2.0),
+        "{text}"
+    );
+    assert_eq!(sample("listmngr_queue_shunted_jobs", None), Some(1.0));
+    assert!(sample("listmngr_queue_oldest_ready_age_seconds", None).is_some());
+    for metric in [
+        "listmngr_lmtp_recipients_total",
+        "listmngr_posts_total",
+        "listmngr_delivery_recipients_total",
+        "listmngr_smtp_transactions_total",
+    ] {
+        assert!(
+            scrape.samples.iter().any(|sample| sample.metric == metric),
+            "{metric} missing:\n{text}"
+        );
+    }
+    // Histograms parse as such, with their cumulative buckets.
+    assert!(
+        scrape.samples.iter().any(|sample| {
+            sample.metric == "listmngr_delivery_latency_seconds"
+                && matches!(sample.value, prometheus_parse::Value::Histogram(_))
+        }),
+        "{text}"
+    );
+
+    // The queue gauges are cached briefly: a new job is not visible at once.
+    enqueue_in_job(&db, "<metrics-later@example.invalid>").await;
+    let again = oneshot(&app, "/metrics").await;
+    let body = to_bytes(again.into_body(), usize::MAX).await.unwrap();
+    assert!(
+        std::str::from_utf8(&body)
+            .unwrap()
+            .contains("listmngr_queue_jobs{queue=\"in\",state=\"ready\"} 2\n")
     );
 }
 

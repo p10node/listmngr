@@ -1,0 +1,14 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Delivery has failed to these recipients or groups
+Content-Type: text/plain
+
+Delivery has failed to these recipients or groups:
+
+ivan@example.net
+The email address you entered couldn't be found. Please check the recipient's email address and try to resend the message.
+
+Diagnostic information for administrators:
+
+Generating server: mail.example.net

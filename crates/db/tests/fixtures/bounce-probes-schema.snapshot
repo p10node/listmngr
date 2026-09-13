@@ -1,0 +1,9 @@
+C|bounce_probes|token_hash|text|required|-
+C|bounce_probes|member_id|text|required|-
+C|bounce_probes|list_id|text|required|-
+C|bounce_probes|sent_at|integer|required|-
+C|bounce_probes|expires_at|integer|required|-
+C|workflow_notices|mail_from|text|optional|-
+F|bounce_probes|member_id|members|id|cascade
+F|bounce_probes|list_id|mailing_lists|list_id|cascade
+U|bounce_probes|token_hash

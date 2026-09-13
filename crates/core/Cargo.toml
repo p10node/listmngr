@@ -9,7 +9,12 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+regex.workspace = true
 chrono.workspace = true
+hmac = "0.12.1"
+sha2.workspace = true
+rand.workspace = true
+base64.workspace = true
 figment.workspace = true
 idna.workspace = true
 ipnet.workspace = true
@@ -18,6 +23,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 utoipa.workspace = true
 uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"
 
 [dev-dependencies]
 tempfile = "3.23.0"

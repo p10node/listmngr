@@ -1,0 +1,7 @@
+C|web_sessions|credential_version|text|optional|-
+C|web_sessions|csrf|text|required|-
+C|web_sessions|expires_at|integer|required|-
+C|web_sessions|token_hash|text|required|-
+C|web_sessions|user_id|text|optional|-
+F|web_sessions|user_id|users|id|cascade
+U|web_sessions|token_hash

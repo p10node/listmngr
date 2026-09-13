@@ -1,0 +1,4 @@
+C|mailing_lists|digests_enabled|integer|required|1
+C|mailing_lists|digest_size_threshold|real|required|30
+C|mailing_lists|digest_send_periodic|integer|required|1
+C|mailing_lists|digest_volume_frequency|text|required|monthly

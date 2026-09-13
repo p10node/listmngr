@@ -1,0 +1,13 @@
+C|mailing_lists|autorespond_owner|text|required|none
+C|mailing_lists|autoresponse_owner_text|text|required|-
+C|mailing_lists|autorespond_postings|text|required|none
+C|mailing_lists|autoresponse_postings_text|text|required|-
+C|mailing_lists|autorespond_requests|text|required|none
+C|mailing_lists|autoresponse_request_text|text|required|-
+C|mailing_lists|autoresponse_grace_period|integer|required|90
+C|autoresponse_records|list_id|text|required|-
+C|autoresponse_records|email|text|required|-
+C|autoresponse_records|kind|text|required|-
+C|autoresponse_records|responded_at|integer|required|-
+F|autoresponse_records|list_id|mailing_lists|list_id|cascade
+U|autoresponse_records|list_id,email,kind

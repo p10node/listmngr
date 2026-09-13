@@ -1,6 +1,37 @@
 use listmngr_mail::cook_headers;
 
 #[test]
+fn empty_filtered_header_block_preserves_crlf_for_new_fields() {
+    assert_eq!(
+        cook_headers(
+            b"\r\nbody",
+            None,
+            &[("From".into(), "list@example.invalid".into())]
+        )
+        .unwrap(),
+        b"From: list@example.invalid\r\n\r\nbody"
+    );
+}
+
+#[test]
+fn strips_legacy_approval_aliases_and_list_control_metadata() {
+    let raw = b"Approve: secret\nX-Approved: secret\nx-approve: secret\n continuation-secret\nX-List-Received-Date: old\nX-Mailman-Approved-At: old\n\nbody";
+    assert_eq!(cook_headers(raw, None, &[]).unwrap(), b"\nbody");
+}
+
+#[test]
+fn redistribution_removes_private_and_obsolete_control_fields() {
+    let raw = b"From: author@example.invalid\r\nbCc: hidden\r\n\tsecret\r\nResent-Bcc: hidden2\r\nAPPROVED: password\r\n approved-continuation\r\nList-Post: <mailto:old@example.invalid>\r\nLiSt-Archive: <https://old.invalid>\r\nList-Unsubscribe-Post: List-Unsubscribe=One-Click\r\nPrecedence: bulk\r\nReturn-Path: <old@example.invalid>\r\nX-Approval: password\r\nX-Confirm: token\r\nX-List-Administrivia: yes\r\nX-Mailman-Version: old\r\nMIME-Version: 1.0\r\nContent-Type: application/octet-stream\r\n\r\n\x00\xffbody";
+    let cooked = cook_headers(
+        raw,
+        None,
+        &[("List-Post".into(), "<mailto:new@example.invalid>".into())],
+    )
+    .unwrap();
+    assert_eq!(cooked, b"From: author@example.invalid\r\nMIME-Version: 1.0\r\nContent-Type: application/octet-stream\r\nList-Post: <mailto:new@example.invalid>\r\n\r\n\x00\xffbody");
+}
+
+#[test]
 fn prepends_subject_prefix_once_and_preserves_binary_body() {
     let raw = b"Message-ID: <a@example.invalid>\r\nSubject: Hello\r\n\r\nbody\x00\xff\r\n.dot\r\n";
     let cooked = cook_headers(raw, Some("[list] "), &[]).unwrap();
@@ -110,4 +141,92 @@ fn accepts_safe_prefix_and_additions_unchanged() {
     let text = String::from_utf8_lossy(&cooked);
     assert!(text.contains("Subject: [safe-list] Hi"));
     assert!(text.contains("List-Id: safe.example.invalid"));
+}
+
+mod approved_line {
+    use listmngr_mail::{cook_post, facts::strip_approved_line};
+
+    fn list() -> listmngr_core::MailingList {
+        listmngr_core::MailingList::new("dev.example.invalid".parse().unwrap(), "Dev".into())
+    }
+
+    #[test]
+    fn strips_a_leading_approved_line_from_a_plain_body_only_once() {
+        let raw =
+            b"From: a@example.invalid\r\nSubject: hi\r\n\r\nApproved: s3cret\r\nreal body\r\n";
+        let stripped = strip_approved_line(raw);
+        assert_eq!(
+            stripped,
+            b"From: a@example.invalid\r\nSubject: hi\r\n\r\nreal body\r\n"
+        );
+        // Idempotent: a body that merely starts with the word is left alone.
+        let again = strip_approved_line(&stripped);
+        assert_eq!(again, stripped);
+    }
+
+    #[test]
+    fn strips_every_spelling_case_insensitively_and_keeps_lf_style() {
+        for prefix in ["approve:", "APPROVED:", "X-Approved:", "x-approve:"] {
+            let raw = format!("From: a@example.invalid\n\n{prefix} key here\nbody\n");
+            assert_eq!(
+                strip_approved_line(raw.as_bytes()),
+                b"From: a@example.invalid\n\nbody\n",
+                "{prefix}"
+            );
+        }
+    }
+
+    #[test]
+    fn leaves_a_body_whose_first_line_is_blank_or_ordinary_untouched() {
+        for raw in [
+            &b"From: a@example.invalid\r\n\r\n\r\nApproved: late\r\n"[..],
+            &b"From: a@example.invalid\r\n\r\nApproved by the board\r\n"[..],
+            &b"From: a@example.invalid\r\n\r\n"[..],
+            &b"From: a@example.invalid\r\n"[..],
+        ] {
+            assert_eq!(strip_approved_line(raw), raw);
+        }
+    }
+
+    #[test]
+    fn strips_inside_the_first_text_plain_part_of_a_multipart_message() {
+        let raw = b"From: a@example.invalid\r\n\
+Content-Type: multipart/mixed; boundary=b\r\n\
+\r\n\
+--b\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+Approved: s3cret\r\n\
+real body\r\n\
+--b\r\n\
+Content-Type: application/octet-stream\r\n\
+\r\n\
+Approved: not text, untouched\r\n\
+--b--\r\n";
+        let stripped = strip_approved_line(raw);
+        let text = String::from_utf8_lossy(&stripped);
+        assert!(!text.contains("Approved: s3cret"), "{text}");
+        assert!(text.contains("real body"));
+        assert!(text.contains("Approved: not text, untouched"));
+        assert_eq!(stripped.len(), raw.len() - b"Approved: s3cret\r\n".len());
+    }
+
+    #[test]
+    fn does_not_touch_an_encoded_part_it_cannot_safely_rewrite() {
+        let raw = b"From: a@example.invalid\r\n\
+Content-Type: text/plain\r\n\
+Content-Transfer-Encoding: base64\r\n\
+\r\n\
+QXBwcm92ZWQ6IHNlY3JldA0K\r\n";
+        assert_eq!(strip_approved_line(raw), raw);
+    }
+
+    #[test]
+    fn cook_post_strips_the_approved_line_and_the_approved_headers_together() {
+        let raw = b"From: a@example.invalid\r\nApproved: s3cret\r\nSubject: hi\r\nMessage-ID: <m@example.invalid>\r\n\r\nApproved: s3cret\r\nreal body\r\n";
+        let cooked = cook_post(raw, &list(), "identity").unwrap();
+        let text = String::from_utf8_lossy(&cooked);
+        assert!(!text.contains("s3cret"), "{text}");
+        assert!(text.ends_with("\r\n\r\nreal body\r\n"), "{text}");
+    }
 }

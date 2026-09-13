@@ -1,8 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod aliases;
+mod bounce;
+mod digests;
 mod errors;
+mod notify;
 mod queue;
+mod requests;
 mod status;
+mod tasks;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
@@ -20,6 +26,16 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Explicit bounce warning/removal maintenance; does not start a scheduler.
+    Bounce {
+        #[command(subcommand)]
+        command: bounce::Command,
+    },
+    /// Generate a new immutable Postfix map generation; never reloads the MTA.
+    Aliases {
+        #[command(subcommand)]
+        command: aliases::Command,
+    },
     Version,
     Conf {
         #[arg(long)]
@@ -49,11 +65,28 @@ enum Command {
         #[command(subcommand)]
         command: TokenCommand,
     },
+    /// Publish collected digests or advance the volume.
+    Digests {
+        #[command(subcommand)]
+        command: digests::Command,
+    },
     /// Durable queue operations; does not start delivery workers.
     Queue {
         #[command(subcommand)]
         command: queue::Command,
     },
+    /// Subscription requests waiting for a moderator.
+    Requests {
+        #[command(subcommand)]
+        command: requests::Command,
+    },
+    /// The periodic task sweep, run once by hand.
+    Tasks {
+        #[command(subcommand)]
+        command: tasks::Command,
+    },
+    /// Remind owners and moderators of held messages and requests.
+    Notify(notify::Options),
 }
 #[derive(Debug, Subcommand)]
 enum DomainCommand {
@@ -293,7 +326,14 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         config.database.max_connections,
         &config.security,
     )
-    .await?;
+    .await?
+    .with_default_language(&config.site.default_language)
+    .with_base_url(&config.site.base_url)
+    .with_bounce_probes(
+        config.mailman.bounce_probes,
+        config.mailman.bounce_probe_lifetime_secs,
+        &config.mta.verp_format,
+    );
     match command {
         Command::Migrate => {
             db.migrate().await.context(errors::MigrationFailure)?;
@@ -302,11 +342,17 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
 
         Command::Serve => serve_database(db, config).await?,
         Command::Domains { command } => domains(&db, command).await?,
-        Command::Lists { command } => lists(&db, command).await?,
+        Command::Lists { command } => lists(&db, &config, command).await?,
         Command::Members { command } => members(&db, command).await?,
         Command::User { command } => users(&db, command).await?,
         Command::Token { command } => tokens(&db, command).await?,
+        Command::Bounce { command } => bounce::run(&db, command).await?,
         Command::Queue { command } => queue::run(&db, command).await?,
+        Command::Requests { command } => requests::run(&db, command).await?,
+        Command::Tasks { command } => tasks::run(&db, &config, command).await?,
+        Command::Notify(options) => notify::run(&db, options).await?,
+        Command::Digests { command } => digests::run(&db, command).await?,
+        Command::Aliases { command } => aliases::run(&db, &config, command).await?,
         Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
             bail!("command does not use database")
         }
@@ -322,6 +368,7 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
         .map_err(|_| listmngr_core::Error::Validation("invalid web.listen".into()))?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address,"HTTP server listening");
+    aliases::publish_at_startup(&db, &config).await?;
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     // The mail role is opt-in (`mta.enabled`, fail-closed-validated at
     // config load) and binds its LMTP socket synchronously here, so a
@@ -391,27 +438,31 @@ async fn domains(db: &Database, command: DomainCommand) -> Result<()> {
     }
     Ok(())
 }
-async fn lists(db: &Database, command: ListCommand) -> Result<()> {
+async fn lists(db: &Database, config: &Config, command: ListCommand) -> Result<()> {
     match command {
         ListCommand::Create {
             list_id,
             display_name,
             style,
-        } => println!(
-            "{}",
-            serde_json::to_string_pretty(
-                &db.lists()
-                    .create(NewList {
-                        list_id,
-                        display_name,
-                        style
-                    })
-                    .await?
-            )?
-        ),
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &db.lists()
+                        .create(NewList {
+                            list_id,
+                            display_name,
+                            style
+                        })
+                        .await?
+                )?
+            );
+            aliases::refresh_after_list_change(db, config).await;
+        }
         ListCommand::Remove { list_id } => {
             db.lists().delete(&list_id).await?;
             println!("removed {list_id}");
+            aliases::refresh_after_list_change(db, config).await;
         }
         ListCommand::Ls => {
             for l in db.lists().list(None).await? {

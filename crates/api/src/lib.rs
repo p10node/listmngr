@@ -2,6 +2,12 @@
 
 //! Axum REST API shared by Mailman-compatible `/3.1` and typed `/api/v1` routes.
 
+mod archive;
+mod bans;
+mod bounce_config;
+mod bounces;
+mod requests;
+
 use axum::{
     Json, Router,
     body::{Body, Bytes, to_bytes},
@@ -28,6 +34,10 @@ use std::{
     time::{Duration, Instant},
 };
 use utoipa::OpenApi;
+mod templates;
+mod unsubscribe;
+mod webui;
+mod workflows;
 
 #[derive(Debug)]
 struct JsonOrForm<T>(T);
@@ -59,6 +69,44 @@ where
     }
 }
 
+/// A JSON object whose form encoding may repeat a key. Repeated form keys
+/// collect into an array (mailmanclient posts lists as `key=a&key=b`); JSON
+/// input is taken as written.
+#[derive(Debug)]
+struct FormAwareObject(Value);
+
+impl<'de> Deserialize<'de> for FormAwareObject {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = FormAwareObject;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut object = serde_json::Map::new();
+                while let Some((key, value)) = map.next_entry::<String, Value>()? {
+                    match object.get_mut(&key) {
+                        Some(Value::Array(items)) => items.push(value),
+                        Some(existing) => {
+                            let first = std::mem::take(existing);
+                            *existing = Value::Array(vec![first, value]);
+                        }
+                        None => {
+                            object.insert(key, value);
+                        }
+                    }
+                }
+                Ok(FormAwareObject(Value::Object(object)))
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 struct ErrorResponse {
     code: &'static str,
@@ -81,6 +129,9 @@ macro_rules! page_response {
 }
 
 page_response!(StringPageResponse, String);
+page_response!(BanPageResponse, bans::BanResponse);
+page_response!(RequestPageResponse, requests::RequestResponse);
+page_response!(BouncePageResponse, listmngr_db::bounces::BounceEvent);
 page_response!(CatalogPageResponse, CatalogEntry);
 page_response!(DomainPageResponse, listmngr_core::Domain);
 page_response!(MailingListPageResponse, listmngr_core::MailingList);
@@ -132,7 +183,11 @@ pub struct UriResponse {
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
+// Mirrors independent persisted configuration switches on MailingList.
+#[allow(clippy::struct_excessive_bools)]
 pub struct ListConfigResponse {
+    pub default_member_action: Option<listmngr_core::ModerationAction>,
+    pub default_nonmember_action: Option<listmngr_core::ModerationAction>,
     pub display_name: String,
     pub description: String,
     pub info: String,
@@ -140,6 +195,25 @@ pub struct ListConfigResponse {
     pub advertised: bool,
     pub preferred_language: String,
     pub anonymous_list: bool,
+    pub send_welcome_message: bool,
+    pub send_goodbye_message: bool,
+    pub process_bounces: bool,
+    #[schema(default = true)]
+    pub bounce_notify_owner_on_disable: bool,
+    #[schema(default = false)]
+    pub bounce_notify_owner_on_bounce_increment: bool,
+    #[schema(default = true)]
+    pub bounce_notify_owner_on_removal: bool,
+    #[schema(minimum = 0, maximum = 100, default = 3)]
+    pub bounce_you_are_disabled_warnings: u32,
+    #[schema(minimum = 0, maximum = 36500, default = 7)]
+    pub bounce_you_are_disabled_warnings_interval: u32,
+    #[schema(minimum = 1, maximum = 3650, default = 7)]
+    pub bounce_info_stale_after: u32,
+    #[schema(exclusive_minimum = 0, maximum = 1_000_000, default = 5)]
+    pub bounce_score_threshold: f64,
+    #[serde(flatten)]
+    pub dmarc: listmngr_core::DmarcSettings,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_post_at: Option<chrono::DateTime<chrono::Utc>>,
     pub post_id: i64,
@@ -147,9 +221,52 @@ pub struct ListConfigResponse {
     pub next_digest_number: i64,
     pub digest_last_sent_at: Option<chrono::DateTime<chrono::Utc>>,
     pub emergency: bool,
+    /// Original post size limit in KiB; zero disables the per-list limit.
+    pub max_message_size: u32,
+    /// Hold at or above this visible To/Cc mailbox count; zero disables.
+    #[schema(minimum = 0, maximum = 2_147_483_647)]
+    pub max_num_recipients: u32,
     pub archive_policy: listmngr_core::ArchivePolicy,
     pub archive_rendering_mode: listmngr_core::ArchiveRenderingMode,
     pub style_name: String,
+    /// Hold short posts that look like email commands.
+    #[schema(default = true)]
+    pub administrivia: bool,
+    /// Hold posts whose visible To/Cc names neither the list nor an alias.
+    #[schema(default = true)]
+    pub require_explicit_destination: bool,
+    /// Exact addresses or `^`-anchored regexes counted as explicit destinations.
+    pub acceptable_aliases: Vec<String>,
+    /// Legacy nonmember action lists; exact addresses or `^`-anchored regexes.
+    pub accept_these_nonmembers: Vec<String>,
+    pub hold_these_nonmembers: Vec<String>,
+    pub reject_these_nonmembers: Vec<String>,
+    pub discard_these_nonmembers: Vec<String>,
+    /// Name of the handler pipeline an accepted post runs.
+    #[schema(default = "default-posting-pipeline")]
+    pub posting_pipeline: String,
+    /// Tell the poster when their post is held for moderation.
+    #[schema(default = true)]
+    pub respond_to_post_requests: bool,
+    /// Tell owners and moderators immediately when a post is held.
+    #[schema(default = true)]
+    pub admin_immed_notify: bool,
+    #[serde(flatten)]
+    pub alter_messages: listmngr_core::AlterMessages,
+    #[serde(flatten)]
+    pub member_policy: listmngr_core::MemberPolicy,
+    #[serde(flatten)]
+    pub automatic_responses: listmngr_core::AutomaticResponses,
+    /// Where bounces that match no member are forwarded.
+    #[schema(default = "administrators")]
+    pub forward_unrecognized_bounces_to: listmngr_core::UnrecognizedBounceDisposition,
+    /// Run the topic matcher and add `X-Topics` to matching posts.
+    pub topics_enabled: bool,
+    /// Leading header-like body lines scanned; negative means all, zero none.
+    #[schema(default = 5, minimum = -1, maximum = 10_000)]
+    pub topics_bodylines_limit: i32,
+    /// listmngr extension (Mailman keeps topics out of its REST API).
+    pub topics: Vec<listmngr_core::Topic>,
     pub mail_host: String,
     pub list_name: String,
     pub fqdn_listname: String,
@@ -166,6 +283,8 @@ pub struct ListConfigResponse {
 #[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListConfigInput {
+    pub default_member_action: Option<listmngr_core::ModerationAction>,
+    pub default_nonmember_action: Option<listmngr_core::ModerationAction>,
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub info: Option<String>,
@@ -173,10 +292,125 @@ pub struct ListConfigInput {
     pub advertised: Option<bool>,
     pub preferred_language: Option<String>,
     pub anonymous_list: Option<bool>,
+    /// Opt-in built-in private welcome for new Member subscriptions; default false.
+    pub send_welcome_message: Option<bool>,
+    /// Opt-in built-in private goodbye for actual Member removal; default false.
+    pub send_goodbye_message: Option<bool>,
+    pub process_bounces: Option<bool>,
+    #[schema(default = true)]
+    pub bounce_notify_owner_on_disable: Option<bool>,
+    #[schema(default = false)]
+    pub bounce_notify_owner_on_bounce_increment: Option<bool>,
+    #[schema(default = true)]
+    pub bounce_notify_owner_on_removal: Option<bool>,
+    #[schema(minimum = 0, maximum = 100, default = 3)]
+    pub bounce_you_are_disabled_warnings: Option<u32>,
+    #[schema(minimum = 0, maximum = 36500, default = 7)]
+    pub bounce_you_are_disabled_warnings_interval: Option<u32>,
+    #[schema(minimum = 1, maximum = 3650, default = 7)]
+    pub bounce_info_stale_after: Option<u32>,
+    #[schema(exclusive_minimum = 0, maximum = 1_000_000, default = 5)]
+    pub bounce_score_threshold: Option<f64>,
+    /// `munge_from` requires unconditional=true; conditional DNS is unsupported.
+    pub dmarc_mitigate_action: Option<listmngr_core::DmarcMitigateAction>,
+    pub dmarc_mitigate_unconditionally: Option<bool>,
     pub next_digest_number: Option<i64>,
     pub emergency: Option<bool>,
+    /// Nonnegative KiB, at most 2147483647; zero disables the per-list limit.
+    pub max_message_size: Option<u32>,
+    /// Hold at or above this visible To/Cc mailbox count; zero disables.
+    #[schema(minimum = 0, maximum = 2_147_483_647)]
+    pub max_num_recipients: Option<u32>,
     pub archive_policy: Option<listmngr_core::ArchivePolicy>,
     pub archive_rendering_mode: Option<listmngr_core::ArchiveRenderingMode>,
+    /// Hold short posts that look like email commands; default true.
+    pub administrivia: Option<bool>,
+    /// Hold posts whose visible To/Cc names neither the list nor an alias; default true.
+    pub require_explicit_destination: Option<bool>,
+    /// Exact addresses or `^`-anchored regexes counted as explicit destinations.
+    pub acceptable_aliases: Option<Vec<String>>,
+    /// Legacy nonmember action lists; exact addresses or `^`-anchored regexes.
+    pub accept_these_nonmembers: Option<Vec<String>>,
+    pub hold_these_nonmembers: Option<Vec<String>>,
+    pub reject_these_nonmembers: Option<Vec<String>>,
+    pub discard_these_nonmembers: Option<Vec<String>>,
+    /// Write-only `Approved:` posting key, stored as Argon2id; empty clears it.
+    #[schema(write_only)]
+    pub moderator_password: Option<String>,
+    /// Name of a registered handler pipeline; see `/system/pipelines`.
+    pub posting_pipeline: Option<String>,
+    /// Tell the poster when their post is held; default true.
+    pub respond_to_post_requests: Option<bool>,
+    /// Tell owners and moderators immediately when a post is held; default true.
+    pub admin_immed_notify: Option<bool>,
+    pub filter_content: Option<bool>,
+    /// MIME types (`type` or `type/subtype`) removed by content filtering.
+    pub filter_types: Option<Vec<String>>,
+    /// MIME types kept by content filtering; empty keeps everything not filtered.
+    pub pass_types: Option<Vec<String>>,
+    /// File-name extensions removed by content filtering.
+    pub filter_extensions: Option<Vec<String>>,
+    /// File-name extensions kept by content filtering.
+    pub pass_extensions: Option<Vec<String>>,
+    #[schema(default = true)]
+    pub collapse_alternatives: Option<bool>,
+    pub convert_html_to_plaintext: Option<bool>,
+    #[schema(default = "discard")]
+    pub filter_action: Option<listmngr_core::FilterAction>,
+    #[schema(default = true)]
+    pub include_rfc2369_headers: Option<bool>,
+    #[schema(default = true)]
+    pub allow_list_posts: Option<bool>,
+    #[schema(default = "no_munging")]
+    pub reply_goes_to_list: Option<listmngr_core::ReplyToMunging>,
+    /// Mailbox for the explicit `Reply-To` policies; empty clears it.
+    pub reply_to_address: Option<String>,
+    pub first_strip_reply_to: Option<bool>,
+    #[schema(default = "none")]
+    pub personalize: Option<listmngr_core::Personalization>,
+    #[schema(default = true)]
+    pub include_sender_header: Option<bool>,
+    #[schema(default = "confirm")]
+    pub subscription_policy: Option<listmngr_core::SubscriptionPolicy>,
+    #[schema(default = "confirm")]
+    pub unsubscription_policy: Option<listmngr_core::SubscriptionPolicy>,
+    #[schema(default = "moderators")]
+    pub member_roster_visibility: Option<listmngr_core::RosterVisibility>,
+    /// Exact addresses or `^`-anchored regexes treated as DMARC-protected.
+    pub dmarc_addresses: Option<Vec<String>>,
+    /// Text added to the hold notice for DMARC holds; at most 64 KiB.
+    pub dmarc_moderation_notice: Option<String>,
+    /// Outer text of a DMARC-wrapped post; at most 64 KiB.
+    pub dmarc_wrapped_message_text: Option<String>,
+    #[schema(default = "administrators")]
+    pub forward_unrecognized_bounces_to: Option<listmngr_core::UnrecognizedBounceDisposition>,
+    #[schema(default = true)]
+    pub digests_enabled: Option<bool>,
+    /// KiB of pending posts that trigger an issue; 0 never does.
+    #[schema(default = 30.0, minimum = 0.0)]
+    pub digest_size_threshold: Option<f64>,
+    #[schema(default = true)]
+    pub digest_send_periodic: Option<bool>,
+    #[schema(default = "monthly")]
+    pub digest_volume_frequency: Option<listmngr_core::DigestFrequency>,
+    #[schema(default = "none")]
+    pub autorespond_owner: Option<listmngr_core::ResponseAction>,
+    /// Reply body for mail to the owner address; empty uses the built-in text.
+    pub autoresponse_owner_text: Option<String>,
+    #[schema(default = "none")]
+    pub autorespond_postings: Option<listmngr_core::ResponseAction>,
+    pub autoresponse_postings_text: Option<String>,
+    #[schema(default = "none")]
+    pub autorespond_requests: Option<listmngr_core::ResponseAction>,
+    pub autoresponse_request_text: Option<String>,
+    /// Days before the same writer is answered again; 0 answers every message.
+    #[schema(default = 90, minimum = 0, maximum = 3650)]
+    pub autoresponse_grace_period: Option<i32>,
+    pub topics_enabled: Option<bool>,
+    #[schema(default = 5, minimum = -1, maximum = 10_000)]
+    pub topics_bodylines_limit: Option<i32>,
+    /// JSON only: a list of `{name, pattern, description}` (listmngr extension).
+    pub topics: Option<Vec<listmngr_core::Topic>>,
 }
 
 #[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
@@ -220,6 +454,7 @@ pub enum ListConfigAttributeValue {
     Text(String),
     Boolean(bool),
     Integer(i64),
+    Number(f64),
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -276,6 +511,15 @@ impl utoipa::Modify for SecurityAddon {
 #[openapi(
     info(title = "listmngr API", version = "0.1.0"),
     paths(
+        bans::list,
+        bounces::list,
+        bans::get,
+        bans::create,
+        bans::delete,
+        requests::list,
+        requests::count,
+        requests::get,
+        requests::decide,
         system_versions,
         system_config,
         system_config_section,
@@ -288,7 +532,6 @@ impl utoipa::Modify for SecurityAddon {
         domains_delete,
         domain_lists,
         domain_owners,
-        domain_uris,
         lists_list,
         lists_create,
         styles,
@@ -301,10 +544,33 @@ impl utoipa::Modify for SecurityAddon {
         list_config_attr_put,
         list_config_attr_patch,
         list_archivers,
-        list_uris,
+        templates::list_uris,
+        templates::patch_list_uris,
+        templates::put_list_uris,
+        templates::delete_list_uris,
+        templates::get_list_uri,
+        templates::set_list_uri,
+        templates::delete_list_uri,
+        templates::domain_uris,
+        templates::patch_domain_uris,
+        templates::put_domain_uris,
+        templates::delete_domain_uris,
+        templates::get_domain_uri,
+        templates::set_domain_uri,
+        templates::delete_domain_uri,
+        templates::site_uris,
+        templates::patch_site_uris,
+        templates::put_site_uris,
+        templates::delete_site_uris,
+        templates::get_site_uri,
+        templates::set_site_uri,
+        templates::delete_site_uri,
+        templates::put_list_template_body,
+        templates::delete_list_template_body,
         list_templates,
         roster,
         list_member,
+        list_member_delete,
         list_held,
         list_held_count,
         list_held_get,
@@ -346,12 +612,13 @@ impl utoipa::Modify for SecurityAddon {
     ),
     components(schemas(
         ErrorResponse, StringPageResponse, CatalogPageResponse, CatalogEntry, PageQuery,
+        RequestPageResponse, requests::RequestResponse, requests::DecisionInput,
         DomainPageResponse, MailingListPageResponse,
         UserPageResponse, ArchiverPageResponse, TemplatePageResponse, MemberPageResponse,
         AddressPageResponse, SystemVersionsResponse, ConfigurationResponse, UriResponse,
         ListConfigResponse, ListConfigInput, ListConfigAttributeValue, MemberPatchInput,
         UserPatchInput, EmptyMutationInput, ProcessedResponse, LoginResponse, AddressUserResponse,
-        ArchiverResponse,
+        ArchiverResponse, templates::TemplateUriResponse, templates::TemplateUriPageResponse, templates::TemplateBodyInput, templates::TemplateUrisInput, templates::TemplateUriInput,
         DomainInput, ListQuery, ListInput, MemberInput, ConfirmationInput, WorkflowInput,
         MassMemberRow, MassMemberInput, FindInput, LoginInput, LinkInput, UserLink,
         Preferences, listmngr_core::Domain, listmngr_core::MailingList, listmngr_core::Member,
@@ -370,7 +637,91 @@ pub struct AppState {
     config: Config,
     pre_auth_rate: Arc<RateLimiter>,
     post_auth_rate: Arc<RateLimiter>,
+    web_login_rate: Arc<RateLimiter>,
     flavor: ApiFlavor,
+    /// `[mta] incoming`: the map writer regenerated after list changes.
+    mta_maps: Option<Arc<listmngr_mail::mta::MapWriter>>,
+    /// The queue-depth part of `/metrics`, refreshed at most every few
+    /// seconds so an unauthenticated scrape cannot hammer the database.
+    queue_metrics: Arc<std::sync::Mutex<Option<(Instant, String)>>>,
+}
+
+const QUEUE_METRICS_TTL: Duration = Duration::from_secs(5);
+
+/// Queue depth as Prometheus gauges, from the same query `queue stats` uses.
+async fn queue_metrics(s: &AppState) -> String {
+    use std::fmt::Write as _;
+    if let Some((at, text)) = s.queue_metrics.lock().expect("metrics cache").as_ref()
+        && at.elapsed() < QUEUE_METRICS_TTL
+    {
+        return text.clone();
+    }
+    let stats = match s
+        .db
+        .mail_queue()
+        .stats(chrono::Utc::now().timestamp_millis())
+        .await
+    {
+        Ok(stats) => stats,
+        Err(error) => {
+            tracing::warn!(%error, "queue metrics unavailable");
+            return String::new();
+        }
+    };
+    let mut text = String::from(
+        "# HELP listmngr_queue_jobs Jobs per queue and state.\n# TYPE listmngr_queue_jobs gauge\n",
+    );
+    for (queue, states) in &stats.queues {
+        for (state, jobs) in states {
+            let _ = writeln!(
+                text,
+                "listmngr_queue_jobs{{queue=\"{queue}\",state=\"{state}\"}} {jobs}"
+            );
+        }
+    }
+    let _ = write!(
+        text,
+        "# HELP listmngr_queue_shunted_jobs Jobs parked in the shunt queue.\n# TYPE listmngr_queue_shunted_jobs gauge\nlistmngr_queue_shunted_jobs {}\n# HELP listmngr_queue_oldest_ready_age_seconds Seconds the oldest ready job has waited past its due time.\n# TYPE listmngr_queue_oldest_ready_age_seconds gauge\nlistmngr_queue_oldest_ready_age_seconds {}\n",
+        stats.shunted,
+        stats.oldest_ready_age_secs.unwrap_or(0)
+    );
+    *s.queue_metrics.lock().expect("metrics cache") = Some((Instant::now(), text.clone()));
+    text
+}
+
+/// Mailman regenerates the MTA's maps when a list is created or removed.
+/// The list change is already committed; a failed publish is logged and
+/// `listmngr aliases regen` repairs it.
+async fn refresh_mta_maps(s: &AppState) {
+    let Some(writer) = s.mta_maps.clone() else {
+        return;
+    };
+    match publish_maps(writer, &s.db).await {
+        Ok(generation) => {
+            tracing::info!(generation = %generation.display(), "MTA maps regenerated");
+        }
+        Err(error) => {
+            tracing::warn!(%error, "MTA maps not regenerated; run `listmngr aliases regen`");
+        }
+    }
+}
+
+async fn publish_maps(
+    writer: Arc<listmngr_mail::mta::MapWriter>,
+    db: &Database,
+) -> Result<std::path::PathBuf, String> {
+    let lists: Vec<listmngr_core::ListId> = db
+        .lists()
+        .list(None)
+        .await
+        .map_err(|error| format!("list read failed: {error}"))?
+        .into_iter()
+        .map(|list| list.id)
+        .collect();
+    tokio::task::spawn_blocking(move || writer.publish(&lists))
+        .await
+        .map_err(|error| format!("publish task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -498,17 +849,30 @@ pub fn router(db: Database, config: Config) -> Router {
             .unwrap_or(&config.security.rate_limit.api),
     );
     let post_auth_rate = RateLimiter::from_config(&config.security.rate_limit.api);
+    // `Config::load` validated `[mta]`; a bad value here can only come from
+    // a caller-built config and must not take the API down.
+    let mta_maps = listmngr_mail::mta::MapWriter::from_config(&config.mta)
+        .unwrap_or_else(|error| {
+            tracing::error!(%error, "MTA map generation disabled");
+            None
+        })
+        .map(Arc::new);
     let state = AppState {
         db,
         config,
         pre_auth_rate: Arc::new(pre_auth_rate),
         post_auth_rate: Arc::new(post_auth_rate),
+        web_login_rate: Arc::new(RateLimiter::from_config("5/min")),
         flavor: ApiFlavor::V1,
+        mta_maps,
+        queue_metrics: Arc::new(std::sync::Mutex::new(None)),
     };
     let mut compat_state = state.clone();
     compat_state.flavor = ApiFlavor::Compat31;
     Router::new()
+        .merge(archive::routes())
         .route("/healthz", get(health))
+        .merge(workflows::routes())
         .route("/readyz", get(ready))
         .route("/metrics", get(metrics))
         .route("/openapi.json", get(openapi))
@@ -520,6 +884,8 @@ pub fn router(db: Database, config: Config) -> Router {
                 .layer(middleware::from_fn(typed_etag))
                 .with_state(state.clone()),
         )
+        .merge(webui::routes())
+        .merge(unsubscribe::routes())
         .layer(middleware::from_fn(trace_request))
         .with_state(state)
 }
@@ -544,7 +910,8 @@ async fn typed_etag(request: Request, next: Next) -> Response {
 async fn trace_request(request: Request, next: Next) -> Response {
     let request_id = uuid::Uuid::now_v7();
     let method = request.method().clone();
-    let uri = request.uri().clone();
+    // Query strings can contain browser confirmation credentials.
+    let uri = request.uri().path().to_owned();
     tracing::info!(%request_id, %method, %uri, "HTTP request started");
     let mut response = next.run(request).await;
     tracing::info!(%request_id, %method, %uri, status = %response.status(), "HTTP request completed");
@@ -560,6 +927,7 @@ async fn trace_request(request: Request, next: Next) -> Response {
 
 fn phase_one_routes() -> Router<AppState> {
     Router::new()
+        .merge(templates::routes())
         .route("/system/versions", get(system_versions))
         .route("/system/configuration", get(system_config))
         .route(
@@ -573,7 +941,6 @@ fn phase_one_routes() -> Router<AppState> {
         .route("/domains/{host}", get(domains_get).delete(domains_delete))
         .route("/domains/{host}/lists", get(domain_lists))
         .route("/domains/{host}/owners", get(domain_owners))
-        .route("/domains/{host}/uris", get(domain_uris))
         .route("/lists", get(lists_list).post(lists_create))
         .route("/lists/styles", get(styles))
         .route("/lists/{id}", get(lists_get).delete(lists_delete))
@@ -590,10 +957,19 @@ fn phase_one_routes() -> Router<AppState> {
                 .patch(list_config_attr_patch),
         )
         .route("/lists/{id}/archivers", get(list_archivers))
-        .route("/lists/{id}/uris", get(list_uris))
+        .route("/lists/{id}/bans", get(bans::list).post(bans::create))
+        .route("/lists/{id}/bounces", get(bounces::list))
+        .route(
+            "/lists/{id}/bans/{email}",
+            get(bans::get).delete(bans::delete),
+        )
         .route("/lists/{id}/templates", get(list_templates))
         .route("/lists/{id}/roster/{role}", get(roster))
-        .route("/lists/{id}/member/{email}", get(list_member))
+        .route(
+            "/lists/{id}/member/{email}",
+            get(list_member).delete(list_member_delete),
+        )
+        .merge(requests::routes())
         .route("/lists/{id}/held", get(list_held))
         .route("/lists/{id}/held/count", get(list_held_count))
         .route(
@@ -664,11 +1040,13 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
         ),
     }
 }
-async fn metrics() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+async fn metrics(State(s): State<AppState>) -> impl IntoResponse {
+    let mut text = String::from(
         "# HELP listmngr_up Service readiness.\n# TYPE listmngr_up gauge\nlistmngr_up 1\n",
-    )
+    );
+    text.push_str(&listmngr_core::metrics::global().render());
+    text.push_str(&queue_metrics(&s).await);
+    ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], text)
 }
 async fn openapi() -> Json<Value> {
     Json(serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI serializes"))
@@ -752,8 +1130,8 @@ const fn audit_context(auth: &TokenAuth, addr: SocketAddr) -> AuditContext {
     AuditContext::new(Some(auth.user_id), Some(auth.id), Some(addr.ip()))
 }
 
-fn is_unbound(auth: &TokenAuth) -> bool {
-    auth.scopes.contains("admin") || (auth.list_id.is_none() && auth.domain_id.is_none())
+const fn is_unbound(auth: &TokenAuth) -> bool {
+    auth.list_id.is_none() && auth.domain_id.is_none()
 }
 
 async fn auth_allows_list(state: &AppState, auth: &TokenAuth, list: &ListId) -> ApiResult<bool> {
@@ -780,9 +1158,8 @@ async fn auth_allows_user(state: &AppState, auth: &TokenAuth, user: UserId) -> A
         return Ok(true);
     }
     let list_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT m.list_id FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.user_id=$1 OR a.user_id=$2",
+        "SELECT DISTINCT m.list_id FROM members m JOIN addresses a ON a.id=m.address_id WHERE a.user_id=$1",
     )
-    .bind(user.to_string())
     .bind(user.to_string())
     .fetch_all(state.db.pool())
     .await
@@ -814,7 +1191,9 @@ async fn authorize_user(
     user: UserId,
 ) -> ApiResult<TokenAuth> {
     let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
-    if !auth_allows_user(state, &auth, user).await? {
+    if (scope == "users:write" && (auth.list_id.is_some() || auth.domain_id.is_some()))
+        || !auth_allows_user(state, &auth, user).await?
+    {
         return Err(ApiError(Error::Forbidden(scope.into())));
     }
     finish_authorization(state, auth).await
@@ -828,7 +1207,9 @@ async fn authorize_address(
     email: &str,
 ) -> ApiResult<TokenAuth> {
     let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
-    if !auth_allows_address(state, &auth, email).await? {
+    if (scope == "users:write" && (auth.list_id.is_some() || auth.domain_id.is_some()))
+        || !auth_allows_address(state, &auth, email).await?
+    {
         return Err(ApiError(Error::Forbidden(scope.into())));
     }
     finish_authorization(state, auth).await
@@ -843,7 +1224,8 @@ async fn authorize_user_and_address(
     email: &str,
 ) -> ApiResult<TokenAuth> {
     let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
-    if !auth_allows_user(state, &auth, user).await?
+    if (scope == "users:write" && (auth.list_id.is_some() || auth.domain_id.is_some()))
+        || !auth_allows_user(state, &auth, user).await?
         || !auth_allows_address(state, &auth, email).await?
     {
         return Err(ApiError(Error::Forbidden(scope.into())));
@@ -858,7 +1240,7 @@ async fn authorize_admin(
     scope: &str,
 ) -> ApiResult<TokenAuth> {
     let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
-    if !auth.scopes.contains("admin") {
+    if !auth.scopes.contains("admin") || auth.list_id.is_some() || auth.domain_id.is_some() {
         return Err(ApiError(Error::Forbidden("admin".into())));
     }
     finish_authorization(state, auth).await
@@ -920,6 +1302,11 @@ fn paged<T: Serialize>(flavor: ApiFlavor, entries: T, query: &PageQuery) -> Resu
         .as_array()
         .ok_or_else(|| Error::Validation("page entries must be an array".into()))?;
     let total = entries.len();
+    let (start, end) = page_window(total, query)?;
+    Ok(page_response(flavor, &entries[start..end], start, total))
+}
+
+fn page_window(total: usize, query: &PageQuery) -> Result<(usize, usize), Error> {
     let count = query.count.unwrap_or(50);
     if !(1..=100).contains(&count) {
         return Err(Error::Validation("count must be between 1 and 100".into()));
@@ -943,10 +1330,14 @@ fn paged<T: Serialize>(flavor: ApiFlavor, entries: T, query: &PageQuery) -> Resu
     };
     let start = requested_start.min(total);
     let end = start.saturating_add(count).min(total);
-    let selected = entries[start..end].to_vec();
+    Ok((start, end))
+}
+
+fn page_response(flavor: ApiFlavor, selected: &[Value], start: usize, total: usize) -> Value {
+    let end = start.saturating_add(selected.len());
     let returned = selected.len();
     let next_cursor = (end < total).then(|| end.to_string());
-    Ok(match flavor {
+    match flavor {
         ApiFlavor::Compat31 => json!({
             "entries": selected,
             "start": start,
@@ -961,7 +1352,7 @@ fn paged<T: Serialize>(flavor: ApiFlavor, entries: T, query: &PageQuery) -> Resu
             "start": start,
             "count": returned
         }),
-    })
+    }
 }
 
 fn domain_value(flavor: ApiFlavor, domain: &listmngr_core::Domain) -> Value {
@@ -1058,16 +1449,20 @@ async fn system_pipelines(
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "system:read").await?;
-    Ok(Json(paged(
-        s.flavor,
-        [
-            "default-posting-pipeline",
-            "virgin",
-            "default-owner-pipeline",
-        ]
-        .map(catalog_entry),
-        &page_query,
-    )?))
+    let registry = listmngr_mail::handlers::builtin_registry();
+    let entries: Vec<Value> = registry
+        .pipelines()
+        .map(|pipeline| {
+            json!({
+                "name": pipeline.name(),
+                "phase": "phase2",
+                "executable": registry.is_executable(pipeline),
+                "status": if registry.is_executable(pipeline) { "engine" } else { "declared" },
+                "handlers": pipeline.handlers(),
+            })
+        })
+        .collect();
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
 }
 #[utoipa::path(
     get,
@@ -1083,30 +1478,32 @@ async fn system_chains(
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "system:read").await?;
-    Ok(Json(paged(
-        s.flavor,
-        [
-            "default-posting-chain",
-            "default-owner-chain",
-            "accept",
-            "hold",
-            "reject",
-            "discard",
-            "moderation",
-            "header-match",
-            "dmarc-mitigation",
-        ]
-        .map(catalog_entry),
-        &page_query,
-    )?))
+    let entries: Vec<Value> = listmngr_pipeline::builtin()
+        .chains()
+        .map(chain_entry)
+        .collect();
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
 }
 
-fn catalog_entry(name: &str) -> Value {
+/// Project one chain as the engine actually holds it, so operators can see the
+/// real link order rather than a name list. A chain that is declared but has no
+/// links yet reports `executable: false`.
+fn chain_entry(chain: &listmngr_pipeline::Chain) -> Value {
+    use listmngr_pipeline::{ChainKind, Link};
+    let (status, rules) = match chain.kind() {
+        ChainKind::Terminal(_) => ("terminal", Vec::new()),
+        ChainKind::Moderation => ("moderation", Vec::new()),
+        ChainKind::HeaderMatch => ("header-match", Vec::new()),
+        ChainKind::DmarcMitigation => ("dmarc-mitigation", Vec::new()),
+        ChainKind::Links(links) if links.is_empty() => ("declared", Vec::new()),
+        ChainKind::Links(links) => ("engine", links.iter().map(Link::rule).collect()),
+    };
     json!({
-        "name": name,
-        "phase": "phase1",
-        "executable": false,
-        "status": "catalog_only"
+        "name": chain.name(),
+        "phase": "phase2",
+        "executable": chain.is_executable(),
+        "status": status,
+        "rules": rules
     })
 }
 
@@ -1279,22 +1676,6 @@ async fn domain_owners(
         &page_query,
     )?))
 }
-#[utoipa::path(
-    get,
-    path = "/api/v1/domains/{host}/uris",
-    params(("host" = String, Path, description = "host path parameter")),
-    responses((status = 200, description = "Successful operation", body = UriResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
-    security(("bearerAuth" = []))
-)]
-async fn domain_uris(
-    State(s): State<AppState>,
-    Path(host): Path<String>,
-    h: HeaderMap,
-    c: ConnectInfo<SocketAddr>,
-) -> ApiResult<Json<Value>> {
-    authorize_domain(&s, &h, peer(c), "lists:read", &host).await?;
-    Ok(Json(json!({"self_link":format!("/api/v1/domains/{host}")})))
-}
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 struct ListQuery {
@@ -1405,6 +1786,7 @@ async fn lists_create(
         s.db.lists()
             .create_with_context(new, &audit_context(&auth, addr))
             .await?;
+    refresh_mta_maps(&s).await;
     let value = list_value(s.flavor, &list);
     let response = match s.flavor {
         ApiFlavor::Compat31 => (
@@ -1453,6 +1835,7 @@ async fn lists_delete(
     s.db.lists()
         .delete_with_context(&id, &audit_context(&auth, addr))
         .await?;
+    refresh_mta_maps(&s).await;
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(
@@ -1493,9 +1876,12 @@ async fn list_config(
 ) -> ApiResult<Json<Value>> {
     let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
-    Ok(Json(list_config_value(
-        &s.db.lists().get(&id).await?,
-        &s.config.mailman.noreply_address,
+    Ok(Json(bounce_config::project(
+        s.flavor,
+        list_config_value(
+            &s.db.lists().get(&id).await?,
+            &s.config.mailman.noreply_address,
+        ),
     )))
 }
 
@@ -1531,7 +1917,7 @@ async fn list_config_put(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: JsonOrForm<Value>,
+    body: JsonOrForm<FormAwareObject>,
 ) -> ApiResult<Json<Value>> {
     list_config_write(state, path, headers, connect, body, true).await
 }
@@ -1548,7 +1934,7 @@ async fn list_config_patch(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: JsonOrForm<Value>,
+    body: JsonOrForm<FormAwareObject>,
 ) -> ApiResult<Json<Value>> {
     list_config_write(state, path, headers, connect, body, false).await
 }
@@ -1557,47 +1943,146 @@ async fn list_config_write(
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    JsonOrForm(v): JsonOrForm<Value>,
+    JsonOrForm(FormAwareObject(mut v)): JsonOrForm<FormAwareObject>,
     replace: bool,
 ) -> ApiResult<Json<Value>> {
     let id = parse_list_path(s.flavor, &id)?;
     let addr = peer(c);
     let auth = authorize_list(&s, &h, addr, "lists:write", &id).await?;
+    bounce_config::normalize(s.flavor, &mut v)?;
+    normalize_list_config_form(&mut v, &h)?;
     let update = if replace {
         let defaults = listmngr_core::MailingList::new(id.clone(), id.list_name().to_owned());
-        let mut replacement = json!({
-            "display_name": defaults.display_name,
-            "description": defaults.description,
-            "info": defaults.info,
-            "subject_prefix": defaults.subject_prefix,
-            "advertised": defaults.advertised,
-            "preferred_language": defaults.preferred_language,
-            "anonymous_list": defaults.anonymous_list,
-            "next_digest_number": defaults.next_digest_number,
-            "emergency": defaults.emergency,
-            "archive_policy": defaults.archive_policy,
-            "archive_rendering_mode": defaults.archive_rendering_mode,
-        });
+        // Every writable setting at its default; the read-only projection
+        // fields are not part of a replacement.
+        let mut replacement = serde_json::to_value(&defaults).expect("serialize");
+        let object = replacement
+            .as_object_mut()
+            .expect("replacement is an object");
+        for read_only in [
+            "id",
+            "created_at",
+            "last_post_at",
+            "post_id",
+            "volume",
+            "digest_last_sent_at",
+            "style_name",
+        ] {
+            object.remove(read_only);
+        }
         let supplied = v
             .as_object()
             .ok_or_else(|| ApiError(Error::Validation("list config must be an object".into())))?;
-        replacement
-            .as_object_mut()
-            .expect("replacement is an object")
-            .extend(supplied.clone());
+        object.extend(supplied.clone());
         replacement
     } else {
         v
     };
-    Ok(Json(
+    Ok(Json(bounce_config::project(
+        s.flavor,
         serde_json::to_value(
             s.db.lists()
                 .update_with_context(&id, &update, &audit_context(&auth, addr))
                 .await?,
         )
         .expect("serialize"),
-    ))
+    )))
 }
+// Form values are strings; keep JSON strict and convert only known numeric settings.
+fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResult<()> {
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/json"))
+    {
+        return Ok(());
+    }
+    for field in [
+        "dmarc_mitigate_unconditionally",
+        "send_welcome_message",
+        "send_goodbye_message",
+        "process_bounces",
+        "bounce_notify_owner_on_disable",
+        "bounce_notify_owner_on_bounce_increment",
+        "bounce_notify_owner_on_removal",
+        "administrivia",
+        "require_explicit_destination",
+        "respond_to_post_requests",
+        "admin_immed_notify",
+        "digests_enabled",
+        "digest_send_periodic",
+        "advertised",
+        "anonymous_list",
+        "emergency",
+        "filter_content",
+        "collapse_alternatives",
+        "convert_html_to_plaintext",
+        "include_rfc2369_headers",
+        "allow_list_posts",
+        "first_strip_reply_to",
+        "include_sender_header",
+        "topics_enabled",
+    ] {
+        if let Some(Value::String(text)) = value.get(field) {
+            let enabled = text
+                .to_ascii_lowercase()
+                .parse::<bool>()
+                .map_err(|_| ApiError(Error::Validation(field.into())))?;
+            value[field] = json!(enabled);
+        }
+    }
+    // List settings: one form value is a one-element list, an empty value
+    // clears the list, repeated keys already arrived as an array.
+    for field in [
+        "acceptable_aliases",
+        "accept_these_nonmembers",
+        "hold_these_nonmembers",
+        "reject_these_nonmembers",
+        "discard_these_nonmembers",
+        "filter_types",
+        "pass_types",
+        "filter_extensions",
+        "pass_extensions",
+        "dmarc_addresses",
+    ] {
+        if let Some(Value::String(text)) = value.get(field) {
+            value[field] = if text.is_empty() {
+                json!([])
+            } else {
+                json!([text])
+            };
+        }
+    }
+    for field in ["bounce_score_threshold", "digest_size_threshold"] {
+        if let Some(Value::String(text)) = value.get(field) {
+            let number = text
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite())
+                .ok_or_else(|| ApiError(Error::Validation(field.into())))?;
+            value[field] = json!(number);
+        }
+    }
+    for field in [
+        "max_message_size",
+        "max_num_recipients",
+        "bounce_info_stale_after",
+        "bounce_you_are_disabled_warnings",
+        "bounce_you_are_disabled_warnings_interval",
+        "next_digest_number",
+        "topics_bodylines_limit",
+        "autoresponse_grace_period",
+    ] {
+        if let Some(Value::String(text)) = value.get(field) {
+            let number = text
+                .parse::<i64>()
+                .map_err(|_| ApiError(Error::Validation(field.into())))?;
+            value[field] = json!(number);
+        }
+    }
+    Ok(())
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/lists/{id}/config/{attr}",
@@ -1613,9 +2098,12 @@ async fn list_config_attr(
 ) -> ApiResult<Json<Value>> {
     let id = id.parse()?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
-    let v = list_config_value(
-        &s.db.lists().get(&id).await?,
-        &s.config.mailman.noreply_address,
+    let v = bounce_config::project(
+        s.flavor,
+        list_config_value(
+            &s.db.lists().get(&id).await?,
+            &s.config.mailman.noreply_address,
+        ),
     );
     Ok(Json(
         v.get(&attr)
@@ -1674,14 +2162,17 @@ async fn list_config_attr_write(
     } else {
         v
     };
-    Ok(Json(
+    let mut update = json!({attr:value});
+    bounce_config::normalize(s.flavor, &mut update)?;
+    Ok(Json(bounce_config::project(
+        s.flavor,
         serde_json::to_value(
             s.db.lists()
-                .update_with_context(&id, &json!({attr:value}), &audit_context(&auth, addr))
+                .update_with_context(&id, &update, &audit_context(&auth, addr))
                 .await?,
         )
         .expect("serialize"),
-    ))
+    )))
 }
 #[utoipa::path(
     get,
@@ -1704,25 +2195,6 @@ async fn list_archivers(
         s.db.lists().archivers(&id).await?,
         &page_query,
     )?))
-}
-#[utoipa::path(
-    get,
-    path = "/api/v1/lists/{id}/uris",
-    params(("id" = String, Path, description = "id path parameter")),
-    responses((status = 200, description = "Successful operation", body = UriResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
-    security(("bearerAuth" = []))
-)]
-async fn list_uris(
-    State(s): State<AppState>,
-    Path(id): Path<String>,
-    h: HeaderMap,
-    c: ConnectInfo<SocketAddr>,
-) -> ApiResult<Json<Value>> {
-    let id: ListId = id.parse()?;
-    authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
-    Ok(Json(
-        json!({"posting_address":id.posting_address(),"bounces_address":id.bounces_address(),"join_address":id.join_address(),"leave_address":id.leave_address(),"owner_address":id.owner_address(),"request_address":id.request_address()}),
-    ))
 }
 #[utoipa::path(
     get,
@@ -1824,7 +2296,8 @@ async fn member_value(state: &AppState, member: &listmngr_core::Member) -> Resul
 }
 #[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
 struct WorkflowInput {
-    #[serde(default)]
+    /// Mailman's clients send booleans as `True`/`False` strings on forms.
+    #[serde(default, deserialize_with = "mailman_bool")]
     invitation: bool,
 }
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -1892,14 +2365,55 @@ async fn members_create(
 ) -> ApiResult<Response> {
     let addr = peer(c);
     let auth = authorize_list(&s, &h, addr, "members:write", &v.list_id).await?;
-    if v.workflow.invitation
-        || !v.confirmation.pre_verified
-        || !v.confirmation.pre_confirmed
-        || !v.confirmation.pre_approved
-    {
-        return Err(ApiError(Error::Validation(
-            "Phase 1 subscriptions require pre_verified, pre_confirmed and pre_approved".into(),
-        )));
+    // mailmanclient's administrative role methods omit subscription workflow
+    // flags. Role assignment does not itself verify ownership of an address.
+    // Owner, moderator and nonmember are role records, not subscriptions:
+    // no workflow, no confirmation flags, exactly as mailmanclient's
+    // administrative helpers post them.
+    let administrative_role = !matches!(v.role, MemberRole::Member);
+    if administrative_role {
+        if v.workflow.invitation {
+            return Err(ApiError(Error::Validation(
+                "an invitation subscribes a member, not an owner or moderator".into(),
+            )));
+        }
+    } else {
+        // Mailman's registrar: the list's policy decides what is still
+        // missing and each flag supplies one of those steps in advance.
+        let outcome =
+            s.db.workflows()
+                .subscribe(
+                    &listmngr_db::workflows::AdminSubscription {
+                        list: &v.list_id,
+                        email: &v.subscriber,
+                        display_name: &v.display_name,
+                        pre_verified: v.confirmation.pre_verified,
+                        pre_confirmed: v.confirmation.pre_confirmed,
+                        pre_approved: v.confirmation.pre_approved,
+                        invitation: v.workflow.invitation,
+                    },
+                    &audit_context(&auth, addr),
+                    chrono::Utc::now().timestamp_millis(),
+                )
+                .await?;
+        if let listmngr_db::workflows::SubscriptionOutcome::Held { token, token_owner } = outcome {
+            let token_owner = match token_owner {
+                listmngr_db::workflows::TokenOwner::Subscriber => "subscriber",
+                listmngr_db::workflows::TokenOwner::Moderator => "moderator",
+            };
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(json!({
+                    "token": token,
+                    "token_owner": token_owner,
+                    "http_etag": format!("{:x}", Sha256::digest(&token)),
+                })),
+            )
+                .into_response());
+        }
+        let member = subscribed_member(&s, &v.list_id, &v.subscriber).await?;
+        let value = member_value(&s, &member).await?;
+        return Ok(created_member(s.flavor, &member, value));
     }
     let member =
         s.db.members()
@@ -1911,12 +2425,30 @@ async fn members_create(
                     subscription_mode: SubscriptionMode::AsAddress,
                     display_name: v.display_name,
                 },
-                true,
+                v.confirmation.pre_verified,
                 &audit_context(&auth, addr),
             )
             .await?;
     let value = member_value(&s, &member).await?;
-    let response = match s.flavor {
+    Ok(created_member(s.flavor, &member, value))
+}
+
+/// The member a just-completed subscription created.
+async fn subscribed_member(
+    s: &AppState,
+    list: &ListId,
+    email: &str,
+) -> ApiResult<listmngr_core::Member> {
+    s.db.members()
+        .find(email)
+        .await?
+        .into_iter()
+        .find(|member| member.list_id == *list && member.role == MemberRole::Member)
+        .ok_or_else(|| ApiError(Error::NotFound("member".into())))
+}
+
+fn created_member(flavor: ApiFlavor, member: &listmngr_core::Member, value: Value) -> Response {
+    match flavor {
         ApiFlavor::Compat31 => (
             StatusCode::CREATED,
             [(header::LOCATION, format!("/3.1/members/{}", member.id))],
@@ -1924,8 +2456,7 @@ async fn members_create(
         )
             .into_response(),
         ApiFlavor::V1 => (StatusCode::CREATED, Json(value)).into_response(),
-    };
-    Ok(response)
+    }
 }
 #[utoipa::path(
     get,
@@ -1973,6 +2504,47 @@ async fn list_member(
     Ok(Json(member_value(&s, member).await?))
 }
 
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct UnsubscribeInput {
+    #[serde(default, deserialize_with = "mailman_bool")]
+    pre_confirmed: bool,
+    #[serde(default, deserialize_with = "mailman_bool")]
+    pre_approved: bool,
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/lists/{id}/member/{email}",
+    params(("id" = String, Path), ("email" = String, Path)),
+    request_body(content((UnsubscribeInput = "application/json"), (UnsubscribeInput = "application/x-www-form-urlencoded"))),
+    responses((status = 204, description = "Confirmed administrative removal"), (status = 400, description = "Both pre_confirmed and pre_approved must be true", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+async fn list_member_delete(
+    State(s): State<AppState>,
+    Path((id, email)): Path<(String, String)>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    JsonOrForm(input): JsonOrForm<UnsubscribeInput>,
+) -> ApiResult<StatusCode> {
+    let id = id.parse()?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "members:write", &id).await?;
+    if !input.pre_confirmed || !input.pre_approved {
+        return Err(ApiError(Error::Validation("only pre_confirmed=true and pre_approved=true administrative unsubscribe is supported here; use the public leave confirmation workflow otherwise".into())));
+    }
+    let members = s.db.members().find(&email).await?;
+    let member = members
+        .iter()
+        .find(|member| member.list_id == id && member.role == MemberRole::Member)
+        .ok_or_else(|| ApiError(Error::NotFound(email)))?;
+    s.db.members()
+        .delete_with_context(member.id, &audit_context(&auth, addr))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 const HELD_OUT_MAX_ATTEMPTS: i64 = 8;
 
 /// Held-message wire shape for `mailmanclient`'s `HeldMessage`.
@@ -1997,37 +2569,6 @@ page_response!(HeldMessagePageResponse, HeldMessageResponse);
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 struct CountResponse {
     count: usize,
-}
-
-/// Recipients a currently-held message would deliver to on accept: enabled,
-/// regular-delivery members honoring `receive_own_postings`. Mirrors
-/// `listmngr_runners::resolve_recipients`; both call the same pure
-/// `listmngr_pipeline::policy::select_recipients` and must stay in sync, but
-/// each crate resolves its own DB candidates (the API crate does not, and
-/// should not, depend on the runners crate).
-async fn resolve_held_recipients(
-    s: &AppState,
-    list_id: &ListId,
-    sender_email: &str,
-) -> ApiResult<Vec<String>> {
-    let members = s.db.members().roster(list_id, MemberRole::Member).await?;
-    let mut candidates = Vec::with_capacity(members.len());
-    for member in &members {
-        let address = s.db.addresses().get_by_id(member.address_id).await?;
-        let preferences = s.db.preferences().resolve_member(member.id, "en").await?;
-        candidates.push(listmngr_pipeline::CandidateRecipient {
-            email: address.email,
-            delivery_status: preferences
-                .delivery_status
-                .unwrap_or(DeliveryStatus::Enabled),
-            delivery_mode: preferences.delivery_mode.unwrap_or(DeliveryMode::Regular),
-            receive_own_postings: preferences.receive_own_postings.unwrap_or(true),
-        });
-    }
-    Ok(listmngr_pipeline::select_recipients(
-        &candidates,
-        sender_email,
-    ))
 }
 
 async fn held_entry_value(
@@ -2082,12 +2623,20 @@ async fn list_held(
     let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "moderation", &id).await?;
     let list = s.db.lists().get(&id).await?;
-    let held = s.db.moderation().list_pending(&id).await?;
+    let total = s.db.moderation().count_pending(&id).await?;
+    let (start, end) = page_window(total, &page_query)?;
+    let held = if start == end {
+        Vec::new()
+    } else {
+        s.db.moderation()
+            .pending_page(&id, start, end - start)
+            .await?
+    };
     let mut entries = Vec::with_capacity(held.len());
     for item in &held {
         entries.push(held_entry_value(&s, &list, item).await?);
     }
-    Ok(Json(paged(s.flavor, entries, &page_query)?))
+    Ok(Json(page_response(s.flavor, &entries, start, total)))
 }
 #[utoipa::path(
     get,
@@ -2104,8 +2653,8 @@ async fn list_held_count(
 ) -> ApiResult<Json<Value>> {
     let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "moderation", &id).await?;
-    let held = s.db.moderation().list_pending(&id).await?;
-    Ok(Json(json!({ "count": held.len() })))
+    let count = s.db.moderation().count_pending(&id).await?;
+    Ok(Json(json!({ "count": count })))
 }
 #[utoipa::path(
     get,
@@ -2162,11 +2711,9 @@ async fn list_held_moderate(
     let now_ms = chrono::Utc::now().timestamp_millis();
     let reason = v.comment.unwrap_or_default();
     let action = match v.action.as_str() {
-        "accept" => ReviewAction::Accept(listmngr_db::mail_queue::ChildJob {
-            queue: listmngr_db::mail_queue::Queue::Out,
+        "accept" => ReviewAction::Accept {
             max_attempts: HELD_OUT_MAX_ATTEMPTS,
-            recipients: resolve_held_recipients(&s, &id, &held.sender).await?,
-        }),
+        },
         "reject" => ReviewAction::Reject,
         "discard" => ReviewAction::Discard,
         "defer" => ReviewAction::Defer,
