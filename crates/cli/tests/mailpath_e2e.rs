@@ -2,6 +2,8 @@
 //! child process, a real bound ephemeral LMTP socket, a real SMTP sink
 //! socket, and the real durable SQLite-backed queue/moderation DB — no
 //! mocked runner or queue. See `docs/FEATURE_PARITY.md` for scope/evidence.
+use base64::Engine as _;
+use mail_auth::common::parse::TxtRecordParser as _;
 use serde_json::Value;
 use std::net::TcpListener as StdTcpListener;
 use std::path::Path;
@@ -168,6 +170,7 @@ async fn handle_smtp_connection(stream: TcpStream, sink: Sink) {
 // ---- A real, raw LMTP client (not the transport's own test suite: this is
 // an independent client speaking the wire protocol to the running binary). ----
 
+#[derive(Debug)]
 struct LmtpResult {
     rcpt_replies: Vec<String>,
     data_replies: Vec<String>,
@@ -361,44 +364,129 @@ struct Fixture {
     list: String,
 }
 
+/// A DKIM key the fixture signs with, and the TXT record that verifies it.
+struct DkimFixture {
+    record: String,
+}
+
+const DKIM_SELECTOR: &str = "e2e";
+
+/// Generate an RSA key with the system OpenSSL, as the DKIM unit tests do,
+/// and return the TOML that makes the outgoing runner sign with it.
+fn dkim_key(dir: &Path) -> (String, DkimFixture) {
+    let key = dir.join("dkim-e2e.pem");
+    assert!(
+        StdCommand::new("openssl")
+            .args([
+                "genpkey",
+                "-algorithm",
+                "RSA",
+                "-pkeyopt",
+                "rsa_keygen_bits:2048",
+                "-out"
+            ])
+            .arg(&key)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let public = StdCommand::new("openssl")
+        .args(["pkey", "-in"])
+        .arg(&key)
+        .args(["-pubout", "-outform", "DER"])
+        .output()
+        .unwrap();
+    let record = format!(
+        "v=DKIM1; k=rsa; p={}",
+        base64::engine::general_purpose::STANDARD.encode(public.stdout)
+    );
+    let toml = format!(
+        "[[mta.dkim_signing]]\ndomain = \"e2e.example.invalid\"\nselector = \"{DKIM_SELECTOR}\"\nprivate_key_file = \"{}\"\n",
+        key.display()
+    );
+    (toml, DkimFixture { record })
+}
+
+/// The child's configuration environment: the fixture database, the bound
+/// ports, the plaintext trusted relay, Postfix maps in the fixture directory.
+fn child_env(
+    dir: &Path,
+    web_port: u16,
+    lmtp_port: u16,
+    sink_port: u16,
+    extra: &[(&str, &str)],
+) -> Vec<(String, String)> {
+    let mut env = base_env();
+    let settings = [
+        (
+            "LISTMNGR__DATABASE__URL",
+            format!("sqlite://{}/e2e.sqlite?mode=rwc", dir.display()),
+        ),
+        (
+            "LISTMNGR__SITE__BASE_URL",
+            "https://lists.e2e.invalid".into(),
+        ),
+        ("LISTMNGR__WEB__LISTEN", format!("127.0.0.1:{web_port}")),
+        ("LISTMNGR__MTA__ENABLED", "true".into()),
+        (
+            "LISTMNGR__MTA__LMTP_LISTEN",
+            format!("127.0.0.1:{lmtp_port}"),
+        ),
+        (
+            "LISTMNGR__MTA__SMTP_RELAY",
+            format!("127.0.0.1:{sink_port}"),
+        ),
+        ("LISTMNGR__MTA__SMTP_TLS", "plaintext_trusted_relay".into()),
+        ("LISTMNGR__MTA__LOCAL_HOSTNAME", "e2e.invalid".into()),
+        ("LISTMNGR__MTA__COMMAND_TIMEOUT_SECS", "5".into()),
+        // The server publishes Postfix maps at startup and after list changes.
+        ("LISTMNGR__MTA__INCOMING", "postfix".into()),
+        (
+            "LISTMNGR__MTA__MAP_DIRECTORY",
+            dir.join("mta").display().to_string(),
+        ),
+        ("RUST_LOG", "warn".into()),
+    ];
+    env.extend(
+        settings
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value)),
+    );
+    env.extend(
+        extra
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned())),
+    );
+    env
+}
+
 impl Fixture {
     async fn start() -> Self {
+        Self::start_with(false, &[]).await.0
+    }
+
+    /// Start the fixture; with `dkim` the server signs outgoing mail for the
+    /// list domain and the matching public record is returned. `extra` adds
+    /// configuration environment for the child.
+    async fn start_with(dkim: bool, extra: &[(&str, &str)]) -> (Self, Option<DkimFixture>) {
         let dir = tempfile::tempdir().unwrap();
         let web_port = free_port();
         let lmtp_port = free_port();
         let (sink_port, sink, sink_task) = start_sink().await;
-        let mut env = base_env();
-        env.push((
-            "LISTMNGR__DATABASE__URL".into(),
-            format!("sqlite://{}/e2e.sqlite?mode=rwc", dir.path().display()),
-        ));
-        env.push((
-            "LISTMNGR__WEB__LISTEN".into(),
-            format!("127.0.0.1:{web_port}"),
-        ));
-        env.push(("LISTMNGR__MTA__ENABLED".into(), "true".into()));
-        env.push((
-            "LISTMNGR__MTA__LMTP_LISTEN".into(),
-            format!("127.0.0.1:{lmtp_port}"),
-        ));
-        env.push((
-            "LISTMNGR__MTA__SMTP_RELAY".into(),
-            format!("127.0.0.1:{sink_port}"),
-        ));
-        env.push((
-            "LISTMNGR__MTA__SMTP_TLS".into(),
-            "plaintext_trusted_relay".into(),
-        ));
-        env.push(("LISTMNGR__MTA__LOCAL_HOSTNAME".into(), "e2e.invalid".into()));
-        env.push(("LISTMNGR__MTA__COMMAND_TIMEOUT_SECS".into(), "5".into()));
-        // The server publishes Postfix maps at startup and after list changes.
-        env.push(("LISTMNGR__MTA__INCOMING".into(), "postfix".into()));
-        env.push((
-            "LISTMNGR__MTA__MAP_DIRECTORY".into(),
-            dir.path().join("mta").display().to_string(),
-        ));
-        env.push(("RUST_LOG".into(), "warn".into()));
-
+        let mut env = child_env(dir.path(), web_port, lmtp_port, sink_port, extra);
+        let dkim = dkim.then(|| {
+            let (toml, fixture) = dkim_key(dir.path());
+            let path = dir.path().join("listmngr.toml");
+            std::fs::write(&path, toml).unwrap();
+            env.push(("LISTMNGR_CONFIG".into(), path.display().to_string()));
+            fixture
+        });
         run_cli(dir.path(), &env, &["migrate"], None);
         run_cli(
             dir.path(),
@@ -442,17 +530,88 @@ impl Fixture {
         let mut child = spawn_server(dir.path(), &env);
         wait_ready(web_port, &mut child).await;
 
-        Self {
-            dir,
-            env,
-            web_port,
-            lmtp_port,
-            sink,
-            sink_task,
-            child: Some(child),
-            admin_token,
-            list: list.to_owned(),
-        }
+        (
+            Self {
+                dir,
+                env,
+                web_port,
+                lmtp_port,
+                sink,
+                sink_task,
+                child: Some(child),
+                admin_token,
+                list: list.to_owned(),
+            },
+            dkim,
+        )
+    }
+
+    /// `PATCH` the list configuration through the typed API.
+    async fn patch_config(&self, body: Value) {
+        let response = reqwest::Client::new()
+            .patch(format!(
+                "http://127.0.0.1:{}/api/v1/lists/{}/config",
+                self.web_port, self.list
+            ))
+            .bearer_auth(&self.admin_token)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&body).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            response.status().is_success(),
+            "config patch failed: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        );
+    }
+
+    /// Store an inline English template body on the list.
+    async fn put_template(&self, name: &str, body: &str) {
+        let response = reqwest::Client::new()
+            .put(format!(
+                "http://127.0.0.1:{}/api/v1/lists/{}/templates/{name}",
+                self.web_port, self.list
+            ))
+            .bearer_auth(&self.admin_token)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&serde_json::json!({"language": "en", "body": body})).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success(), "{}", response.status());
+    }
+
+    /// Ban a sender from the list through the API.
+    async fn ban(&self, email: &str) {
+        let response = reqwest::Client::new()
+            .post(format!(
+                "http://127.0.0.1:{}/api/v1/lists/{}/bans",
+                self.web_port, self.list
+            ))
+            .bearer_auth(&self.admin_token)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&serde_json::json!({"email": email})).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    }
+
+    /// Wait for `predicate` over the sink's deliveries; returns the deliveries.
+    async fn deliveries_when(
+        &self,
+        deadline: Duration,
+        predicate: impl Fn(&[Delivery]) -> bool + Send + Sync,
+    ) -> Vec<Delivery> {
+        let satisfied = wait_until(deadline, || predicate(&self.sink.deliveries())).await;
+        let deliveries = self.sink.deliveries();
+        assert!(
+            satisfied,
+            "sink never satisfied the expectation: {deliveries:?}"
+        );
+        deliveries
     }
 
     fn add_member(&self, email: &str) -> Value {
@@ -900,4 +1059,327 @@ async fn durable_intake_survives_a_real_process_restart() {
             .unwrap();
     assert_eq!(stored_after, raw);
     db.pool().close().await;
+}
+
+/// The value of one header in a delivered message, unfolded.
+fn header(data: &[u8], name: &str) -> Option<String> {
+    listmngr_mail::header_value(data, name)
+}
+
+fn post(from: &str, subject: &str, body: &str) -> Vec<u8> {
+    format!(
+        "From: {from}\r\nTo: dev@e2e.example.invalid\r\nMessage-ID: <{}@example.invalid>\r\nSubject: {subject}\r\n\r\n{body}\r\n",
+        uuid::Uuid::now_v7()
+    )
+    .into_bytes()
+}
+
+/// Phase 2 acceptance: the delivered copy carries the `List-*` headers, the
+/// subject prefix and the footer, and its DKIM signature verifies against
+/// the fixture's public key.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn delivered_post_has_list_headers_prefix_footer_and_a_verifiable_dkim_signature() {
+    let (fixture, dkim) = Fixture::start_with(true, &[]).await;
+    let dkim = dkim.unwrap();
+    fixture.add_member("author@e2e.example.invalid");
+    fixture.add_member("reader@e2e.example.invalid");
+    fixture
+        .patch_config(serde_json::json!({"subject_prefix": "[Dev] "}))
+        .await;
+    fixture
+        .put_template(
+            "list:member:regular:footer",
+            "-- \ne2e footer for $display_name\n",
+        )
+        .await;
+    let raw = post("author@e2e.example.invalid", "hello list", "real body");
+    let result = lmtp_deliver(
+        fixture.lmtp_port,
+        Some("author@e2e.example.invalid"),
+        &["dev@e2e.example.invalid"],
+        &raw,
+    )
+    .await;
+    assert!(result.data_replies[0].starts_with("250"), "{result:?}");
+    let deliveries = fixture
+        .deliveries_when(Duration::from_secs(15), |all| {
+            all.iter()
+                .any(|d| d.rcpt_to.contains(&"reader@e2e.example.invalid".to_owned()))
+        })
+        .await;
+    let delivered = deliveries
+        .iter()
+        .find(|d| d.rcpt_to.contains(&"reader@e2e.example.invalid".to_owned()))
+        .unwrap();
+    let data = &delivered.data;
+    assert_eq!(header(data, "Subject").as_deref(), Some("[Dev] hello list"));
+    assert_eq!(
+        header(data, "List-Id").as_deref(),
+        Some("<dev.e2e.example.invalid>")
+    );
+    assert_eq!(
+        header(data, "List-Post").as_deref(),
+        Some("<mailto:dev@e2e.example.invalid>")
+    );
+    // The shared (non-personalized) copy carries the mailto forms; the
+    // per-recipient RFC 8058 pair is asserted on personalized copies below.
+    let unsubscribe = header(data, "List-Unsubscribe").unwrap();
+    assert!(
+        unsubscribe.contains("<mailto:dev-leave@e2e.example.invalid>"),
+        "{unsubscribe}"
+    );
+    assert_eq!(
+        header(data, "List-Archive").as_deref(),
+        Some("<https://lists.e2e.invalid/archives/list/dev.e2e.example.invalid/>")
+    );
+    assert_eq!(
+        header(data, "Precedence").as_deref(),
+        Some("list"),
+        "{}",
+        String::from_utf8_lossy(data)
+    );
+    let text = String::from_utf8_lossy(data);
+    assert!(text.contains("real body"), "{text}");
+    assert!(text.contains("e2e footer for Dev"), "{text}");
+    let signature = header(data, "DKIM-Signature").expect("signed");
+    assert!(
+        signature.contains("d=e2e.example.invalid")
+            && signature.contains(&format!("s={DKIM_SELECTOR}")),
+        "{signature}"
+    );
+    // Verify the signature the way a receiving MTA would, with the public
+    // record served from a seeded cache instead of DNS.
+    let cache = listmngr_mail::authenticity::TxtCache::default();
+    cache.seed(
+        &format!("{DKIM_SELECTOR}._domainkey.e2e.example.invalid."),
+        mail_auth::Txt::DomainKey(Arc::new(
+            mail_auth::common::verify::DomainKey::parse(dkim.record.as_bytes()).unwrap(),
+        )),
+    );
+    let verifier = listmngr_mail::authenticity::Verifier::system("mx.e2e.invalid")
+        .unwrap()
+        .with_txt_cache(cache);
+    let verdict = verifier
+        .verify(data, delivered.mail_from.as_deref(), None)
+        .await;
+    let results = verdict.header.expect("Authentication-Results");
+    assert!(results.contains("dkim=pass"), "{results}");
+}
+
+/// Phase 2 acceptance: a banned sender is rejected with a notice and the
+/// members never see the post.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn banned_sender_is_rejected_with_a_notice_and_never_delivered() {
+    let fixture = Fixture::start().await;
+    fixture.add_member("reader@e2e.example.invalid");
+    fixture.ban("banned@attacker.invalid").await;
+    let raw = post("banned@attacker.invalid", "spam", "buy now");
+    let result = lmtp_deliver(
+        fixture.lmtp_port,
+        Some("banned@attacker.invalid"),
+        &["dev@e2e.example.invalid"],
+        &raw,
+    )
+    .await;
+    assert!(result.data_replies[0].starts_with("250"), "{result:?}");
+    let deliveries = fixture
+        .deliveries_when(Duration::from_secs(15), |all| {
+            all.iter()
+                .any(|d| d.rcpt_to == ["banned@attacker.invalid".to_owned()])
+        })
+        .await;
+    let notice = deliveries
+        .iter()
+        .find(|d| d.rcpt_to == ["banned@attacker.invalid".to_owned()])
+        .unwrap();
+    let text = String::from_utf8_lossy(&notice.data);
+    assert!(text.contains("is banned from this list"), "{text}");
+    assert_eq!(
+        header(&notice.data, "Subject").as_deref(),
+        Some("Request to mailing list \"Dev\" rejected")
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !fixture
+            .sink
+            .deliveries()
+            .iter()
+            .any(|d| d.rcpt_to.contains(&"reader@e2e.example.invalid".to_owned())),
+        "{:?}",
+        fixture.sink.deliveries()
+    );
+    assert_eq!(fixture.held_count().await, 0);
+}
+
+/// Phase 2 acceptance: a post over `max_message_size` is held, not delivered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn oversized_post_is_held() {
+    let fixture = Fixture::start().await;
+    fixture.add_member("author@e2e.example.invalid");
+    fixture.add_member("reader@e2e.example.invalid");
+    fixture
+        .patch_config(serde_json::json!({"max_message_size": 1}))
+        .await;
+    let raw = post("author@e2e.example.invalid", "big", &"x".repeat(3 * 1024));
+    let result = lmtp_deliver(
+        fixture.lmtp_port,
+        Some("author@e2e.example.invalid"),
+        &["dev@e2e.example.invalid"],
+        &raw,
+    )
+    .await;
+    assert!(result.data_replies[0].starts_with("250"), "{result:?}");
+    let end = tokio::time::Instant::now() + Duration::from_secs(15);
+    while fixture.held_count().await != 1 {
+        assert!(tokio::time::Instant::now() < end, "the post was never held");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let entries = fixture.held_entries().await;
+    assert!(
+        entries[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("max_message_size"),
+        "{entries:?}"
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !fixture
+            .sink
+            .deliveries()
+            .iter()
+            .any(|d| d.rcpt_to.contains(&"reader@e2e.example.invalid".to_owned()))
+    );
+}
+
+/// Phase 2 acceptance: `personalize = full` with Mailman's
+/// `verp_personalized_deliveries` sends one message per member with a VERP
+/// envelope naming that member and the member's own one-click unsubscribe.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn personalize_full_sends_one_verp_message_per_member() {
+    let (fixture, _) = Fixture::start_with(
+        false,
+        &[("LISTMNGR__MTA__VERP_PERSONALIZED_DELIVERIES", "true")],
+    )
+    .await;
+    fixture.add_member("author@e2e.example.invalid");
+    fixture.add_member("one@e2e.example.invalid");
+    fixture.add_member("two@other.invalid");
+    fixture
+        .patch_config(serde_json::json!({"personalize": "full"}))
+        .await;
+    let raw = post("author@e2e.example.invalid", "personal", "for you");
+    let result = lmtp_deliver(
+        fixture.lmtp_port,
+        Some("author@e2e.example.invalid"),
+        &["dev@e2e.example.invalid"],
+        &raw,
+    )
+    .await;
+    assert!(result.data_replies[0].starts_with("250"), "{result:?}");
+    let deliveries = fixture
+        .deliveries_when(Duration::from_secs(15), |all| all.len() >= 3)
+        .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let deliveries = if fixture.sink.deliveries().len() > deliveries.len() {
+        fixture.sink.deliveries()
+    } else {
+        deliveries
+    };
+    assert_eq!(deliveries.len(), 3, "{deliveries:?}");
+    let mut envelopes: Vec<(String, String)> = deliveries
+        .iter()
+        .map(|d| {
+            assert_eq!(d.rcpt_to.len(), 1, "one recipient per message: {d:?}");
+            (d.mail_from.clone().unwrap(), d.rcpt_to[0].clone())
+        })
+        .collect();
+    envelopes.sort();
+    assert_eq!(
+        envelopes,
+        [
+            (
+                "dev-bounces+author=e2e.example.invalid@e2e.example.invalid".to_owned(),
+                "author@e2e.example.invalid".to_owned()
+            ),
+            (
+                "dev-bounces+one=e2e.example.invalid@e2e.example.invalid".to_owned(),
+                "one@e2e.example.invalid".to_owned()
+            ),
+            (
+                "dev-bounces+two=other.invalid@e2e.example.invalid".to_owned(),
+                "two@other.invalid".to_owned()
+            ),
+        ]
+    );
+    for delivery in &deliveries {
+        assert_eq!(
+            header(&delivery.data, "To").as_deref(),
+            Some(delivery.rcpt_to[0].as_str()),
+            "full personalization addresses each copy to its member"
+        );
+        assert_eq!(
+            header(&delivery.data, "List-Unsubscribe-Post").as_deref(),
+            Some("List-Unsubscribe=One-Click")
+        );
+        let unsubscribe = header(&delivery.data, "List-Unsubscribe").unwrap();
+        assert!(
+            unsubscribe.starts_with("<https://lists.e2e.invalid/")
+                && unsubscribe.ends_with("<mailto:dev-leave@e2e.example.invalid>"),
+            "{unsubscribe}"
+        );
+    }
+}
+
+/// Phase 2 acceptance: a post accepted while no server runs — the queue is
+/// durable — is delivered exactly once when the server starts, and a
+/// server killed with SIGKILL between the pipeline and the relay's answer
+/// (see `durable_intake_survives_a_real_process_restart`) never
+/// double-delivers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn post_injected_while_stopped_is_delivered_exactly_once_after_start() {
+    let mut fixture = Fixture::start().await;
+    fixture.add_member("author@e2e.example.invalid");
+    fixture.add_member("reader@e2e.example.invalid");
+    let mut child = fixture.child.take().unwrap();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let file = fixture.dir.path().join("stopped.eml");
+    std::fs::write(
+        &file,
+        post("author@e2e.example.invalid", "while stopped", "queued"),
+    )
+    .unwrap();
+    let job = run_cli(
+        fixture.dir.path(),
+        &fixture.env,
+        &[
+            "queue",
+            "inject",
+            &fixture.list,
+            file.to_str().unwrap(),
+            "--sender",
+            "author@e2e.example.invalid",
+        ],
+        None,
+    );
+    assert_eq!(job["queue"], "in", "{job}");
+    assert!(fixture.sink.deliveries().is_empty());
+    let mut child = spawn_server(fixture.dir.path(), &fixture.env);
+    wait_ready(fixture.web_port, &mut child).await;
+    fixture.child = Some(child);
+    fixture
+        .deliveries_when(Duration::from_secs(15), |all| {
+            all.iter()
+                .any(|d| d.rcpt_to.contains(&"reader@e2e.example.invalid".to_owned()))
+        })
+        .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let to_reader = fixture
+        .sink
+        .deliveries()
+        .into_iter()
+        .filter(|d| d.rcpt_to.contains(&"reader@e2e.example.invalid".to_owned()))
+        .count();
+    assert_eq!(to_reader, 1, "exactly once");
 }
