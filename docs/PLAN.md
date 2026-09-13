@@ -3,46 +3,58 @@
 > Mailman 3 alternative (Core + Postorius + HyperKitty + mailman-web + django-mailman3 + mailmanclient) viết bằng Rust.
 > Single binary, feature parity, UI hiện đại, security-first.
 
-## Verification update — bounded acknowledgement (2026-09-07)
+## Trạng thái triển khai (2026-09-14) — thay cho các checkpoint 2026-09-06/07
 
-The historical checkpoint below is not the latest implementation inventory.
-`P3-BOUNCE-ACK` in `FEATURE_PARITY.md` records the current bounded CLI operator
-acknowledgement and SQL-filtered backlog: workspace 457/0/30 ignored, full static
-checks and fresh security checks passed (deny required an isolated-fetch retry).
-The canonical `scripts/test-postgres.sh` gate passed 13 tests on an owned,
-disposable PostgreSQL 14.24 cluster; a separate real CLI/PG acknowledgement,
-retained-raw and audit tracer also passed. Fixtures were stopped and removed.
-This supersedes the historical "no current PostgreSQL PASS" below only for that
-explicit scope. Other server versions, PG acknowledgement contention, live MTA,
-full bounce correlation/scoring and production replacement remain unverified.
-The normative phase requirements and checkboxes are unchanged.
+Tài liệu này là **hợp đồng sản phẩm chuẩn và roadmap**, không phải bảng kê tính
+năng đã giao. Bằng chứng theo từng acceptance ID nằm ở
+[FEATURE_PARITY.md](FEATURE_PARITY.md); bề mặt đã triển khai mô tả ở
+README/ARCHITECTURE; `Cargo.lock` là nguồn phiên bản phụ thuộc (ADR-0003). Các
+checkpoint 2026-09-06/07 (mail path "plaintext trusted relay", "no current
+PostgreSQL PASS", R1/O1 OPEN) đã bị vượt qua; nội dung cũ giữ trong git history.
 
-## Historical implementation checkpoint (2026-09-06)
+Đã có bằng chứng (bounded local acceptance, ledger ID trong ngoặc):
 
-This document is the **normative product contract and future roadmap**, not an
-inventory of delivered features. Its original requirements, examples, phase
-checkboxes, and acceptance criteria below remain intact; planned commands/config,
-schema sketches, full parity, and security guarantees are not current runtime
-instructions. Use README/ARCHITECTURE for the implemented surface and
-[FEATURE_PARITY.md](FEATURE_PARITY.md) for revision-specific evidence. Dependency
-manifests and `Cargo.lock` are authoritative for installed versions (ADR-0003).
+- Phase 0/1: đầy đủ (`P0-*`, `P1-*`).
+- Phase 2 mail path: LMTP (P2-TRANSPORT, P2-LMTP-PARAMETERS); store/queue/runtime
+  (P2-STORE, P2-QUEUE, P2-RUNTIME, P2-LEASE-HEARTBEAT); chain/rule engine 15 rules
+  + header-match + DMARC (P2-CHAIN-ENGINE, P2-CHAIN-RULES, P2-DMARC-MUNGE,
+  P2-VALIDATE-AUTHENTICITY, P2-HEADER-MATCHES-REST); handler pipeline trừ
+  `to-usenet`/`arc-sign` (P2-PIPELINE-HANDLERS, P2-MIME-DELETE,
+  P2-HANDLERS-DECORATE, P2-COOK-HEADERS, P2-PERSONALIZE-VERP); templates
+  (P2-TEMPLATES); held REST + notices; out runner (P2-DELIVERY-POLICY,
+  P2-RECIPIENT-LIMIT, P2-STARTTLS, P2-SMTP-AUTH, P3-DKIM); RFC 2369/8058
+  (P2-ONE-CLICK-UNSUBSCRIBE); MTA maps (P2-MTA-INTEGRATION); metrics (P2-METRICS);
+  `/queues` (P2-QUEUES-REST).
+- Phase 3: subscription policies/requests/invitations (P3-SUBSCRIPTION-POLICY,
+  P3-SUBSCRIPTION-REQUESTS-REST, P3-ADMIN-SUBSCRIBE); email commands +
+  autoresponder (P3-EMAIL-COMMANDS, P3-AUTORESPONDER, P3-HELP-REPLY); bounces
+  (P3-BOUNCE-RUNNER, -DETECTORS, -PROBES, -MAINTENANCE, -SCHEDULER, -INBOX,
+  -ACK, các notice); digests (P3-DIGEST-SETTINGS, P3-DIGEST-REST); task runner +
+  `notify` (P3-TASK-RUNNER); `admin_notify_mchanges` (P3-ADMIN-NOTIFY-MCHANGES);
+  i18n en/vi (P3-I18N); bans list + site (P3-LIST-POSTING-BANS,
+  P3-SITE-BANS-REST).
+- Phase 4: các lát SSR rời (P4-WEB-*: login/session/CSRF, held review có scope,
+  members/policy, settings lát nhỏ, own postings, bounce recovery). HTML dựng
+  bằng `format!`, chưa template engine, chưa accounts/2FA/OIDC. Xem §7.0 và
+  Phase 4.
+- Phase 5: threading + Message-ID-Hash tương thích HyperKitty + archive đọc cơ
+  bản (P2-ARCHIVE-AUTHORITY). Chưa có search/UI đầy đủ.
 
-The actual implementation is Phase 1 plus a bounded, opt-in **plaintext trusted-
-relay LMTP → held moderation → SMTP** path with database intake, durable queue
-attempts and uncertainty quarantine through migration `0004_delivery_attempt_token.sql`.
-Parent verification reports current locked workspace tests/build/Clippy passing.
-The current PostgreSQL attempt gate timed out: **no current PostgreSQL PASS**.
-Earlier PostgreSQL passes predate 0004 and remain historical evidence only.
-The parent independently reran pinned `mailmanclient==3.3.5` Phase 1 + held
-successfully on the current SQLite-backed candidate before committing.
+R1 (partial LMTP batch commit) và O1 (lease clock sau lock wait) trong bảng
+"Residual P1s" của ledger đã được các tăng trưởng sau đóng:
+`crates/runners/tests/inbound_safety.rs`
+(`second_recipient_storage_failure_rolls_back_entire_batch`,
+`data_database_wait_timeout_replies_for_all_without_late_intake`) và các contract
+PostgreSQL `mail_queue_lock_clock`, `sibling_lease_clock`, `email_command_clock`
+trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
+`cargo test --locked --workspace --all-targets --no-fail-fast` (145 binaries,
+936 passed, 0 failed, 56 ignored) và `TEST_POSTGRES_URL=… scripts/test-postgres.sh`
+(38 tests, PostgreSQL 14.24 dùng một lần rồi drop). Ledger đã cập nhật.
 
-**R1 (partial LMTP batch commit on timeout) and O1 (lease clock after database
-lock waits) remain OPEN P1 findings.** The bounded O2/O3 repair does not close
-them. This is a development checkpoint, not production readiness, full Phase 2,
-or a Mailman replacement. Transport TLS/SMTP AUTH, DKIM/DMARC/ARC, bounces,
-digests, workflows, archive, administration UI, and migration remain outside the
-implemented mail slice. No additional feature implementation is implied by this
-checkpoint. The original normative contract follows in its existing language.
+Chưa có: ma trận e2e acceptance Phase 2 (P2-E2E-ACCEPTANCE), held `forward`
+(P2-HELD-FORWARD), bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE),
+suite SQLite/PostgreSQL song song trong CI (P3-DUAL-BACKEND-CI), toàn bộ Phase
+4–7 trừ các lát nêu trên. Chi tiết và thứ tự ở §7.
 
 ## 0. Tóm tắt 1 phút
 
@@ -780,6 +792,23 @@ Hai prefix: `/3.1/` (compat, JSON shape giống Mailman 3.3 để `mailmanclient
 
 Effort tương đối: S < M < L < XL. A phase tag is created only after its acceptance gates pass and CHANGELOG/FEATURE_PARITY carry the evidence; a package version alone does not imply phase completion. ADR-0003 establishes `0.1.0` as the current unreleased Phase 1 development baseline, so the earlier mechanical `v0.<phase>.0` rule does not apply retroactively to Phase 0.
 
+### 7.0 Quy ước thực thi
+
+- **Một acceptance ID = một nhánh** `feat/<id-slug>` tách từ `main`; qua đủ
+  gates trong CLAUDE.md (kể cả PostgreSQL và `scripts/test-mailmanclient.py`
+  khi chạm REST) → merge `--no-ff` → xoá nhánh. Không xếp nhiều tính năng lên
+  một nhánh.
+- Mỗi work package dưới đây có ID `P<phase>-<TÊN>`; row ledger cùng ID ghi đúng
+  lệnh và kết quả. Checkbox trong roadmap chỉ được tick khi row ledger tồn tại.
+- **Stage ↔ Phase**: một số row ledger gọi work package theo chữ cái (A–F,
+  ví dụ "B6", "C4", "D4", "F3") từ kế hoạch thực thi ngoài repo trước đây:
+  A–C = Phase 2–3 (đã xong), D = Phase 4, E = Phase 5, F = Phase 6. Từ nay chỉ
+  dùng ID `P<phase>-*`.
+- **Web UI**: server-rendered theo ADR-0002 — askama + htmx 2.x vendored + CSS
+  thuần, không Node runtime, không SPA. Câu chữ "Stage D SPA" trong ledger là
+  trôi dạt và đã sửa; ADR-0004 ghi quyết định hoà giải và lộ trình chuyển các
+  trang `format!` hiện có sang askama theo từng work package Phase 4.
+
 ### Phase 0 — Bootstrap (S)
 
 Mục tiêu: workspace compile, chạy `serve` trả healthz, CI xanh. Checkbox indicates artifact presence only; formal completion follows the ID-based acceptance ledger in `FEATURE_PARITY.md`.
@@ -813,67 +842,99 @@ Mục tiêu: tạo domain/list/user/member qua REST + CLI; `mailmanclient` subse
 
 Mục tiêu: gửi thư vào list → member nhận; hold/accept qua REST.
 
-Historical bounded checkpoint (2026-09-06; not completion of the checkboxes below): database raw
-intake, claim/lease/retry/shunt, standalone filesystem storage, CLI
-`queue inject/show/ls`, heartbeat, repository `unshunt`, atomic child handoff,
-opt-in supervisor and LMTP/inbound/outbound workers, held REST, and durable
-attempt quarantine are implemented. CLI `queue unshunt`, selectable filesystem
-intake and lifecycle/GC are not implemented. The current mail role requires
-`mta.enabled` and `mta.smtp_tls = "plaintext_trusted_relay"`; it does not implement
-the target TLS/authentication configuration shown earlier. R1 and O1 remain OPEN
-P1s; the current PostgreSQL attempt gate timed out. Full Phase 2 requirements and
-acceptance below remain unchanged and open. See `FEATURE_PARITY.md` for
-P2-STORE/P2-QUEUE/P2-CLI/P2-RUNTIME, held, and O2/O3 evidence.
+Checkbox tick theo row ledger nêu bên cạnh; deviation của từng row vẫn có hiệu lực.
 
-- [ ] Message store (fs, db) + `messages` index + `Message-ID-Hash`
-- [ ] Queue (`queue_jobs`) + claim/backoff/shunt + runner supervisor + graceful shutdown
-- [x] LMTP server (RFC 2033: LHLO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, PIPELINING, SIZE, 8BITMIME, per-recipient status), sub-address routing, early reject
-- [ ] `in` runner + chains + 15 rules (§4.3 trừ news/digests) + header-match chain + DMARC lookup + `munge_from`
-- [ ] Held messages: DB, notices (owner/user), REST held endpoints + actions
-- [ ] Pipeline runner + handlers §4.4 (trừ to-usenet, arc-sign): mime-delete đầy đủ, decorate + placeholders, personalize, VERP
-- [ ] Templates engine (built-in `mailman:///` bodies port từ Mailman en) + loader DB/file/http
-- [ ] `out` runner: `mail-send`, chunk, TLS, DKIM sign (dkim_keys + CLI `dkim gen/dns`), `retry`, `virgin`, `bad`
-- [ ] RFC 2369/8058 headers + HTTP one-click unsubscribe endpoint (token HMAC)
-- [x] Postfix/Exim map generation + `aliases regen`; docker-compose thêm postfix
-- [ ] CLI `queue inject/show/unshunt`, `status`
-- [x] Metrics: queue depth, deliveries, latency
+- [x] Message store (fs, db) + `messages` index + `Message-ID-Hash` — P2-STORE, P2-ARCHIVE-AUTHORITY (fs store là thư viện standalone; intake CLI/LMTP dùng DB; GC qua P3-TASK-RUNNER)
+- [x] Queue (`queue_jobs`) + claim/backoff/shunt + runner supervisor + graceful shutdown — P2-QUEUE, P2-RUNTIME, P2-LEASE-HEARTBEAT, P2-DELIVERY-POLICY
+- [x] LMTP server (RFC 2033: LHLO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, PIPELINING, SIZE, 8BITMIME, per-recipient status), sub-address routing, early reject — P2-TRANSPORT, P2-LMTP-PARAMETERS
+- [x] `in` runner + chains + 15 rules (§4.3 trừ news/digests) + header-match chain + DMARC lookup + `munge_from` — P2-CHAIN-ENGINE, P2-CHAIN-RULES, P2-DMARC-MUNGE, P2-VALIDATE-AUTHENTICITY, P2-HEADER-MATCHES-REST
+- [x] Held messages: DB, notices (owner/user), REST held endpoints + actions — held REST, P2-TEMPLATES (hold notices), P3-MODERATOR-REJECTION-NOTICE; `forward` còn thiếu → P2-HELD-FORWARD
+- [x] Pipeline runner + handlers §4.4 (trừ to-usenet, arc-sign): mime-delete đầy đủ, decorate + placeholders, personalize, VERP — P2-PIPELINE-HANDLERS, P2-MIME-DELETE, P2-HANDLERS-DECORATE, P2-COOK-HEADERS, P2-PERSONALIZE-VERP
+- [x] Templates engine (built-in `mailman:///` bodies port từ Mailman en) + loader DB/file/http — P2-TEMPLATES (`https://` chấp nhận nhưng không fetch trong transaction; xem deviation)
+- [x] `out` runner: `mail-send`, chunk, TLS, DKIM sign (dkim_keys + CLI `dkim gen/dns`), `retry`, `virgin`, `bad` — P2-RECIPIENT-LIMIT, P2-STARTTLS, P2-SMTP-AUTH, P3-DKIM, P3-DKIM-BODY, P2-DELIVERY-POLICY
+- [x] RFC 2369/8058 headers + HTTP one-click unsubscribe endpoint (token HMAC) — P2-COOK-HEADERS, P2-ONE-CLICK-UNSUBSCRIBE
+- [x] Postfix/Exim map generation + `aliases regen`; docker-compose thêm postfix — P2-MTA-INTEGRATION, P2-MTA-MAPS
+- [x] CLI `queue inject/show/unshunt`, `status` — P2-CLI, P2-RUNTIME (+ `queue recipients/resolve`)
+- [x] Metrics: queue depth, deliveries, latency — P2-METRICS
+- [x] REST `/queues` — P2-QUEUES-REST
+- [ ] **P2-HELD-FORWARD** (S): `forward=True&forward_to=…` trên `POST /lists/{id}/held/{id}` như Mailman/Postorius — bọc bản gốc `message/rfc822`, gửi từ `-bounces`, kết hợp mọi action kể cả `defer`; audit `post.forward`.
+- [ ] **P2-E2E-ACCEPTANCE** (M): hoàn tất ma trận acceptance dưới đây trong `crates/cli/tests/mailpath_e2e.rs` (binary thật + SMTP sink). Đã có: member delivery, nonmember hold, accept-once, restart giữ intake. Còn thiếu: headers (List-*, subject prefix, footer) + DKIM verify với key test; ban → reject DSN; max-size → hold; `personalize=full` → N msg VERP đúng; kill -9 **giữa pipeline/out** → job không mất, không double-deliver.
 - Acceptance: e2e test harness = pg + smtp sink (Rust mock hoặc `mailhog`) → gửi qua LMTP → assert N member nhận, headers đúng (List-*, subject prefix, footer, DKIM verify pass với key test), held → accept → delivered; nonmember → hold; ban → reject DSN; max-size → hold; `personalize=full` → N msg riêng với VERP đúng; crash giữa pipeline → job không mất (kill -9 test).
 
 ### Phase 3 — Subscription, commands, bounces, digests (L)
 
 Mục tiêu: parity Core hoàn chỉnh (trừ NNTP/DMARC wrap).
 
-- [x] Subscription/unsubscription workflow state machine + pendings + tokens + policies + invitations + moderation requests + REST `requests`
-- [ ] Email command runner: `confirm`, `join/subscribe`, `leave/unsubscribe`, `help`, `echo`, `end/stop` (done); `-request/-join/-leave/-confirm` routing (done); autoresponder + grace period (done); administrivia (done)
-- [ ] Welcome/goodbye/invite/hold/refuse/rejected/warning/probe notices; template scopes + language fallback; REST templates/uris; ban REST
-- [ ] Bounce runner: VERP decode (done), DSN + ENVID (done), events/scoring/stale/disable/owner notices (done), forward unrecognized (done); detectors port + fixture corpus (done, synthetic corpus); warnings + removal (done, maintenance sweep); probes (done)
-- [x] Digest runner: durable collection (DB, not mbox), thresholds/periodic, MIME + RFC1153 builders, volume/number rollover, masthead/header/footer, CLI `digests`
-- [x] `task` runner: expire pendings/workflows, cleanup orphan messages (refcount), stale bounce reset
-- [x] `notify` (pending reminders), `admin_notify_mchanges`, `admin_immed_notify` (held posts)
-- [ ] i18n framework (fluent) + `en`, `vi`; import `.po` Mailman templates (tooling) → P6
-- [ ] SQLite parity test suite chạy song song pg
+- [x] Subscription/unsubscription workflow state machine + pendings + tokens + policies + invitations + moderation requests + REST `requests` — P3-SUBSCRIPTION-POLICY, P3-SUBSCRIPTION-REQUESTS-REST, P3-ADMIN-SUBSCRIBE, P3-HTTP-CONFIRM-RECEIPT, P3-EMAIL-CONFIRM-RECEIPT
+- [x] Email command runner: `confirm`, `join/subscribe`, `leave/unsubscribe`, `help`, `echo`, `end/stop`; `-request/-join/-leave/-confirm` routing; autoresponder + grace period; administrivia — P3-EMAIL-COMMANDS, P3-AUTORESPONDER, P3-HELP-REPLY
+- [x] Welcome/goodbye/invite/hold/refuse/rejected/warning/probe notices; template scopes + language fallback; REST templates/uris; ban REST — P2-TEMPLATES, P3-WELCOME, P3-GOODBYE, P3-ADMIN-SUBSCRIBE (invite), P3-MODERATOR-REJECTION-NOTICE, P3-BOUNCE-INCREMENT-NOTICE, P3-BOUNCE-DISABLE-NOTICE, P3-BOUNCE-PROBES, P3-LIST-POSTING-BANS, P3-BAN-RESOURCE-GET, P3-SITE-BANS-REST
+- [x] Bounce runner: VERP decode, DSN + ENVID, events/scoring/stale/disable/owner notices, forward unrecognized, detectors + fixture corpus, warnings + removal, probes — P3-BOUNCE-RUNNER, P3-BOUNCE-DETECTORS, P3-BOUNCE-PROBES, P3-BOUNCE-MAINTENANCE, P3-BOUNCE-SCHEDULER, P3-BOUNCE-INBOX, P3-BOUNCE-ACK, P3-DIRECT-BOUNCE-SCORE, P3-SMTP-BOUNCE-EVENT
+- [x] Digest runner: durable collection (DB, not mbox), thresholds/periodic, MIME + RFC1153 builders, volume/number rollover, masthead/header/footer, CLI `digests`, REST `/lists/{id}/digest` — P3-DIGEST-SETTINGS, P3-DIGEST-REST
+- [x] `task` runner: expire pendings/workflows, cleanup orphan messages (refcount), stale bounce reset — P3-TASK-RUNNER
+- [x] `notify` (pending reminders), `admin_notify_mchanges`, `admin_immed_notify` (held posts) — P3-TASK-RUNNER, P3-ADMIN-NOTIFY-MCHANGES, P2-TEMPLATES
+- [x] i18n framework (fluent) + `en`, `vi` — P3-I18N; import `.po` Mailman templates (tooling) → P6
+- [ ] **P3-DUAL-BACKEND-CI** (M): suite SQLite và PostgreSQL chạy song song trong CI. Hiện PG gate = 38 contract tests chọn lọc trong `scripts/test-postgres.sh`; mục tiêu: job CI riêng chạy mọi test `#[ignore]` PostgreSQL, ma trận backend cho `crates/db`, `crates/api`, `crates/runners`, không silent fallback.
+- [ ] **P3-CLIENT-SUITE** (M): bộ test tương đương doctest `mailmanclient==3.3.5` trong `tests/compat/` chạy qua `scripts/test-mailmanclient.py`: domains, lists, settings 9 nhóm, members/roster/preferences, header matches, bans (list + site), held, requests, templates/uris, queues, users/addresses, digest counters. Hiện có: Phase 1 flow + held flow + header matches + site bans + queues listing + `admin_notify_mchanges`.
+- [ ] **P3-DIGEST-SNAPSHOT** (S): snapshot RFC 1153/MIME (insta) so với output Mailman 3.3 từ fixture thật.
+- [ ] **P3-SUBSCRIPTION-E2E** (S): confirm-token round-trip qua email trong e2e harness (`-join` → challenge → `-confirm` → member; `-leave` tương tự).
 - Acceptance: full `mailmanclient` doctest-equivalent suite pass; bounce corpus detection ≥ flufl.bounce; digest snapshot tests (insta) so với Mailman output; subscription flow e2e qua email (confirm token round-trip).
 
 ### Phase 4 — Web UI, Postorius parity (L)
 
-- [ ] Accounts: signup/verify/login/reset/change pwd, TOTP + recovery, WebAuthn, OIDC (generic + Google/GitHub presets), sessions, delete account
-- [ ] CSRF, CSP nonce, security headers, rate limit, `trusted_proxies`
-- [ ] Layout system, design tokens, dark mode, i18n UI, a11y baseline
-- [ ] Màn hình §4.12 đầy đủ; htmx cho held queue (keyboard), member table (search/paginate/inline edit), mass ops
-- [ ] Domains + DKIM UI, users admin, system status (runners/queues/maps), audit viewer
-- [ ] `/moderation` tổng hợp cross-list
-- [ ] GDPR export/erase
+**Kiến trúc (ADR-0002, tái khẳng định bởi ADR-0004):** server-rendered. askama
+(compile-time, auto-escape) + htmx 2.x vendored (progressive enhancement; mọi
+form hoạt động không JS) + CSS thuần với design tokens + CSP strict có nonce,
+không Node runtime, không SPA. Các trang hiện có (`crates/api/src/webui.rs`,
+HTML dựng bằng `format!` qua `crates/web`) là lát tạm: từ P4-SHELL trở đi mọi
+màn hình render qua askama; không giữ hai cách render song song sau khi
+P4-SHELL merge.
+
+Trạng thái: đã có login/password session (CSRF, exact Origin), list index/list
+page, subscribe/confirm, held review có scope, members/policy, settings lát nhỏ,
+`/moderation` lát nhỏ, own postings, bounce recovery (rows `P4-WEB-*`,
+P4-LIST-COPY, P4-BOUNCE-WEB-RECOVERY). Chưa có accounts đầy đủ, 2FA/OIDC,
+template engine, i18n UI, admin đầy đủ.
+
+Work packages, theo thứ tự; mỗi ID một nhánh:
+
+| ID | Effort | Phạm vi | Acceptance riêng |
+|---|---|---|---|
+| P4-SHELL | M | askama layout + design tokens + dark mode; CSP nonce, security headers, rate limit, `trusted_proxies`; htmx vendored (hash pinned, không CDN); i18n UI bằng Fluent (`en`, `vi`, cùng catalog `listmngr_i18n`); a11y baseline (landmarks, focus, skip link); chuyển 20 route hiện có sang template | axe không critical; CSP không violation; `scripts/test-webui-browser.py` PASS không đổi hành vi |
+| P4-ACCOUNTS | M | signup + verify email, password reset qua token email, change password, sessions list/revoke, delete account (erase gốc cho P4-GDPR); addresses add/verify/primary/remove; profile (display name, locale, timezone); API tokens của user | e2e signup → verify → login → reset; mỗi write có audit |
+| P4-TOTP | S | TOTP setup/verify + recovery codes; tuỳ chọn bắt buộc cho server owner | e2e enrol → login 2 bước → recovery code |
+| P4-WEBAUTHN | M | passkeys (webauthn-rs), đăng ký/xoá key, đăng nhập không mật khẩu | Playwright virtual authenticator |
+| P4-OIDC | M | OIDC generic + presets Google/GitHub; link/unlink; JIT account với email đã verify | mock OIDC provider trong test |
+| P4-LIST-SETTINGS | L | 9 nhóm §4.1 theo form, validate inline phía server, diff preview + audit; header filters CRUD/thứ tự/regex test; bans list + site; templates editor + preview + placeholders help + language; digest; archivers; delete list (confirm + archive policy) | mỗi nhóm round-trip UI = REST cùng handler |
+| P4-MEMBERS | L | rosters 4 role, search/paginate (htmx partial + fallback), per-member options (moderation_action, delivery, preferences), mass subscribe (textarea/file, pre_*/invite/welcome), mass removal, export CSV, bounce info + re-enable | no-JS fallback test cho mọi partial |
+| P4-HELD-QUEUE | M | held list + preview (rendered + raw), bulk accept/reject/discard/defer, reject reason, forward (cần P2-HELD-FORWARD), "moderate sender", "ban sender", "add header match", keyboard shortcuts; subscription/unsubscription requests | e2e post → held → moderate |
+| P4-LIST-CREATE-INDEX | S | list create (domain, style, owner, advertised, description); list index filters (advertised/domain/search/role badges); list summary + subscribe (anon → confirm) | e2e create → subscribe |
+| P4-DOMAINS-USERS | M | domains CRUD + owners + templates + DKIM keys/DNS record; users admin (search, roles, force verify, subscriptions) | |
+| P4-SYSTEM | S | versions, config masked, runner/queue status (từ `/queues` + metrics), MTA maps status, audit log viewer | |
+| P4-MODERATION-CROSS | S | `/moderation` tổng hợp cross-list (held + requests) trên P4-HELD-QUEUE | |
+| P4-GDPR | S | export (JSON) / erase user data qua UI + CLI | |
+| P4-ACCEPTANCE | M | Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe, CSP, Lighthouse a11y ≥ 95, mobile viewport, gate trong CI | |
+
 - Acceptance: Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe a11y không lỗi critical, CSP không violation, Lighthouse a11y ≥ 95, mobile viewport pass.
 
 ### Phase 5 — Archive, HyperKitty parity (L)
 
-- [ ] Archive runner: parse, sender, threading, attachments store, text/markdown render + sanitize, quote folding
-- [ ] tantivy index (fields: list, subject, body, sender, date, thread; facets), commit batching, `reindex` CLI
-- [ ] UI §4.13: overview, thread lists, thread page, votes/tags/categories/favorites/last-view, sender/user pages, search, feeds
-- [ ] Web post reply/new thread → inject pipeline (rule `approved`-like trust cho web user đã verify)
-- [ ] Export/import mbox, private archive auth, admin ops
-- [ ] `archive_policy=never`, `Archived-At` + `List-Archive` từ `base_url`
-- [ ] Remote archivers: `mail-archive.com`, `mhonarc` (exec), `prototype` (maildir) để parity `archivers`
+Trạng thái: `crates/archive` có parse, threading root ids, Message-ID-Hash tương
+thích HyperKitty, `Archived-At`, archive đọc SSR cơ bản
+(`/web/lists/{id}/archive`, export mbox ≤ 20 message) — P2-ARCHIVE-AUTHORITY,
+P2-DSN-INSPECTION. Chưa có index/search, UI đầy đủ, votes/tags, import mbox,
+remote archivers. UI theo cùng kiến trúc Phase 4 (askama + htmx).
+
+| ID | Effort | Phạm vi | Acceptance riêng |
+|---|---|---|---|
+| P5-RENDER | M | sender + threading hoàn chỉnh (In-Reply-To/References, reattach thủ công), attachments store + serve an toàn (nosniff, download disposition, path riêng), text/markdown render + sanitize, quote folding, email obfuscate, gravatar opt-in proxied | snapshot threading vs HyperKitty import cùng mbox |
+| P5-SEARCH | M | tantivy index (list, subject, body, sender, date, thread; facets), commit batching, `listmngr archive reindex` | search p95 < 100ms trên 100k msg |
+| P5-UI | L | overview (recent activity, active/popular threads, top posters), thread lists (latest, năm/tháng, unread/last-view), thread page, sender/user pages, search UI với highlight, RSS/Atom | axe/CSP như Phase 4 |
+| P5-INTERACTIONS | S | votes ±1, tags, categories, favorites, last-view | |
+| P5-WEB-POST | M | reply/new thread → inject pipeline (rule kiểu `approved` cho web user đã verify) | e2e web post → delivered + archived |
+| P5-MBOX | M | `listmngr archive import` (100k msg < 10 phút máy dev) + export mbox (thread/tháng/list, gzip); `archive_policy=never`; private archive auth + membership check | |
+| P5-ADMIN | S | delete/hide message/thread, reattach, category CRUD | |
+| P5-REMOTE-ARCHIVERS | S | `mail-archive.com`, `mhonarc` (exec), `prototype` (maildir) cho parity `archivers` | |
+
 - Acceptance: import 100k msg mbox (Mailman list public) < 10 phút máy dev, search p95 < 100ms, URL hash trùng HyperKitty với cùng Message-ID, threading snapshot so với HyperKitty import cùng mbox.
 
 ### Phase 6 — Advanced & migration (M)

@@ -4,6 +4,7 @@
 
 - `docs/PLAN.md` is the canonical product contract; `docs/FEATURE_PARITY.md` is the living evidence ledger.
 - Implement one vertical behavior at a time with a failing test first.
+- One acceptance ID is one branch (`feat/<id-slug>` from `main`), merged with `--no-ff` after every gate below passes, then deleted. Never stack a second feature on a branch whose feature is already committed. Work packages and their order are in `docs/PLAN.md` §7.
 - Phase boundaries are strict. In particular, do not add or claim LMTP delivery, runners, SMTP delivery, or other Phase 2 behavior while closing Phase 0/1 artifacts.
 - A present file or route is not completion evidence. Record the exact passing command or CI run before changing a status to verified.
 
