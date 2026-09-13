@@ -10,7 +10,7 @@ pub mod bounce_processing;
 pub mod bounces;
 pub mod digests;
 pub mod header_matches;
-pub use header_matches::HeaderMatchRow;
+pub use header_matches::{FieldEdit, HeaderMatchPatch, HeaderMatchRow};
 pub mod delivery;
 pub mod mail_queue;
 pub mod moderation;

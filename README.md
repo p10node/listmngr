@@ -1140,10 +1140,28 @@ Per-list `header_matches` rows (header, pattern, optional `chain` of
 `accept|hold|reject|discard`, optional `tag`) are evaluated in position order;
 the first match wins. Rows are validated with the exact regex settings used at
 evaluation, and a stored pattern that no longer compiles holds the message
-naming the row instead of ignoring it. Rows are managed through the repository
-only for now; REST and browser surfaces are open work. See `P2-CHAIN-RULES` in
+naming the row instead of ignoring it. See `P2-CHAIN-RULES` in
 `docs/FEATURE_PARITY.md` for evidence and the full list of deliberate
 deviations.
+
+Rows are managed through Mailman's `header-matches` resource on both prefixes
+(`P2-HEADER-MATCHES-REST`): `GET`/`POST`/`DELETE /lists/{id}/header-matches`,
+`GET`/`PATCH`/`PUT`/`DELETE /lists/{id}/header-matches/{position}` and
+`POST /lists/{id}/header-matches/find`. Rows are numbered from zero; a `POST`
+appends and answers `201` with the new row's `Location`; `PATCH` changes only
+the fields it names and `position` moves the row, shifting the ones in
+between; `PUT` needs `header` and `pattern` and clears the optional fields it
+leaves out; deleting a row renumbers the rest. The header name is stored
+lower-cased. The compatibility prefix speaks Mailman's dialect — the chain
+under `action`, absent optional fields omitted, form bodies as mailmanclient
+sends them — and the typed prefix uses `chain` with explicit `null`s; both
+accept either spelling on input. The same header and pattern twice is a `400`,
+as in Mailman; `defer` names no chain and is refused. `find` takes any of
+`header`, `tag` and `action` and returns the matching rows with their real
+positions (an empty collection when none match). Every edit rewrites the
+list's set inside one transaction under the list's writer reservation and
+records one `list.header_matches` audit event naming the change. The browser
+UI does not expose the rows yet.
 
 ## Experimental outbound DKIM (local acceptance verified)
 

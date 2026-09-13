@@ -4,10 +4,11 @@ use crate::{
     authorize_list, page_response, page_window, parse_list_path, peer,
 };
 use axum::{
-    Json,
+    Json, Router,
     extract::{ConnectInfo, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
+    routing,
 };
 use listmngr_core::Error;
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,13 @@ pub struct BanInput {
 pub struct BanResponse {
     pub email: String,
     pub self_link: String,
+}
+
+/// The list-scoped ban routes, mounted under both API prefixes.
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/lists/{id}/bans", routing::get(list).post(create))
+        .route("/lists/{id}/bans/{email}", routing::get(get).delete(delete))
 }
 
 fn value(state: &AppState, id: &listmngr_core::ListId, email: &str) -> Value {
