@@ -1,3 +1,5 @@
+#[path = "rest/admin_notify_mchanges.rs"]
+mod admin_notify_mchanges;
 #[path = "rest/alter_messages.rs"]
 mod alter_messages;
 #[path = "rest/autoresponder.rs"]

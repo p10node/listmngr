@@ -1258,6 +1258,7 @@ impl ListRepo<'_> {
             "require_explicit_destination" => &mut list.require_explicit_destination,
             "respond_to_post_requests" => &mut list.respond_to_post_requests,
             "admin_immed_notify" => &mut list.admin_immed_notify,
+            "admin_notify_mchanges" => &mut list.admin_notify_mchanges,
             "digests_enabled" => &mut list.digests_enabled,
             "digest_send_periodic" => &mut list.digest_send_periodic,
             "filter_content" => &mut list.alter_messages.filter_content,
@@ -1487,6 +1488,7 @@ impl ListRepo<'_> {
             | "require_explicit_destination"
             | "respond_to_post_requests"
             | "admin_immed_notify"
+            | "admin_notify_mchanges"
             | "digests_enabled"
             | "digest_send_periodic"
             | "filter_content"
@@ -1644,7 +1646,7 @@ impl ListRepo<'_> {
             .execute(&mut **tx)
             .await
             .map_err(db_error)?;
-        sqlx::query("UPDATE mailing_lists SET administrivia=$1,require_explicit_destination=$2,acceptable_aliases=$3,accept_these_nonmembers=$4,hold_these_nonmembers=$5,reject_these_nonmembers=$6,discard_these_nonmembers=$7,posting_pipeline=$9,respond_to_post_requests=$10,admin_immed_notify=$11 WHERE list_id=$8")
+        sqlx::query("UPDATE mailing_lists SET administrivia=$1,require_explicit_destination=$2,acceptable_aliases=$3,accept_these_nonmembers=$4,hold_these_nonmembers=$5,reject_these_nonmembers=$6,discard_these_nonmembers=$7,posting_pipeline=$9,respond_to_post_requests=$10,admin_immed_notify=$11,admin_notify_mchanges=$12 WHERE list_id=$8")
             .bind(i64::from(list.administrivia))
             .bind(i64::from(list.require_explicit_destination))
             .bind(encode(&list.acceptable_aliases))
@@ -1656,6 +1658,7 @@ impl ListRepo<'_> {
             .bind(&list.posting_pipeline)
             .bind(i64::from(list.respond_to_post_requests))
             .bind(i64::from(list.admin_immed_notify))
+            .bind(i64::from(list.admin_notify_mchanges))
             .execute(&mut **tx)
             .await
             .map_err(db_error)?;
@@ -2134,6 +2137,7 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
         posting_pipeline: row.try_get("posting_pipeline").map_err(db_error)?,
         respond_to_post_requests: flag_column(row, "respond_to_post_requests")?,
         admin_immed_notify: flag_column(row, "admin_immed_notify")?,
+        admin_notify_mchanges: flag_column(row, "admin_notify_mchanges")?,
         automatic_responses: automatic_responses_from_row(row)?,
         alter_messages: alter_messages_from_row(row)?,
         member_policy: listmngr_core::MemberPolicy {

@@ -38,3 +38,8 @@ notify-held-messages = Held messages:
 notify-held-subscriptions = Held subscriptions:
 notify-held-unsubscriptions = Held unsubscriptions:
 notify-more = ... and { $count } more
+
+# Mailman's `admin_notify_mchanges`: owners and moderators learn of
+# membership changes.
+notice-admin-subscribe-subject = { $display_name } subscription notification
+notice-admin-unsubscribe-subject = { $display_name } unsubscription notification
