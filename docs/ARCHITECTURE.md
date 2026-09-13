@@ -153,6 +153,25 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P3-BOUNCE-DETECTORS — bounded acceptance verified
+
+`listmngr_mail::bounce::detect` is the heuristic layer under the bounce
+runner, after the model of `flufl.bounce`: a standards report is read
+exactly by `dsn::parse_report` (failed → addresses, only delays →
+temporary); otherwise the decoded `text/plain` parts — bounded to 64 KiB —
+are handed to the MTA-family detectors in order of specificity (Postfix,
+qmail, Exim, Sendmail, Yahoo, Exchange in both its shapes, then a generic
+permanent-failure phrase matcher that takes the addresses within a few lines
+of the phrase), and finally a delay/warning matcher decides `Temporary`. Each
+detector keys on the phrases its MTA writes and the way it lists addresses
+(`<address>: reason` lines, Exim's indented list, Sendmail's `-----`
+sections), and every address is canonicalized, capped at a hundred and never
+a daemon's own. The result is a claim, not authority: `bounce_processing`
+still requires a member of the list, which is what keeps a quoted address in
+somebody's out-of-office from scoring anyone. `tests/fixtures/bounces/` is
+the corpus, one synthetic message per family plus the negatives, and the
+test refuses a fixture without an expectation.
+
 ## P3-BOUNCE-RUNNER — bounded acceptance verified
 
 `BounceProcessingRepo::process` is the consumer the bounce inbox lacked. It

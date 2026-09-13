@@ -4,7 +4,8 @@
 //! the member it concerns in one of two trustworthy ways — the VERP
 //! address the intake decoded, or a delivery-status report whose
 //! `Original-Envelope-Id` this server issued — and, failing those, in the
-//! report's own `Final-Recipient` claims. Recognized members are scored with
+//! report's own `Final-Recipient` claims or, for MTAs that write prose
+//! instead of a report, in what `listmngr_mail::bounce` can read from it. Recognized members are scored with
 //! exactly the rules an SMTP-time failure uses; what cannot be attributed is
 //! forwarded where `forward_unrecognized_bounces_to` points, or dropped.
 //! Every effect commits with the lease acknowledgement.
@@ -146,28 +147,41 @@ async fn named_recipients(
             source: "verp",
         }]));
     }
-    let Some(report) = listmngr_mail::dsn::parse_report(raw) else {
-        return Ok(None);
-    };
-    if let (Some(envid), Some(issuer)) = (&report.original_envelope_id, issuer)
-        && let Some(recipient) = verified_issuance(tx, envid, issuer, now).await?
-    {
-        return Ok(Some(vec![Named {
-            recipient,
-            source: "dsn_envid",
-        }]));
+    if let Some(report) = listmngr_mail::dsn::parse_report(raw) {
+        if let (Some(envid), Some(issuer)) = (&report.original_envelope_id, issuer)
+            && let Some(recipient) = verified_issuance(tx, envid, issuer, now).await?
+        {
+            return Ok(Some(vec![Named {
+                recipient,
+                source: "dsn_envid",
+            }]));
+        }
+        return Ok(Some(
+            report
+                .recipients
+                .into_iter()
+                .filter(|claim| claim.action == "failed")
+                .map(|claim| Named {
+                    recipient: claim.final_recipient,
+                    source: "dsn",
+                })
+                .collect(),
+        ));
     }
-    Ok(Some(
-        report
-            .recipients
-            .into_iter()
-            .filter(|claim| claim.action == "failed")
-            .map(|claim| Named {
-                recipient: claim.final_recipient,
-                source: "dsn",
-            })
-            .collect(),
-    ))
+    // No standard report: the MTA-family detectors read the prose.
+    Ok(match listmngr_mail::bounce::detect(raw).detection {
+        listmngr_mail::bounce::Detection::Failed(addresses) => Some(
+            addresses
+                .into_iter()
+                .map(|recipient| Named {
+                    recipient,
+                    source: "heuristic",
+                })
+                .collect(),
+        ),
+        listmngr_mail::bounce::Detection::Temporary => Some(Vec::new()),
+        listmngr_mail::bounce::Detection::Unrecognized => None,
+    })
 }
 
 /// The recipient an ENVID this server issued was for, when the MAC and the
