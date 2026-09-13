@@ -158,3 +158,50 @@ fn queue_unshunt_replays_a_shunted_job_and_validates_the_target() {
         .assert()
         .code(2);
 }
+
+#[test]
+fn queue_stats_reports_depth_per_queue_and_state_with_the_oldest_ready_age() {
+    let fixture = Fixture::new();
+    let empty = fixture.json(&["queue", "stats"]);
+    assert_eq!(empty["queues"], serde_json::json!({}));
+    assert_eq!(empty["shunted"], 0);
+    assert!(empty["oldest_ready_age_secs"].is_null());
+    let path = fixture.dir.path().join("private-content-sentinel.eml");
+    std::fs::write(
+        &path,
+        b"Message-ID: <stats@example.invalid>\r\n\r\nprivate-content-sentinel",
+    )
+    .unwrap();
+    for _ in 0..2 {
+        fixture
+            .command(&[
+                "queue",
+                "inject",
+                "dev.example.invalid",
+                path.to_str().unwrap(),
+                "--sender",
+                "alice@example.invalid",
+            ])
+            .assert()
+            .success();
+    }
+    let stats = fixture.json(&["queue", "stats"]);
+    assert_eq!(stats["queues"]["in"]["ready"], 2);
+    assert_eq!(stats["shunted"], 0);
+    let age = stats["oldest_ready_age_secs"].as_i64().unwrap();
+    assert!((0..60).contains(&age), "{age}");
+    let text = String::from_utf8(
+        fixture
+            .command(&["queue", "stats"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        !text.contains("private-content-sentinel"),
+        "stats never export message content"
+    );
+}

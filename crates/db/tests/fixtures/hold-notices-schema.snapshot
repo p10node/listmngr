@@ -1,0 +1,2 @@
+C|mailing_lists|respond_to_post_requests|integer|required|1
+C|mailing_lists|admin_immed_notify|integer|required|1

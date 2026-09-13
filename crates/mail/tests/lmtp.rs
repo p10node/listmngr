@@ -612,3 +612,122 @@ async fn overlong_command_line_is_rejected_and_closes_the_session() {
     task.await.unwrap();
     let _ = writer.await;
 }
+
+/// Greet and open a session, returning the client end.
+async fn greeted(handler: FakeHandler) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
+    let (mut client, task) = session_pair_with(handler);
+    read_reply(&mut client).await;
+    send_line(&mut client, "LHLO client.example.invalid").await;
+    read_reply(&mut client).await;
+    (client, task)
+}
+
+#[tokio::test]
+async fn a_declared_size_over_the_limit_is_refused_at_mail_from() {
+    let mut handler = FakeHandler::new();
+    handler.max_message_bytes = 1000;
+    let (mut client, inspect, task) = session_pair_inspectable(handler);
+    read_reply(&mut client).await;
+    send_line(&mut client, "LHLO client.example.invalid").await;
+    read_reply(&mut client).await;
+    send_line(&mut client, "MAIL FROM:<alice@example.invalid> SIZE=1001").await;
+    let reply = read_reply(&mut client).await;
+    assert!(reply.starts_with("552 5.3.4"), "{reply}");
+    // No transaction was opened, so RCPT is out of sequence.
+    send_line(&mut client, "RCPT TO:<list@example.invalid>").await;
+    assert!(read_reply(&mut client).await.starts_with("503 "));
+
+    // The exact limit is acceptable, and the session continues normally.
+    send_line(&mut client, "MAIL FROM:<alice@example.invalid> SIZE=1000").await;
+    assert!(read_reply(&mut client).await.starts_with("250 "));
+    send_line(&mut client, "RCPT TO:<list@example.invalid>").await;
+    assert!(read_reply(&mut client).await.starts_with("250 "));
+    send_line(&mut client, "DATA").await;
+    read_reply(&mut client).await;
+    client
+        .write_all(b"Subject: sized\r\n\r\nbody\r\n.\r\n")
+        .await
+        .unwrap();
+    assert!(read_reply(&mut client).await.starts_with("250 "));
+    send_line(&mut client, "QUIT").await;
+    read_reply(&mut client).await;
+    task.await.unwrap();
+    assert_eq!(
+        inspect.deliveries().len(),
+        1,
+        "only the sized post is stored"
+    );
+}
+
+#[tokio::test]
+async fn body_and_size_parameters_are_validated_before_the_transaction_opens() {
+    let (mut client, task) = greeted(FakeHandler::new()).await;
+    for (command, code) in [
+        // RFC 6152: both body types this server announces are accepted,
+        // case-insensitively, in any order with SIZE.
+        ("MAIL FROM:<a@example.invalid> BODY=8BITMIME", "250 "),
+        ("MAIL FROM:<a@example.invalid> body=7bit", "250 "),
+        (
+            "MAIL FROM:<a@example.invalid> SIZE=10 BODY=8BITMIME",
+            "250 ",
+        ),
+        // BINARYMIME needs CHUNKING, which this server does not offer.
+        ("MAIL FROM:<a@example.invalid> BODY=BINARYMIME", "555 5.5.4"),
+        ("MAIL FROM:<a@example.invalid> BODY=NONSENSE", "555 5.5.4"),
+        // Nothing else is announced, so nothing else may be used.
+        ("MAIL FROM:<a@example.invalid> RET=FULL", "555 5.5.4"),
+        ("MAIL FROM:<a@example.invalid> AUTH=<>", "555 5.5.4"),
+        ("MAIL FROM:<a@example.invalid> SIZE=", "501 "),
+        ("MAIL FROM:<a@example.invalid> SIZE=many", "501 "),
+        ("MAIL FROM:<a@example.invalid> SIZE=-1", "501 "),
+        (
+            "MAIL FROM:<a@example.invalid> SIZE=99999999999999999999",
+            "501 ",
+        ),
+        ("MAIL FROM:<a@example.invalid> BODY", "555 5.5.4"),
+        // A recipient parameter is equally unannounced.
+        ("MAIL FROM:<a@example.invalid>", "250 "),
+    ] {
+        send_line(&mut client, command).await;
+        let reply = read_reply(&mut client).await;
+        assert!(reply.starts_with(code), "{command} -> {reply}");
+    }
+    send_line(&mut client, "RCPT TO:<list@example.invalid> NOTIFY=NEVER").await;
+    let reply = read_reply(&mut client).await;
+    assert!(reply.starts_with("555 5.5.4"), "{reply}");
+    send_line(&mut client, "RCPT TO:<list@example.invalid>").await;
+    assert!(read_reply(&mut client).await.starts_with("250 "));
+    send_line(&mut client, "QUIT").await;
+    read_reply(&mut client).await;
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn an_eight_bit_body_is_stored_byte_for_byte_after_a_bodied_mail_from() {
+    let (mut client, inspect, task) = session_pair_inspectable(FakeHandler::new());
+    read_reply(&mut client).await;
+    send_line(&mut client, "LHLO client.example.invalid").await;
+    read_reply(&mut client).await;
+    send_line(
+        &mut client,
+        "MAIL FROM:<a@example.invalid> BODY=8BITMIME SIZE=64",
+    )
+    .await;
+    assert!(read_reply(&mut client).await.starts_with("250 "));
+    send_line(&mut client, "RCPT TO:<list@example.invalid>").await;
+    read_reply(&mut client).await;
+    send_line(&mut client, "DATA").await;
+    read_reply(&mut client).await;
+    let body = b"Subject: t\xc3\xaan\r\n\r\nch\xc3\xa0o b\xe1\xba\xa1n\r\n.\r\n";
+    client.write_all(body).await.unwrap();
+    assert!(read_reply(&mut client).await.starts_with("250 "));
+    send_line(&mut client, "QUIT").await;
+    read_reply(&mut client).await;
+    task.await.unwrap();
+    let deliveries = inspect.deliveries();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(
+        deliveries[0].2,
+        b"Subject: t\xc3\xaan\r\n\r\nch\xc3\xa0o b\xe1\xba\xa1n\r\n"
+    );
+}

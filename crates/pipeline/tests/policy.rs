@@ -1,14 +1,31 @@
 use listmngr_core::{DeliveryMode, DeliveryStatus, ModerationAction};
 use listmngr_pipeline::{
-    CandidateRecipient, Disposition, ListChecks, ListHeaderInfo, PostingContext, SenderChecks,
-    decide_posting, list_headers, select_recipients,
+    CandidateRecipient, Disposition, HeaderMatch, ListChecks, ListHeaderInfo, MessageChecks,
+    PostingContext, SenderChecks, decide_posting, list_headers, select_recipients,
 };
 
+/// A well-formed nonmember post on a list that holds nonmembers by default.
 fn base_ctx() -> PostingContext {
     PostingContext {
         envelope_sender: Some("alice@example.invalid".into()),
         sender: SenderChecks::default(),
-        list: ListChecks::default(),
+        list: ListChecks {
+            posting_address: "dev@example.invalid".into(),
+            administrivia: true,
+            require_explicit_destination: true,
+            ..ListChecks::default()
+        },
+        message: MessageChecks {
+            headers: vec![
+                ("From".into(), "alice@example.invalid".into()),
+                ("To".into(), "dev@example.invalid".into()),
+                ("Subject".into(), "hello".into()),
+            ],
+            body_lines: vec!["An ordinary post.".into()],
+            recipients: vec!["dev@example.invalid".into()],
+        },
+        site_header_checks: Vec::new(),
+        site_jump_chain: "hold".into(),
         member_moderation_action: None,
         default_member_action: ModerationAction::Defer,
         default_nonmember_action: ModerationAction::Hold,
@@ -29,16 +46,27 @@ fn null_reverse_path_is_discarded_not_bounced() {
 fn ban_takes_priority_over_membership() {
     let mut ctx = base_ctx();
     ctx.sender.is_banned = true;
-    ctx.member_moderation_action = Some(None);
+    ctx.member_moderation_action = Some(Some(ModerationAction::Accept));
     assert!(matches!(decide_posting(&ctx), Disposition::Reject(_)));
 }
 
 #[test]
-fn loop_is_discarded_before_emergency_or_membership() {
+fn loop_is_discarded_before_bans_or_membership() {
+    let mut ctx = base_ctx();
+    ctx.sender.is_loop = true;
+    ctx.sender.is_banned = true;
+    ctx.member_moderation_action = Some(Some(ModerationAction::Accept));
+    assert!(matches!(decide_posting(&ctx), Disposition::Discard(_)));
+}
+
+#[test]
+fn emergency_holds_before_a_loop_is_even_considered() {
+    // Mailman order: emergency precedes loop, so an operator who flips the
+    // switch sees everything, loops included, in the held queue.
     let mut ctx = base_ctx();
     ctx.sender.is_loop = true;
     ctx.list.emergency = true;
-    assert!(matches!(decide_posting(&ctx), Disposition::Discard(_)));
+    assert!(matches!(decide_posting(&ctx), Disposition::Hold(_)));
 }
 
 #[test]
@@ -50,9 +78,14 @@ fn emergency_holds_even_a_normally_accepted_member() {
 }
 
 #[test]
-fn unsupported_header_matches_fail_closed_to_hold() {
+fn a_matching_header_rule_holds_a_member_post() {
     let mut ctx = base_ctx();
-    ctx.list.has_unsupported_header_matches = true;
+    ctx.list.header_matches = vec![HeaderMatch {
+        header: "Subject".into(),
+        pattern: "hello".into(),
+        chain: None,
+        tag: None,
+    }];
     ctx.member_moderation_action = Some(None);
     assert!(matches!(decide_posting(&ctx), Disposition::Hold(_)));
 }
@@ -178,7 +211,7 @@ fn list_headers_include_precedence_and_omit_archive_when_absent() {
         archive_url: None,
     };
     let headers = list_headers(&info);
-    assert!(headers.contains(&("List-Id".to_owned(), "dev.example.invalid".to_owned())));
+    assert!(headers.contains(&("List-Id".to_owned(), "<dev.example.invalid>".to_owned())));
     assert!(headers.contains(&("Precedence".to_owned(), "list".to_owned())));
     assert!(!headers.iter().any(|(name, _)| name == "List-Archive"));
 }

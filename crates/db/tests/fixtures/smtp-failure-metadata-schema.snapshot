@@ -1,0 +1,2 @@
+C|bounce_events|smtp_stage|text|optional|-
+C|bounce_events|smtp_code|integer|optional|-

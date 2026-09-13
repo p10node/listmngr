@@ -110,7 +110,7 @@ async fn permanent_rcpt_failure_does_not_block_other_recipients() {
     .unwrap();
     assert!(matches!(
         outcome.results[0],
-        RecipientStatus::PermanentFailure(_)
+        RecipientStatus::RemotePermanentFailure { .. }
     ));
     assert_eq!(outcome.results[1], RecipientStatus::Sent);
     relay.await.unwrap();
@@ -140,7 +140,7 @@ async fn all_recipients_rejected_skips_data_entirely() {
     .unwrap();
     assert!(matches!(
         outcome.results[0],
-        RecipientStatus::PermanentFailure(_)
+        RecipientStatus::RemotePermanentFailure { .. }
     ));
     relay.await.unwrap();
 }
@@ -490,7 +490,10 @@ async fn a_permanent_rcpt_failure_survives_a_later_recipients_connection_loss() 
     .await
     .unwrap();
     assert!(
-        matches!(outcome.results[0], RecipientStatus::PermanentFailure(_)),
+        matches!(
+            outcome.results[0],
+            RecipientStatus::RemotePermanentFailure { .. }
+        ),
         "recipient A's known 550 must survive B's later connection loss, got {:?}",
         outcome.results[0]
     );
@@ -525,7 +528,10 @@ async fn data_start_554_is_a_permanent_failure_not_transient() {
     .await
     .unwrap();
     assert!(
-        matches!(outcome.results[0], RecipientStatus::PermanentFailure(_)),
+        matches!(
+            outcome.results[0],
+            RecipientStatus::RemotePermanentFailure { .. }
+        ),
         "got {:?}",
         outcome.results[0]
     );
@@ -772,4 +778,99 @@ async fn unreachable_greeting_never_panics_and_reports_transient() {
     )
     .await;
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn an_eight_bit_body_declares_body_8bitmime_when_the_relay_offers_it() {
+    let (client, server) = tokio::io::duplex(65536);
+    let relay = tokio::spawn(fake_relay(
+        server,
+        "220 relay.invalid ESMTP\r\n",
+        vec![
+            (
+                "EHLO ",
+                "250-relay.invalid\r\n250-SIZE 10240000\r\n250 8BITMIME\r\n",
+            ),
+            (
+                "MAIL FROM:<alice@example.invalid> BODY=8BITMIME",
+                "250 ok\r\n",
+            ),
+            ("RCPT TO:<a@", "250 ok\r\n"),
+            ("DATA", "354 go\r\n"),
+            (".", "250 accepted\r\n"),
+        ],
+    ));
+    let outcome = send(
+        client,
+        &config(),
+        Some("alice@example.invalid"),
+        &["a@example.invalid".into()],
+        "Subject: tên\r\n\r\nchào bạn\r\n".as_bytes(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome.results, vec![RecipientStatus::Sent]);
+    let seen = relay.await.unwrap();
+    assert!(
+        seen.iter()
+            .any(|line| line.starts_with("MAIL FROM:<alice@example.invalid> BODY=8BITMIME")),
+        "{seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_seven_bit_body_never_declares_a_body_type() {
+    let (client, server) = tokio::io::duplex(65536);
+    let relay = tokio::spawn(fake_relay(
+        server,
+        "220 relay.invalid ESMTP\r\n",
+        vec![
+            ("EHLO ", "250-relay.invalid\r\n250 8BITMIME\r\n"),
+            ("MAIL FROM:<alice@example.invalid>\r\n", "250 ok\r\n"),
+            ("RCPT TO:<a@", "250 ok\r\n"),
+            ("DATA", "354 go\r\n"),
+            (".", "250 accepted\r\n"),
+        ],
+    ));
+    let outcome = send(
+        client,
+        &config(),
+        Some("alice@example.invalid"),
+        &["a@example.invalid".into()],
+        b"Subject: plain\r\n\r\nascii only\r\n",
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome.results, vec![RecipientStatus::Sent]);
+    relay.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_relay_without_8bitmime_never_receives_an_eight_bit_message() {
+    let (client, server) = tokio::io::duplex(65536);
+    let relay = tokio::spawn(fake_relay(
+        server,
+        "220 relay.invalid ESMTP\r\n",
+        vec![("EHLO ", "250-relay.invalid\r\n250 PIPELINING\r\n")],
+    ));
+    let outcome = send(
+        client,
+        &config(),
+        Some("alice@example.invalid"),
+        &["a@example.invalid".into()],
+        "Subject: tên\r\n\r\nchào bạn\r\n".as_bytes(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        outcome.results,
+        vec![RecipientStatus::TransientFailure(
+            "relay does not announce 8BITMIME for an 8-bit message".into()
+        )]
+    );
+    let seen = relay.await.unwrap();
+    assert!(
+        !seen.iter().any(|line| line.starts_with("MAIL FROM:")),
+        "the transaction never starts: {seen:?}"
+    );
 }

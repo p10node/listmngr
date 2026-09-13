@@ -391,6 +391,12 @@ impl Fixture {
         ));
         env.push(("LISTMNGR__MTA__LOCAL_HOSTNAME".into(), "e2e.invalid".into()));
         env.push(("LISTMNGR__MTA__COMMAND_TIMEOUT_SECS".into(), "5".into()));
+        // The server publishes Postfix maps at startup and after list changes.
+        env.push(("LISTMNGR__MTA__INCOMING".into(), "postfix".into()));
+        env.push((
+            "LISTMNGR__MTA__MAP_DIRECTORY".into(),
+            dir.path().join("mta").display().to_string(),
+        ));
         env.push(("RUST_LOG".into(), "warn".into()));
 
         run_cli(dir.path(), &env, &["migrate"], None);
@@ -554,6 +560,16 @@ impl Drop for Fixture {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn member_delivery_reaches_enabled_member_and_excludes_disabled_member() {
     let fixture = Fixture::start().await;
+    // Startup published the MTA maps for the list created before it ran.
+    let transport =
+        std::fs::read_to_string(fixture.dir.path().join("mta/current/transport.regexp")).unwrap();
+    assert!(
+        transport.contains(&format!(
+            "/^dev@e2e\\.example\\.invalid$/ lmtp:[127.0.0.1]:{}\n",
+            fixture.lmtp_port
+        )),
+        "{transport}"
+    );
     let sender = fixture.add_member("sender@e2e.example.invalid");
     let _ = sender;
     let enabled = fixture.add_member("enabled@e2e.example.invalid");
@@ -564,7 +580,7 @@ async fn member_delivery_reaches_enabled_member_and_excludes_disabled_member() {
 
     let posting_address = "dev@e2e.example.invalid".to_owned();
     let raw =
-        b"Message-ID: <e2e-member@example.invalid>\r\nSubject: hello list\r\n\r\nreal body\r\n";
+        b"From: sender@e2e.example.invalid\r\nTo: dev@e2e.example.invalid\r\nMessage-ID: <e2e-member@example.invalid>\r\nSubject: hello list\r\n\r\nreal body\r\n";
     let result = lmtp_deliver(
         fixture.lmtp_port,
         Some("sender@e2e.example.invalid"),
@@ -634,7 +650,7 @@ async fn nonmember_post_is_held_not_delivered() {
     fixture.add_member("member@e2e.example.invalid");
     let posting_address = "dev@e2e.example.invalid".to_owned();
     let raw =
-        b"Message-ID: <e2e-nonmember@example.invalid>\r\nSubject: outside post\r\n\r\nbody\r\n";
+        b"From: outsider@attacker.invalid\r\nTo: dev@e2e.example.invalid\r\nMessage-ID: <e2e-nonmember@example.invalid>\r\nSubject: outside post\r\n\r\nbody\r\n";
     let result = lmtp_deliver(
         fixture.lmtp_port,
         Some("outsider@attacker.invalid"),
@@ -655,9 +671,21 @@ async fn nonmember_post_is_held_not_delivered() {
     assert_eq!(count, 1, "nonmember post must be held exactly once");
 
     tokio::time::sleep(Duration::from_millis(500)).await;
+    // The held post itself is never delivered; the only traffic is the
+    // Mailman hold notice back to the poster (respond_to_post_requests).
+    let deliveries = fixture.sink.deliveries();
     assert!(
-        fixture.sink.deliveries().is_empty(),
-        "a held message must never be delivered"
+        deliveries
+            .iter()
+            .all(|delivery| delivery.rcpt_to == ["outsider@attacker.invalid"]),
+        "a held message must never be delivered: {deliveries:?}"
+    );
+    assert!(
+        deliveries
+            .iter()
+            .all(|delivery| String::from_utf8_lossy(&delivery.data)
+                .contains("awaits moderator approval")),
+        "only the hold notice may leave: {deliveries:?}"
     );
 }
 
@@ -704,7 +732,7 @@ async fn unauthorized_cross_list_action_is_rejected_and_authorized_accept_delive
     let member = fixture.add_member("member@e2e.example.invalid");
     let posting_address = "dev@e2e.example.invalid".to_owned();
     let raw =
-        b"Message-ID: <e2e-held-accept@example.invalid>\r\nSubject: needs approval\r\n\r\nbody\r\n";
+        b"From: outsider@attacker.invalid\r\nTo: dev@e2e.example.invalid\r\nMessage-ID: <e2e-held-accept@example.invalid>\r\nSubject: needs approval\r\n\r\nbody\r\n";
     lmtp_deliver(
         fixture.lmtp_port,
         Some("outsider@attacker.invalid"),
@@ -776,7 +804,7 @@ async fn durable_intake_survives_a_real_process_restart() {
     let mut fixture = Fixture::start().await;
     fixture.add_member("member@e2e.example.invalid");
     let posting_address = "dev@e2e.example.invalid".to_owned();
-    let raw = b"Message-ID: <e2e-restart@example.invalid>\r\nSubject: restart test\r\n\r\nbody\r\n";
+    let raw = b"From: member@e2e.example.invalid\r\nTo: dev@e2e.example.invalid\r\nMessage-ID: <e2e-restart@example.invalid>\r\nSubject: restart test\r\n\r\nbody\r\n";
     // A real SMTP boundary defers before accepting any DATA. The durable
     // out job must be pending, not an already-delivered message row.
     fixture

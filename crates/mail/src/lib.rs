@@ -5,17 +5,45 @@
 
 use sha1::{Digest, Sha1};
 mod metadata;
-pub use metadata::{MAX_HEADER_BYTES, MAX_HEADER_LINE_BYTES, header_value, parse_message_id};
+pub use metadata::{
+    MAX_HEADER_BYTES, MAX_HEADER_LINE_BYTES, header_value, parse_message_id,
+    parse_optional_message_id,
+};
 mod store;
 pub use store::FsMessageStore;
 mod cook;
-pub use cook::cook_headers;
+mod munge;
+pub use cook::{cook_headers, cook_individual_post, cook_post, header_body_split};
+pub mod attachments;
+pub mod authenticity;
+pub mod bounce;
+pub mod commands;
+pub mod decorate;
+pub mod digest;
+pub mod dkim;
+pub mod dsn;
+pub mod encoding;
+pub mod facts;
+pub mod handlers;
+pub mod html_text;
+pub mod list_headers;
 pub mod lmtp;
+pub mod mime_delete;
+pub mod mta;
+pub mod owner;
+pub mod personalize;
+pub mod reply_to;
 pub mod smtp;
+pub mod templates;
+mod templates_vi;
+pub mod topics;
+pub mod visible_recipients;
 
 /// Mail helper failures. Message contents are never included in diagnostics.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("invalid digest input")]
+    InvalidDigest,
     #[error("invalid Message-ID")]
     InvalidMessageId,
     #[error("invalid store key")]
@@ -26,6 +54,13 @@ pub enum Error {
     UnsafeStorePath,
     #[error("unsafe header name, value, or subject prefix")]
     UnsafeHeaderContent,
+    /// A pipeline handler ended processing with a disposition for the post.
+    #[error("{handler}: {reason}")]
+    Refused {
+        handler: &'static str,
+        reason: String,
+        refusal: listmngr_pipeline::handlers::Refusal,
+    },
     #[error("message store I/O failure")]
     Io(#[from] std::io::Error),
 }

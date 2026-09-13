@@ -1,0 +1,22 @@
+C|delivery_recipients|member_incarnation|text|optional|-
+C|dsn_issuances|attempt_token|text|required|-
+C|dsn_issuances|claims|text|required|-
+C|dsn_issuances|envid|text|required|-
+C|dsn_issuances|expires_at|integer|required|-
+C|dsn_issuances|id|text|required|-
+C|dsn_issuances|issued_at|integer|required|-
+C|dsn_issuances|job_id|text|required|-
+C|dsn_issuances|message_id|text|required|-
+C|dsn_issuances|recipient|text|required|-
+C|mailing_lists|delivery_incarnation|text|required|-
+C|message_delivery_bindings|list_id|text|required|-
+C|message_delivery_bindings|list_incarnation|text|required|-
+C|message_delivery_bindings|message_id|text|required|-
+C|preferences|delivery_generation|integer|required|0
+F|dsn_issuances|job_id|queue_jobs|id|no action
+F|dsn_issuances|message_id|messages|id|no action
+F|message_delivery_bindings|message_id|messages|id|no action
+U|dsn_issuances|envid
+U|dsn_issuances|id
+U|dsn_issuances|job_id,recipient,attempt_token
+U|message_delivery_bindings|message_id

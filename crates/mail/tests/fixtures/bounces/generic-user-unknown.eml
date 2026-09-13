@@ -1,0 +1,12 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Delivery Status Notification (Failure)
+Content-Type: text/plain
+
+Delivery to the following recipient failed permanently:
+
+     judy@example.net
+
+Technical details of permanent failure:
+The recipient server did not accept our requests to connect.
