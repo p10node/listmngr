@@ -18,6 +18,8 @@ mod digest_settings;
 mod goodbye;
 #[path = "rest/goodbye_unsubscribe.rs"]
 mod goodbye_unsubscribe;
+#[path = "rest/header_matches.rs"]
+mod header_matches;
 #[path = "rest/mta_maps.rs"]
 mod mta_maps;
 #[path = "rest/requests.rs"]

@@ -109,6 +109,11 @@ def run_held(url, token, cli, user_id, directory, lmtp_port, sink):
     mailing_list.subscribe(subscriber, pre_verified=True, pre_confirmed=True, pre_approved=True)
     # Current posting policy uses the explicit global fixture default below;
     # per-list default_nonmember_action is not a supported settings field.
+    # This harness counts list deliveries at the sink, so the hold notices to
+    # the poster and the moderators (Mailman defaults, P2-TEMPLATES) stay off.
+    mailing_list.settings["respond_to_post_requests"] = False
+    mailing_list.settings["admin_immed_notify"] = False
+    mailing_list.settings.save()
     assert mailing_list.get_held_count() == 0
     assert mailing_list.held == []
 

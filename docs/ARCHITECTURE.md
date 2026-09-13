@@ -153,7 +153,27 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
-## P3-TASK-RUNNER — bounded acceptance verified
+## P2-HEADER-MATCHES-REST — bounded acceptance verified
+
+`listmngr_api::header_matches` mounts Mailman's `/lists/{id}/header-matches`
+collection, `/{position}` item and `/find` on both prefixes over
+`listmngr_db::header_matches::HeaderMatchRepo`. Every mutation — `append`,
+`update(position, HeaderMatchPatch)`, `remove(position)`, `clear` and the
+older `replace` — goes through one private `edit`: take the list's writer
+reservation (`lock_list_for_patch`), read the current rows inside the
+transaction, apply the change to the in-memory set, validate every row and
+refuse a repeated header (case-insensitive) and pattern, rewrite the set with
+gap-free positions, and record one `list.header_matches` audit row carrying
+the change kind, the position it touched and the resulting count. A patch
+that fails validation or names a position past the end leaves the stored set
+as it was. `HeaderMatchPatch` fields are `Option` for header/pattern and
+`FieldEdit::{Keep, Clear, Set}` for chain and tag, so a `PUT` (clear what is
+absent) and a `PATCH` (keep what is absent) share one path. The REST layer
+lower-cases the header, accepts `action` (Mailman) or `chain` (typed) and
+rejects a disagreeing pair, renders the compatibility entry without absent
+optional fields and with `http_etag`, and treats a non-digit position segment
+as not found the way Mailman's `{position:int}` route does. `find` filters the
+list's rows in memory and keeps their real positions.
 
 `listmngr_db::tasks::TaskRepo::sweep(now, retention)` is Mailman's task
 runner as a repository call: eight steps, each a loop of bounded batches

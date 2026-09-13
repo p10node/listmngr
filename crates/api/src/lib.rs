@@ -6,6 +6,7 @@ mod archive;
 mod bans;
 mod bounce_config;
 mod bounces;
+mod header_matches;
 mod requests;
 
 use axum::{
@@ -130,6 +131,7 @@ macro_rules! page_response {
 
 page_response!(StringPageResponse, String);
 page_response!(BanPageResponse, bans::BanResponse);
+page_response!(HeaderMatchPageResponse, header_matches::HeaderMatchResponse);
 page_response!(RequestPageResponse, requests::RequestResponse);
 page_response!(BouncePageResponse, listmngr_db::bounces::BounceEvent);
 page_response!(CatalogPageResponse, CatalogEntry);
@@ -516,6 +518,14 @@ impl utoipa::Modify for SecurityAddon {
         bans::get,
         bans::create,
         bans::delete,
+        header_matches::list,
+        header_matches::create,
+        header_matches::find,
+        header_matches::clear,
+        header_matches::get,
+        header_matches::patch,
+        header_matches::put,
+        header_matches::delete,
         requests::list,
         requests::count,
         requests::get,
@@ -613,6 +623,7 @@ impl utoipa::Modify for SecurityAddon {
     components(schemas(
         ErrorResponse, StringPageResponse, CatalogPageResponse, CatalogEntry, PageQuery,
         RequestPageResponse, requests::RequestResponse, requests::DecisionInput,
+        HeaderMatchPageResponse, header_matches::HeaderMatchResponse, header_matches::HeaderMatchInput, header_matches::HeaderMatchFindInput, header_matches::HeaderMatchPatchInput,
         DomainPageResponse, MailingListPageResponse,
         UserPageResponse, ArchiverPageResponse, TemplatePageResponse, MemberPageResponse,
         AddressPageResponse, SystemVersionsResponse, ConfigurationResponse, UriResponse,
@@ -957,12 +968,8 @@ fn phase_one_routes() -> Router<AppState> {
                 .patch(list_config_attr_patch),
         )
         .route("/lists/{id}/archivers", get(list_archivers))
-        .route("/lists/{id}/bans", get(bans::list).post(bans::create))
+        .merge(bans::routes())
         .route("/lists/{id}/bounces", get(bounces::list))
-        .route(
-            "/lists/{id}/bans/{email}",
-            get(bans::get).delete(bans::delete),
-        )
         .route("/lists/{id}/templates", get(list_templates))
         .route("/lists/{id}/roster/{role}", get(roster))
         .route(
@@ -970,6 +977,7 @@ fn phase_one_routes() -> Router<AppState> {
             get(list_member).delete(list_member_delete),
         )
         .merge(requests::routes())
+        .merge(header_matches::routes())
         .route("/lists/{id}/held", get(list_held))
         .route("/lists/{id}/held/count", get(list_held_count))
         .route(
