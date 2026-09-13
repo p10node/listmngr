@@ -41,3 +41,8 @@ notify-held-messages = Thư đang giữ:
 notify-held-subscriptions = Yêu cầu đăng ký đang chờ:
 notify-held-unsubscriptions = Yêu cầu rời đi đang chờ:
 notify-more = ... và { $count } yêu cầu nữa
+
+# Mailman's `admin_notify_mchanges`: owners and moderators learn of
+# membership changes.
+notice-admin-subscribe-subject = Thông báo đăng ký { $display_name }
+notice-admin-unsubscribe-subject = Thông báo huỷ đăng ký { $display_name }

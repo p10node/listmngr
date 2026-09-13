@@ -253,6 +253,9 @@ pub struct ListConfigResponse {
     /// Tell owners and moderators immediately when a post is held.
     #[schema(default = true)]
     pub admin_immed_notify: bool,
+    /// Tell owners and moderators when a member subscribes or unsubscribes.
+    #[schema(default = false)]
+    pub admin_notify_mchanges: bool,
     #[serde(flatten)]
     pub alter_messages: listmngr_core::AlterMessages,
     #[serde(flatten)]
@@ -345,6 +348,8 @@ pub struct ListConfigInput {
     pub respond_to_post_requests: Option<bool>,
     /// Tell owners and moderators immediately when a post is held; default true.
     pub admin_immed_notify: Option<bool>,
+    /// Tell owners and moderators when a member subscribes or unsubscribes; default false.
+    pub admin_notify_mchanges: Option<bool>,
     pub filter_content: Option<bool>,
     /// MIME types (`type` or `type/subtype`) removed by content filtering.
     pub filter_types: Option<Vec<String>>,
@@ -2021,6 +2026,7 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
         "require_explicit_destination",
         "respond_to_post_requests",
         "admin_immed_notify",
+        "admin_notify_mchanges",
         "digests_enabled",
         "digest_send_periodic",
         "advertised",

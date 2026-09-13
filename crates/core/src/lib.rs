@@ -706,6 +706,10 @@ pub struct MailingList {
     #[serde(default = "default_true")]
     #[schema(default = true)]
     pub admin_immed_notify: bool,
+    /// Tell owners and moderators when a member subscribes or unsubscribes.
+    #[serde(default)]
+    #[schema(default = false)]
+    pub admin_notify_mchanges: bool,
     #[serde(flatten)]
     pub automatic_responses: AutomaticResponses,
     #[serde(flatten)]
@@ -818,6 +822,7 @@ impl MailingList {
             respond_to_post_requests: true,
             automatic_responses: AutomaticResponses::default(),
             admin_immed_notify: true,
+            admin_notify_mchanges: false,
             alter_messages: AlterMessages::default(),
             member_policy: MemberPolicy::default(),
             forward_unrecognized_bounces_to: default_unrecognized_bounces(),

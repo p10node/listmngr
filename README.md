@@ -1087,6 +1087,19 @@ is never notified) and the owners and moderators (`admin_immed_notify`,
 default true). Non-ASCII templates and subjects are encoded safely. See
 `P2-TEMPLATES` in `docs/FEATURE_PARITY.md`.
 
+Mailman's `admin_notify_mchanges` (migration `0041`, default false, on the
+list configuration resource under both prefixes) tells every owner and
+moderator when a member is subscribed (`list:admin:notice:subscribe`,
+"*display name* subscription notification") or removed
+(`list:admin:notice:unsubscribe`, "… unsubscription notification"), naming
+the member's address as `$member`. The notices are enqueued in the
+membership's own transaction by every path that inserts or deletes a member
+role — REST, CLI, mass operations, confirmed and moderated workflows, bounce
+removal and one-click unsubscribe — independently of `send_welcome_message`
+and `send_goodbye_message`, each in the administrator's own language. Owner
+and moderator role changes are not membership changes. See
+`P3-ADMIN-NOTIFY-MCHANGES` in `docs/FEATURE_PARITY.md`.
+
 ## Mailman handler pipeline — bounded acceptance verified
 
 Accepted posts run the list's `posting_pipeline` (default

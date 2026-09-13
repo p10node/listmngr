@@ -849,7 +849,7 @@ Mục tiêu: parity Core hoàn chỉnh (trừ NNTP/DMARC wrap).
 - [ ] Bounce runner: VERP decode (done), DSN + ENVID (done), events/scoring/stale/disable/owner notices (done), forward unrecognized (done); detectors port + fixture corpus (done, synthetic corpus); warnings + removal (done, maintenance sweep); probes (done)
 - [x] Digest runner: durable collection (DB, not mbox), thresholds/periodic, MIME + RFC1153 builders, volume/number rollover, masthead/header/footer, CLI `digests`
 - [x] `task` runner: expire pendings/workflows, cleanup orphan messages (refcount), stale bounce reset
-- [ ] `notify` (pending reminders) (done), `admin_notify_mchanges`, `admin_immed_notify` (done for held posts)
+- [x] `notify` (pending reminders), `admin_notify_mchanges`, `admin_immed_notify` (held posts)
 - [ ] i18n framework (fluent) + `en`, `vi`; import `.po` Mailman templates (tooling) → P6
 - [ ] SQLite parity test suite chạy song song pg
 - Acceptance: full `mailmanclient` doctest-equivalent suite pass; bounce corpus detection ≥ flufl.bounce; digest snapshot tests (insta) so với Mailman output; subscription flow e2e qua email (confirm token round-trip).
