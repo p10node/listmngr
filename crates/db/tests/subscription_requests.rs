@@ -2,7 +2,10 @@
 //! `open` acts at once, `confirm` keeps today's token flow, `moderate` and
 //! `confirm_then_moderate` park the request until a moderator decides.
 use listmngr_core::{MemberRole, SubscriptionMode};
-use listmngr_db::workflows::{RequestDecision, RequestFilter, SubscriptionAction, TokenOwner};
+use listmngr_db::workflows::{
+    AdminSubscription, RequestDecision, RequestFilter, SubscriptionAction, SubscriptionOutcome,
+    TokenOwner,
+};
 use listmngr_db::{AuditContext, Database, NewList, NewMember};
 use serde_json::json;
 
@@ -384,4 +387,156 @@ async fn confirmation_token(db: &Database) -> String {
     let text = String::from_utf8_lossy(&raw).into_owned();
     let start = text.find("confirm ").expect("confirm token in the notice") + "confirm ".len();
     text[start..start + 43].to_owned()
+}
+
+#[tokio::test]
+async fn an_administrative_subscribe_honours_the_policy_unless_it_is_pre_approved() {
+    let (db, list) = fixture("confirm_then_moderate", "confirm").await;
+    let subscribe = |pre_verified, pre_confirmed, pre_approved, email: &'static str| {
+        let db = db.clone();
+        let list = list.clone();
+        async move {
+            db.workflows()
+                .subscribe(
+                    &AdminSubscription {
+                        list: &list,
+                        email,
+                        display_name: "A Reader",
+                        pre_verified,
+                        pre_confirmed,
+                        pre_approved,
+                        invitation: false,
+                    },
+                    &AuditContext::system(),
+                    now(),
+                )
+                .await
+                .unwrap()
+        }
+    };
+
+    // Nothing pre-supplied: the address must confirm first.
+    let outcome = subscribe(false, false, false, "one@example.invalid").await;
+    let SubscriptionOutcome::Held { token, token_owner } = outcome else {
+        panic!("expected a held subscription, got {outcome:?}");
+    };
+    assert_eq!(token_owner, TokenOwner::Subscriber);
+    assert_eq!(members(&db).await, 0);
+    assert_eq!(notices(&db).await, 1, "the confirmation notice is sent");
+
+    // Confirmed but unapproved: the moderator decides.
+    let outcome = subscribe(true, true, false, "two@example.invalid").await;
+    assert!(matches!(
+        outcome,
+        SubscriptionOutcome::Held {
+            token_owner: TokenOwner::Moderator,
+            ..
+        }
+    ));
+    assert_eq!(members(&db).await, 0);
+
+    // Everything pre-supplied: the member is subscribed at once.
+    let outcome = subscribe(true, true, true, "three@example.invalid").await;
+    assert!(matches!(outcome, SubscriptionOutcome::Subscribed));
+    assert_eq!(members(&db).await, 1);
+    let display: String = sqlx::query_scalar(
+        "SELECT m.display_name FROM members m JOIN addresses a ON a.id=m.address_id WHERE a.email='three@example.invalid'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(display, "A Reader");
+
+    // Confirming the first address (with the mailed secret, which the API
+    // token never is) hands it to the moderator, whose queue shows the
+    // display name the operator supplied.
+    let secret = confirmation_token(&db).await;
+    assert_ne!(secret, token, "the REST handle is not the mailed secret");
+    db.workflows().confirm(&list, &secret, now()).await.unwrap();
+    let pending = db.workflows().pending(&list, moderator()).await.unwrap();
+    assert_eq!(pending.len(), 2);
+    assert!(pending.iter().any(|request| request.id == token));
+    assert_eq!(pending[0].display_name, "A Reader");
+    assert_eq!(members(&db).await, 1);
+}
+
+#[tokio::test]
+async fn a_pre_approved_confirmation_skips_the_moderator_and_an_invitation_needs_only_acceptance() {
+    let (db, list) = fixture("confirm_then_moderate", "confirm").await;
+    let held = db
+        .workflows()
+        .subscribe(
+            &AdminSubscription {
+                list: &list,
+                email: "approved@example.invalid",
+                display_name: String::new().leak(),
+                pre_verified: false,
+                pre_confirmed: false,
+                pre_approved: true,
+                invitation: false,
+            },
+            &AuditContext::system(),
+            now(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        held,
+        SubscriptionOutcome::Held {
+            token_owner: TokenOwner::Subscriber,
+            ..
+        }
+    ));
+    let token = confirmation_token(&db).await;
+    db.workflows().confirm(&list, &token, now()).await.unwrap();
+    assert_eq!(
+        members(&db).await,
+        1,
+        "a pre-approved confirmation does not wait for a moderator"
+    );
+    assert!(
+        db.workflows()
+            .pending(&list, moderator())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // An invitation is the owner's approval: accepting it subscribes.
+    let (db, list) = fixture("moderate", "confirm").await;
+    let invited = db
+        .workflows()
+        .subscribe(
+            &AdminSubscription {
+                list: &list,
+                email: "invited@example.invalid",
+                display_name: String::new().leak(),
+                pre_verified: false,
+                pre_confirmed: false,
+                pre_approved: false,
+                invitation: true,
+            },
+            &AuditContext::system(),
+            now(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        invited,
+        SubscriptionOutcome::Held {
+            token_owner: TokenOwner::Subscriber,
+            ..
+        }
+    ));
+    let raw: Vec<u8> = sqlx::query_scalar(
+        "SELECT b.raw FROM workflow_notices n JOIN queue_jobs q ON q.id=n.job_id JOIN messages m ON m.id=q.message_id JOIN message_blobs b ON b.store_key=m.store_key",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let text = String::from_utf8_lossy(&raw);
+    assert!(text.contains("has been invited to join"), "{text}");
+    let token = confirmation_token(&db).await;
+    db.workflows().confirm(&list, &token, now()).await.unwrap();
+    assert_eq!(members(&db).await, 1, "accepting an invitation subscribes");
 }

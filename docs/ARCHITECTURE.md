@@ -188,6 +188,21 @@ decision by form or JSON), mounted through `requests::routes()` under both
 prefixes; the request id is the `token` in the URL, and a request is only
 addressable through its own list.
 
+`WorkflowRepo::subscribe` is Mailman's registrar for the administrative
+path. It reads `subscription_policy`, works out whether the address still
+owes a confirmation (`!pre_verified`, or a confirming policy without
+`pre_confirmed`) and whether a moderator still owes a decision (a moderating
+policy without `pre_approved`), and either subscribes inside the transaction
+or stores a request in the state that says whose move it is. Migration `0036`
+adds `display_name` (carried onto the member row when the subscription
+completes, and shown in the moderator queue) and `pre_approved`, which is
+what lets an approval given up front survive the confirmation the subscriber
+still owes — an invitation sets it, because inviting *is* the approval, and
+reuses Mailman's `list:user:action:invite` template. `members_create` returns
+`202` with `{token, token_owner, http_etag}` when the subscription is held,
+and keeps the immediate `201` for role records (owner, moderator, nonmember),
+which are not subscriptions and carry no flags.
+
 ## P2-LMTP-PARAMETERS — bounded acceptance verified
 
 `parse_path` now returns the ESMTP parameters after the `<path>`, and
