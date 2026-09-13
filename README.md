@@ -624,6 +624,27 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Digest settings, RFC 1153 and volume rollover — bounded acceptance verified
+
+Mailman's Digest settings are list settings now: `digests_enabled` (off, the
+`to-digest` handler collects nothing), `digest_size_threshold` (KiB of
+pending posts that trigger an issue; `0` never), `digest_send_periodic`
+(send what is pending once it is a day old) and `digest_volume_frequency`
+(`yearly`, `monthly`, `quarterly`, `weekly`, `daily`: a new calendar period
+since the last issue advances the volume and restarts the issue numbers at 1,
+audited as `digest.bump`).
+
+The plain-text issue now follows RFC 1153 as Mailman writes it: the list's
+`list:member:digest:masthead`, `Today's Topics:` with each subject and
+author, the `list:member:digest:header`, each message under a numbered
+`Message: N` block behind a line of thirty hyphens, the
+`list:member:digest:footer` as `Subject: Digest Footer`, and `End of … Digest,
+Vol X, Issue Y` with its underline. The MIME issue keeps the posts whole and
+carries the same three templates as their own text parts (empty templates are
+omitted). `summary_digests` remains Mailman's MIME alias. Templates are
+resolved for the list's language with `$volume` and `$issue` added to the
+usual placeholders. See `P3-DIGEST-SETTINGS` in `docs/FEATURE_PARITY.md`.
+
 ## Bounce processing — bounded acceptance verified
 
 The mail role now runs Mailman's bounce runner over the `bounces` queue. A

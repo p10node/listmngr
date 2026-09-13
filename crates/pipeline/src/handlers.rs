@@ -396,10 +396,14 @@ impl Handler for ToDigest {
     fn process(
         &self,
         _message: &mut Working<'_>,
-        _ctx: &PipelineContext<'_>,
+        ctx: &PipelineContext<'_>,
         data: &mut MsgData,
     ) -> Result<(), HandlerError> {
-        data.effects.push(Effect::Enqueue(FanOut::Digest));
+        // Mailman's `digests_enabled`: a list that produces no digests
+        // collects nothing, whatever its members asked for.
+        if ctx.list.digests_enabled {
+            data.effects.push(Effect::Enqueue(FanOut::Digest));
+        }
         Ok(())
     }
 }

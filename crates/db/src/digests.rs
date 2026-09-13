@@ -27,6 +27,74 @@ pub struct DigestIssue {
     pub number: i64,
     pub timestamp: i64,
     pub posts: Vec<DigestPost>,
+    /// Mailman's `list:member:digest:masthead`, `:header` and `:footer`,
+    /// resolved for the list's language with the issue's placeholders.
+    pub masthead: String,
+    pub header: String,
+    pub footer: String,
+}
+
+/// The list's digest settings as the flush reads them under the lock.
+struct DigestSettings {
+    display_name: String,
+    volume: i32,
+    number: i64,
+    last_sent_at: Option<chrono::DateTime<chrono::Utc>>,
+    size_threshold_bytes: usize,
+    send_periodic: bool,
+    frequency: listmngr_core::DigestFrequency,
+}
+
+/// Lock the list row for publication and read what the flush needs.
+async fn load_settings(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    list: &ListId,
+) -> Result<DigestSettings> {
+    let row = sqlx::query("UPDATE mailing_lists SET next_digest_number=next_digest_number WHERE list_id=$1 RETURNING display_name,volume,next_digest_number,digest_last_sent_at,digest_size_threshold,digest_send_periodic,digest_volume_frequency").bind(list.as_str()).fetch_optional(&mut **tx).await.map_err(db_error)?.ok_or_else(|| Error::NotFound(list.to_string()))?;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Ok(DigestSettings {
+        display_name: row.try_get("display_name").map_err(db_error)?,
+        volume: i32::try_from(row.try_get::<i64, _>("volume").map_err(db_error)?)
+            .map_err(db_error)?,
+        number: row.try_get("next_digest_number").map_err(db_error)?,
+        last_sent_at: row
+            .try_get::<Option<String>, _>("digest_last_sent_at")
+            .map_err(db_error)?
+            .map(|value| crate::parse_time(&value))
+            .transpose()?,
+        size_threshold_bytes: (row
+            .try_get::<f64, _>("digest_size_threshold")
+            .map_err(db_error)?
+            .max(0.0)
+            * 1024.0) as usize,
+        send_periodic: row
+            .try_get::<i64, _>("digest_send_periodic")
+            .map_err(db_error)?
+            != 0,
+        frequency: row
+            .try_get::<String, _>("digest_volume_frequency")
+            .map_err(db_error)?
+            .parse()
+            .map_err(|_| Error::Validation("digest_volume_frequency".into()))?,
+    })
+}
+
+/// Mailman's volume period: the calendar unit the volume number counts.
+fn period(
+    at: chrono::DateTime<chrono::Utc>,
+    frequency: listmngr_core::DigestFrequency,
+) -> (i32, u32) {
+    use chrono::Datelike as _;
+    match frequency {
+        listmngr_core::DigestFrequency::Yearly => (at.year(), 0),
+        listmngr_core::DigestFrequency::Monthly => (at.year(), at.month()),
+        listmngr_core::DigestFrequency::Quarterly => (at.year(), (at.month() - 1) / 3),
+        listmngr_core::DigestFrequency::Weekly => {
+            let week = at.iso_week();
+            (week.year(), week.week())
+        }
+        listmngr_core::DigestFrequency::Daily => (at.year(), at.ordinal()),
+    }
 }
 #[derive(Debug)]
 pub struct DigestOutput {
@@ -193,7 +261,7 @@ impl<'a> DigestRepo<'a> {
         F: FnOnce(&DigestIssue) -> Result<Vec<DigestOutput>>,
     {
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
-        let settings = sqlx::query("UPDATE mailing_lists SET next_digest_number=next_digest_number WHERE list_id=$1 RETURNING display_name,volume,next_digest_number").bind(list.as_str()).fetch_optional(&mut *tx).await.map_err(db_error)?.ok_or_else(|| Error::NotFound(list.to_string()))?;
+        let settings = load_settings(&mut tx, list).await?;
         let rows = sqlx::query("SELECT id,raw,recipients,accepted_at FROM digest_posts WHERE list_id=$1 AND issue_id IS NULL ORDER BY accepted_at,id LIMIT 1000").bind(list.as_str()).fetch_all(&mut *tx).await.map_err(db_error)?;
         if rows.is_empty() {
             tx.commit().await.map_err(db_error)?;
@@ -218,22 +286,70 @@ impl<'a> DigestRepo<'a> {
                 .map_err(db_error)?,
             });
         }
-        if !force
-            && size < 1024 * 1024
-            && rows.len() < 1000
-            && now_ms.saturating_sub(oldest) < 86_400_000
-        {
+        // Mailman's triggers: the size threshold (0 never), the daily
+        // periodic run when the list allows it, the hard cap, or force.
+        let by_size = settings.size_threshold_bytes > 0 && size >= settings.size_threshold_bytes;
+        let by_period = settings.send_periodic && now_ms.saturating_sub(oldest) >= 86_400_000;
+        if !force && !by_size && !by_period && rows.len() < 1000 {
             tx.commit().await.map_err(db_error)?;
             return Ok(0);
         }
+        // The volume follows the calendar: a new period since the last
+        // issue advances it and restarts the numbering.
+        let now = chrono::DateTime::from_timestamp_millis(now_ms)
+            .ok_or_else(|| Error::Validation("invalid digest timestamp".into()))?;
+        let (mut volume, mut number) = (settings.volume, settings.number);
+        if settings
+            .last_sent_at
+            .is_some_and(|last| period(last, settings.frequency) != period(now, settings.frequency))
+        {
+            volume = volume
+                .checked_add(1)
+                .ok_or_else(|| Error::Validation("digest volume overflow".into()))?;
+            number = 1;
+            sqlx::query("UPDATE mailing_lists SET volume=$1,next_digest_number=1 WHERE list_id=$2")
+                .bind(i64::from(volume))
+                .bind(list.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(db_error)?;
+            Database::record_tx_with_context(
+                &mut tx,
+                &AuditContext::system(),
+                "digest.bump",
+                "list",
+                list.as_str(),
+                serde_json::json!({"volume": volume, "frequency": settings.frequency.as_str()}),
+            )
+            .await?;
+        }
+        let snapshot = crate::notices::list_snapshot(&mut tx, list).await?;
+        let language = snapshot.preferred_language.clone();
+        let values = crate::notices::list_placeholders(&snapshot)
+            .set("volume", volume.to_string())
+            .set("issue", number.to_string());
+        let mut templates = Vec::with_capacity(3);
+        for name in [
+            "list:member:digest:masthead",
+            "list:member:digest:header",
+            "list:member:digest:footer",
+        ] {
+            templates
+                .push(crate::notices::render(&mut tx, &snapshot, name, &language, &values).await?);
+        }
+        let footer = templates.pop().unwrap_or_default();
+        let header = templates.pop().unwrap_or_default();
+        let masthead = templates.pop().unwrap_or_default();
         let issue = DigestIssue {
             list: list.clone(),
-            display_name: settings.try_get("display_name").map_err(db_error)?,
-            volume: i32::try_from(settings.try_get::<i64, _>("volume").map_err(db_error)?)
-                .map_err(db_error)?,
-            number: settings.try_get("next_digest_number").map_err(db_error)?,
+            display_name: settings.display_name,
+            volume,
+            number,
             timestamp: now_ms / 1000,
             posts,
+            masthead,
+            header,
+            footer,
         };
         let outputs = render(&issue)?;
         if outputs

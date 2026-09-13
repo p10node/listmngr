@@ -298,6 +298,8 @@ string_enum!(ArchiveRenderingMode { Text => "text", Markdown => "markdown" });
 string_enum!(FilterAction { Discard => "discard", Reject => "reject", Forward => "forward", Preserve => "preserve" });
 string_enum!(ReplyToMunging { NoMunging => "no_munging", PointToList => "point_to_list", ExplicitHeader => "explicit_header", ExplicitHeaderOnly => "explicit_header_only" });
 string_enum!(Personalization { None => "none", Individual => "individual", Full => "full" });
+// Mailman's `digest_volume_frequency`: how often the digest volume rolls.
+string_enum!(DigestFrequency { Yearly => "yearly", Monthly => "monthly", Quarterly => "quarterly", Weekly => "weekly", Daily => "daily" });
 // Mailman's `ResponseAction`: what the list does with mail it answers.
 string_enum!(ResponseAction { None => "none", Respond => "respond", RespondAndDiscard => "respond_and_discard" });
 string_enum!(SubscriptionPolicy { Open => "open", Confirm => "confirm", Moderate => "moderate", ConfirmThenModerate => "confirm_then_moderate" });
@@ -642,6 +644,22 @@ pub struct MailingList {
     pub volume: i32,
     pub next_digest_number: i64,
     pub digest_last_sent_at: Option<DateTime<Utc>>,
+    /// Produce digests at all; off, digest members get nothing.
+    #[serde(default = "default_true")]
+    #[schema(default = true)]
+    pub digests_enabled: bool,
+    /// KiB of pending posts that trigger an issue; `0` never does.
+    #[serde(default = "default_digest_size_threshold")]
+    #[schema(default = 30.0)]
+    pub digest_size_threshold: f64,
+    /// Send what is pending on the daily periodic run.
+    #[serde(default = "default_true")]
+    #[schema(default = true)]
+    pub digest_send_periodic: bool,
+    /// How often the volume number advances and issues restart at 1.
+    #[serde(default = "default_digest_volume_frequency")]
+    #[schema(default = "monthly")]
+    pub digest_volume_frequency: DigestFrequency,
     pub emergency: bool,
     /// Maximum original post size in KiB; zero disables this per-list limit.
     #[serde(default)]
@@ -714,6 +732,12 @@ const fn default_topics_bodylines_limit() -> i32 {
     5
 }
 
+const fn default_digest_size_threshold() -> f64 {
+    30.0
+}
+const fn default_digest_volume_frequency() -> DigestFrequency {
+    DigestFrequency::Monthly
+}
 const fn default_unrecognized_bounces() -> UnrecognizedBounceDisposition {
     UnrecognizedBounceDisposition::Administrators
 }
@@ -771,6 +795,10 @@ impl MailingList {
             volume: 1,
             next_digest_number: 1,
             digest_last_sent_at: None,
+            digests_enabled: true,
+            digest_size_threshold: 30.0,
+            digest_send_periodic: true,
+            digest_volume_frequency: DigestFrequency::Monthly,
             emergency: false,
             max_message_size: 0,
             max_num_recipients: 0,

@@ -12,6 +12,8 @@ mod bounce_maintenance;
 mod bounce_notice;
 #[path = "rest/bounce_score.rs"]
 mod bounce_score;
+#[path = "rest/digest_settings.rs"]
+mod digest_settings;
 #[path = "rest/goodbye.rs"]
 mod goodbye;
 #[path = "rest/goodbye_unsubscribe.rs"]
