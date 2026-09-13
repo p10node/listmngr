@@ -16,9 +16,9 @@ PostgreSQL PASS", R1/O1 OPEN) đã bị vượt qua; nội dung cũ giữ trong 
 
 - Phase 0/1: đầy đủ (`P0-*`, `P1-*`).
 - Phase 2 mail path: LMTP (P2-TRANSPORT, P2-LMTP-PARAMETERS); store/queue/runtime
-  (P2-STORE, P2-QUEUE, P2-RUNTIME, P2-LEASE-HEARTBEAT); chain/rule engine 15 rules
-  + header-match + DMARC (P2-CHAIN-ENGINE, P2-CHAIN-RULES, P2-DMARC-MUNGE,
-  P2-VALIDATE-AUTHENTICITY, P2-HEADER-MATCHES-REST); handler pipeline trừ
+  (P2-STORE, P2-QUEUE, P2-RUNTIME, P2-LEASE-HEARTBEAT); chain/rule engine với
+  15 rules, header-match và DMARC (P2-CHAIN-ENGINE, P2-CHAIN-RULES,
+  P2-DMARC-MUNGE, P2-VALIDATE-AUTHENTICITY, P2-HEADER-MATCHES-REST); handler pipeline trừ
   `to-usenet`/`arc-sign` (P2-PIPELINE-HANDLERS, P2-MIME-DELETE,
   P2-HANDLERS-DECORATE, P2-COOK-HEADERS, P2-PERSONALIZE-VERP); templates
   (P2-TEMPLATES); held REST + notices; out runner (P2-DELIVERY-POLICY,
