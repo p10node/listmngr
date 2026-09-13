@@ -120,9 +120,9 @@ pub async fn score(
                 old + 1.0
             };
             let fresh = received_at.is_none_or(|prior| at.date_naive() != prior.date_naive());
-            let disable = fresh && next >= threshold;
+            let threshold_reached = fresh && next >= threshold;
             sqlx::query("UPDATE members SET bounce_score=$1,last_bounce_received=$2 WHERE id=$3")
-                .bind(if disable { 0.0 } else { next })
+                .bind(if threshold_reached { 0.0 } else { next })
                 .bind(at.to_rfc3339())
                 .bind(&member)
                 .execute(&mut **tx)
@@ -139,26 +139,16 @@ pub async fn score(
                 )
                 .await?;
             }
-            if disable {
-                sqlx::query(
-                    "UPDATE members SET total_warnings_sent=0,last_warning_sent=NULL WHERE id=$1",
-                )
-                .bind(&member)
-                .execute(&mut **tx)
-                .await
-                .map_err(db_error)?;
-                crate::workflows::enqueue_disable_notice(
-                    tx,
-                    db,
-                    list,
-                    recipient,
-                    at.timestamp_millis(),
-                )
-                .await?;
-                sqlx::query("UPDATE preferences SET delivery_status='by_bounces' WHERE id=(SELECT preferences_id FROM members WHERE id=$1)")
-                    .bind(&member).execute(&mut **tx).await.map_err(db_error)?;
-                sqlx::query("INSERT INTO audit_log(id,at,action,target_type,target_id,diff) VALUES($1,$2,'bounce.disable','member',$3,'{\"delivery_status\":\"by_bounces\",\"bounce_score\":0}')")
-                    .bind(Uuid::now_v7().to_string()).bind(at.to_rfc3339()).bind(&member).execute(&mut **tx).await.map_err(db_error)?;
+            if threshold_reached {
+                // Mailman probes first and disables only when the probe
+                // bounces; without that configuration the threshold
+                // disables at once.
+                match db.bounce_probe_lifetime_ms() {
+                    Some(lifetime) => {
+                        send_probe(tx, db, list, &member, recipient, at, lifetime).await?;
+                    }
+                    None => disable_member(tx, db, list, &member, recipient, at).await?,
+                }
             }
         }
         sqlx::query("UPDATE bounce_events SET processed=1 WHERE id=$1")
@@ -169,5 +159,76 @@ pub async fn score(
         sqlx::query("INSERT INTO audit_log(id,at,action,target_type,target_id,diff) VALUES($1,$2,'bounce.score','member',$3,'{}')")
             .bind(Uuid::now_v7().to_string()).bind(at.to_rfc3339()).bind(member).execute(&mut **tx).await.map_err(db_error)?;
     }
+    Ok(())
+}
+
+/// Disable delivery for `member` because of bounces: score to zero, the
+/// warning cycle restarted, the owner told, and the decision audited.
+pub async fn disable_member(
+    tx: &mut Transaction<'_, Any>,
+    db: &crate::Database,
+    list: &ListId,
+    member: &str,
+    recipient: &str,
+    at: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    sqlx::query("UPDATE members SET bounce_score=0,total_warnings_sent=0,last_warning_sent=NULL WHERE id=$1")
+        .bind(member)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    crate::workflows::enqueue_disable_notice(tx, db, list, recipient, at.timestamp_millis())
+        .await?;
+    sqlx::query("UPDATE preferences SET delivery_status='by_bounces' WHERE id=(SELECT preferences_id FROM members WHERE id=$1)")
+        .bind(member).execute(&mut **tx).await.map_err(db_error)?;
+    sqlx::query("INSERT INTO audit_log(id,at,action,target_type,target_id,diff) VALUES($1,$2,'bounce.disable','member',$3,'{\"delivery_status\":\"by_bounces\",\"bounce_score\":0}')")
+        .bind(Uuid::now_v7().to_string()).bind(at.to_rfc3339()).bind(member).execute(&mut **tx).await.map_err(db_error)?;
+    Ok(())
+}
+
+/// Mailman's probe: a one-time token, stored hashed, in the probe's own
+/// VERP sender; the member stays enabled until that address bounces.
+async fn send_probe(
+    tx: &mut Transaction<'_, Any>,
+    db: &crate::Database,
+    list: &ListId,
+    member: &str,
+    recipient: &str,
+    at: chrono::DateTime<chrono::Utc>,
+    lifetime_ms: i64,
+) -> Result<()> {
+    use rand::TryRngCore as _;
+    use sha2::Digest as _;
+    // Lower-case hex: the address travels through MTAs and the intake's
+    // canonicalization, neither of which preserves case.
+    let mut secret = [0_u8; 20];
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut secret)
+        .map_err(db_error)?;
+    let token = secret.iter().fold(String::new(), |mut out, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+        out
+    });
+    let hash = format!("{:x}", sha2::Sha256::digest(token.as_bytes()));
+    let sender = listmngr_core::verp::encode(
+        db.verp_format(),
+        list,
+        &format!("{}@{token}", listmngr_core::verp::PROBE_LOCAL),
+    )
+    .ok_or_else(|| listmngr_core::Error::Validation("probe sender".into()))?;
+    let now_ms = at.timestamp_millis();
+    sqlx::query("INSERT INTO bounce_probes(token_hash,member_id,list_id,sent_at,expires_at) VALUES($1,$2,$3,$4,$5)")
+        .bind(&hash)
+        .bind(member)
+        .bind(list.as_str())
+        .bind(now_ms)
+        .bind(now_ms.saturating_add(lifetime_ms.max(1)))
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    crate::workflows::enqueue_probe(tx, db, list, recipient, &sender, now_ms).await?;
+    sqlx::query("INSERT INTO audit_log(id,at,action,target_type,target_id,diff) VALUES($1,$2,'bounce.probe','member',$3,'{}')")
+        .bind(Uuid::now_v7().to_string()).bind(at.to_rfc3339()).bind(member).execute(&mut **tx).await.map_err(db_error)?;
     Ok(())
 }

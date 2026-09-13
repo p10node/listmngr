@@ -97,7 +97,15 @@ impl<'a> BounceProcessingRepo<'a> {
         .await
         .map_err(db_error)?;
         let mut outcome = Outcome::default();
-        if let Some(disposition) = disposition {
+        if let Some(token) = context["probe_token"].as_str() {
+            // A probe's own bounce: the one thing that disables delivery
+            // when probes are on. Stale, spent or unknown tokens are inert.
+            if let Some(recipient) =
+                disable_after_probe(&mut tx, self.db, &list, token, now).await?
+            {
+                outcome.scored.push(recipient);
+            }
+        } else if let Some(disposition) = disposition {
             let named = named_recipients(&mut tx, &context, &message.raw, issuer, now).await?;
             if let Some(named) = named {
                 for named in named {
@@ -210,6 +218,58 @@ async fn verified_issuance(
     } else {
         Ok(None)
     }
+}
+
+/// The member a probe was sent to, disabled now that it bounced; `None`
+/// when the token is unknown, expired, for another list, or the member is
+/// gone or already disabled.
+async fn disable_after_probe(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    list: &ListId,
+    token: &str,
+    now: i64,
+) -> Result<Option<String>> {
+    use sha2::Digest as _;
+    let hash = format!("{:x}", sha2::Sha256::digest(token.as_bytes()));
+    let row = sqlx::query("DELETE FROM bounce_probes WHERE token_hash=$1 AND list_id=$2 RETURNING member_id, expires_at")
+        .bind(&hash)
+        .bind(list.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let member: String = row.try_get("member_id").map_err(db_error)?;
+    let expires_at: i64 = row.try_get("expires_at").map_err(db_error)?;
+    if now >= expires_at {
+        return Ok(None);
+    }
+    // Every other probe for the member is spent with this one.
+    sqlx::query("DELETE FROM bounce_probes WHERE member_id=$1")
+        .bind(&member)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    crate::smtp_bounces::lock_preferences(tx, &member).await?;
+    let row = sqlx::query("SELECT a.original_email, COALESCE(mp.delivery_status,ap.delivery_status,up.delivery_status,'enabled') AS status FROM members m JOIN addresses a ON a.id=m.address_id JOIN preferences mp ON mp.id=m.preferences_id LEFT JOIN preferences ap ON ap.id=a.preferences_id LEFT JOIN users u ON u.id=m.user_id LEFT JOIN preferences up ON up.id=u.preferences_id WHERE m.id=$1 AND m.role='member' AND m.list_id=$2")
+        .bind(&member)
+        .bind(list.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    if row.try_get::<String, _>("status").map_err(db_error)? != "enabled" {
+        return Ok(None);
+    }
+    let recipient: String = row.try_get("original_email").map_err(db_error)?;
+    let at = chrono::DateTime::from_timestamp_millis(now)
+        .ok_or_else(|| Error::Validation("timestamp out of range".into()))?;
+    crate::smtp_bounces::disable_member(tx, db, list, &member, &recipient, at).await?;
+    Ok(Some(recipient))
 }
 
 /// Record and score one named recipient when they are a member of the list.

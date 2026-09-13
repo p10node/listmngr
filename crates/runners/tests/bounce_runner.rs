@@ -184,3 +184,64 @@ async fn an_unrecognized_report_at_the_bare_bounces_address_reaches_the_owners()
     .unwrap();
     assert_eq!(bounces_done, 1);
 }
+
+#[tokio::test]
+async fn with_probes_on_the_threshold_probes_and_only_the_probe_bounce_disables() {
+    let (db, mut handler) = fixture().await;
+    let db = db.with_bounce_probes(true, 7 * 86_400, "{bounces}+{local}={domain}");
+    handler.db = db.clone();
+    let raw = b"From: MAILER-DAEMON@mx.example.net\r\nTo: dev-bounces+member=example.net@example.invalid\r\nSubject: Undelivered Mail Returned to Sender\r\nMessage-ID: <dsn-2@mx.example.net>\r\nAuto-Submitted: auto-replied\r\n\r\nUser unknown.\r\n";
+    assert_eq!(
+        handler
+            .deliver(
+                None,
+                &["dev-bounces+member=example.net@example.invalid".into()],
+                raw
+            )
+            .await[0]
+            .code,
+        250
+    );
+    run_bounces(&db).await;
+    assert_eq!(
+        member_state(&db).await,
+        (0.0, "enabled".into()),
+        "probed, not disabled"
+    );
+    let (to, sender): (String, Option<String>) = sqlx::query_as(
+        "SELECT r.email, n.mail_from FROM workflow_notices n JOIN queue_jobs q ON q.id=n.job_id JOIN delivery_recipients r ON r.job_id=q.id",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(to, "member@example.net");
+    let probe_address = sender.expect("the probe's one-time sender");
+    assert!(
+        probe_address.starts_with("dev-bounces+probe="),
+        "{probe_address}"
+    );
+
+    // The MTA bounces the probe to its own sender address.
+    let raw = format!(
+        "From: MAILER-DAEMON@mx.example.net\r\nTo: {probe_address}\r\nSubject: Undelivered Mail Returned to Sender\r\nMessage-ID: <probe-bounce@mx.example.net>\r\nAuto-Submitted: auto-replied\r\n\r\nUser unknown.\r\n"
+    );
+    let outcome = handler
+        .deliver(None, &[probe_address.clone()], raw.as_bytes())
+        .await;
+    assert_eq!(outcome[0].code, 250, "{}", outcome[0].detail);
+    let context: String = sqlx::query_scalar(
+        "SELECT m.context FROM messages m JOIN queue_jobs q ON q.message_id=m.id WHERE q.queue='bounces' AND q.state!='done'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(context.contains("probe_token"), "{context}");
+    assert!(!context.contains("verp_recipient"), "{context}");
+    run_bounces(&db).await;
+    assert_eq!(member_state(&db).await, (0.0, "by_bounces".into()));
+    let probes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bounce_probes")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(probes, 0);
+}

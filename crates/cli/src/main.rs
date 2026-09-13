@@ -319,7 +319,12 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
     )
     .await?
     .with_default_language(&config.site.default_language)
-    .with_base_url(&config.site.base_url);
+    .with_base_url(&config.site.base_url)
+    .with_bounce_probes(
+        config.mailman.bounce_probes,
+        config.mailman.bounce_probe_lifetime_secs,
+        &config.mta.verp_format,
+    );
     match command {
         Command::Migrate => {
             db.migrate().await.context(errors::MigrationFailure)?;

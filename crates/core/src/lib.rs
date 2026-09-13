@@ -1139,7 +1139,7 @@ config_struct!(MtaConfig {
     map_permissions: String = "group".into(),
     map_generations_kept: u32 = 5,
     verp_delimiter: String = "+".into(),
-    verp_format: String = "{bounces}+{local}={domain}".into(),
+    verp_format: String = verp::DEFAULT_FORMAT.into(),
     // Mailman's `verp_personalized_deliveries`: personalized copies use a
     // per-recipient VERP envelope sender.
     verp_personalized_deliveries: bool = false,
@@ -1312,7 +1312,14 @@ config_struct!(MailmanConfig {
     // Mailman's `filtered_messages_are_preservable`: whether a list's
     // `filter_action = preserve` keeps a copy in the shunt store (else it
     // behaves as discard).
-    filtered_messages_are_preservable: bool = false
+    filtered_messages_are_preservable: bool = false,
+    // Mailman's probe step: a member at the bounce threshold is sent a probe
+    // from a one-time bounce address and disabled only when it bounces.
+    // Off, the threshold disables delivery at once.
+    bounce_probes: bool = true,
+    // How long a probe's bounce is honoured (seconds; Mailman keeps them
+    // with its other pended requests).
+    bounce_probe_lifetime_secs: u32 = 604_800
 });
 config_struct!(HeaderCheck {
     header: String = String::new(),
