@@ -1379,17 +1379,17 @@ pub(crate) async fn enqueue_content_filter_forward(
 
 /// One templated notice to enqueue: who receives it, which template renders
 /// the body, and which catalog message (with arguments) is its subject.
-struct Notice<'a> {
-    to: &'a str,
-    reply_to: Option<&'a str>,
-    subject: &'a str,
-    subject_args: &'a [(&'a str, &'a str)],
-    template: &'a str,
+pub(crate) struct Notice<'a> {
+    pub(crate) to: &'a str,
+    pub(crate) reply_to: Option<&'a str>,
+    pub(crate) subject: &'a str,
+    pub(crate) subject_args: &'a [(&'a str, &'a str)],
+    pub(crate) template: &'a str,
 }
 
 /// Render the notice in the recipient's language and enqueue it job-bound.
 /// `placeholders` extends the list's own.
-async fn enqueue_templated_notice(
+pub(crate) async fn enqueue_templated_notice(
     tx: &mut Transaction<'_, Any>,
     db: &Database,
     list: &ListId,

@@ -31,3 +31,10 @@ content-filter-forward-body =
 
 # Mailman's `acknowledge` handler.
 notice-post-ack-subject = { $display_name } post acknowledgment
+
+# Mailman's `notify`: the daily reminder of what moderators still owe.
+notice-pending-subject = The { $listname } list has { $count } moderation requests waiting.
+notify-held-messages = Held messages:
+notify-held-subscriptions = Held subscriptions:
+notify-held-unsubscriptions = Held unsubscriptions:
+notify-more = ... and { $count } more

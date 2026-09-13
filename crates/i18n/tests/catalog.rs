@@ -76,7 +76,8 @@ fn every_english_message_has_a_vietnamese_translation() {
                     ("member", "x"),
                     ("action", "x"),
                     ("sender", "x"),
-                    ("token", "x")
+                    ("token", "x"),
+                    ("count", "1")
                 ]
             ),
             message(
@@ -88,7 +89,8 @@ fn every_english_message_has_a_vietnamese_translation() {
                     ("member", "x"),
                     ("action", "x"),
                     ("sender", "x"),
-                    ("token", "x")
+                    ("token", "x"),
+                    ("count", "1")
                 ]
             ),
             "{id} is not translated"

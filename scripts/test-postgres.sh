@@ -46,6 +46,8 @@ cargo test --locked -p listmngr-db --test list_posting_settings \
   postgres_waiting_patch_does_not_overwrite_other_committed_fields -- --ignored --exact
 cargo test --locked -p listmngr-db --test moderation_rules \
   postgres_moderation_rules_contract -- --ignored --exact
+cargo test --locked -p listmngr-db --test tasks \
+  postgres_task_sweep_and_notify_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test notice_language \
   postgres_notice_language_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test alter_messages_settings \

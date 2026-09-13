@@ -4,9 +4,11 @@ mod aliases;
 mod bounce;
 mod digests;
 mod errors;
+mod notify;
 mod queue;
 mod requests;
 mod status;
+mod tasks;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
@@ -78,6 +80,13 @@ enum Command {
         #[command(subcommand)]
         command: requests::Command,
     },
+    /// The periodic task sweep, run once by hand.
+    Tasks {
+        #[command(subcommand)]
+        command: tasks::Command,
+    },
+    /// Remind owners and moderators of held messages and requests.
+    Notify(notify::Options),
 }
 #[derive(Debug, Subcommand)]
 enum DomainCommand {
@@ -340,6 +349,8 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Bounce { command } => bounce::run(&db, command).await?,
         Command::Queue { command } => queue::run(&db, command).await?,
         Command::Requests { command } => requests::run(&db, command).await?,
+        Command::Tasks { command } => tasks::run(&db, &config, command).await?,
+        Command::Notify(options) => notify::run(&db, options).await?,
         Command::Digests { command } => digests::run(&db, command).await?,
         Command::Aliases { command } => aliases::run(&db, &config, command).await?,
         Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {

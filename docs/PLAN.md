@@ -385,6 +385,8 @@ site_owner_notify = true
 filtered_messages_are_preservable = false # filter_action = preserve keeps a copy in the shunt store
 bounce_probes = true                     # probe at the bounce threshold; false disables at once
 bounce_probe_lifetime_secs = 604800
+run_tasks_every_secs = 3600              # task runner: expire tokens/probes, collect finished jobs, stale bounce reset
+finished_job_retention_secs = 604800     # how long finished queue jobs and their messages stay
 
 [archive]
 enabled = true
@@ -846,8 +848,8 @@ Mục tiêu: parity Core hoàn chỉnh (trừ NNTP/DMARC wrap).
 - [ ] Welcome/goodbye/invite/hold/refuse/rejected/warning/probe notices; template scopes + language fallback; REST templates/uris; ban REST
 - [ ] Bounce runner: VERP decode (done), DSN + ENVID (done), events/scoring/stale/disable/owner notices (done), forward unrecognized (done); detectors port + fixture corpus (done, synthetic corpus); warnings + removal (done, maintenance sweep); probes (done)
 - [x] Digest runner: durable collection (DB, not mbox), thresholds/periodic, MIME + RFC1153 builders, volume/number rollover, masthead/header/footer, CLI `digests`
-- [ ] `task` runner: expire pendings/workflows, cleanup orphan messages (refcount), stale bounce reset
-- [ ] `notify` (pending reminders), `admin_notify_mchanges`, `admin_immed_notify`
+- [x] `task` runner: expire pendings/workflows, cleanup orphan messages (refcount), stale bounce reset
+- [ ] `notify` (pending reminders) (done), `admin_notify_mchanges`, `admin_immed_notify` (done for held posts)
 - [ ] i18n framework (fluent) + `en`, `vi`; import `.po` Mailman templates (tooling) → P6
 - [ ] SQLite parity test suite chạy song song pg
 - Acceptance: full `mailmanclient` doctest-equivalent suite pass; bounce corpus detection ≥ flufl.bounce; digest snapshot tests (insta) so với Mailman output; subscription flow e2e qua email (confirm token round-trip).

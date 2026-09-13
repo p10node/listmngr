@@ -624,6 +624,40 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Task runner and `notify` — bounded acceptance verified
+
+The mail role now runs Mailman's task runner: every `mailman.run_tasks_every_secs`
+(an hour) it sweeps what nothing else cleans up on its own schedule, each
+step as bounded batches in their own audited transactions (`task.sweep`):
+
+- confirmation tokens past their day that nobody answered (a request waiting
+  for a moderator is never touched), bounce probes past their life, help
+  cooldown rows older than an hour, and autoresponse records outside the
+  list's `autoresponse_grace_period`;
+- finished queue jobs acknowledged more than `mailman.finished_job_retention_secs`
+  (7 days) ago — never one a still-valid DSN issuance could answer — with
+  their recipient snapshots and notice provenance; disposed held messages
+  and their moderation log after the same retention; then the messages and
+  blobs no job, held row or issuance references any more. Shunted jobs and
+  pending held posts keep their message however old it is;
+- bounce scores whose last bounce is older than the list's
+  `bounce_info_stale_after` are forgotten (`bounce.stale_reset`), as the
+  next bounce would have started them over anyway.
+
+```toml
+[mailman]
+run_tasks_every_secs = 3600          # the sweep's period on the mail role
+finished_job_retention_secs = 604800 # how long finished jobs and their messages stay
+```
+
+`listmngr tasks run` sweeps once by hand and prints the JSON summary.
+`listmngr notify [--list ID]... [--dry-run]` is Mailman's `notify`: every
+list with held messages or subscription requests waiting for a moderator
+sends its owners and moderators `list:admin:notice:pending` (`$count`, and a
+`$data` block listing each section's first entries), audited as
+`list.notify`; it is meant for a daily cron, not the sweep. See
+`P3-TASK-RUNNER` in `docs/FEATURE_PARITY.md`.
+
 ## Digest settings, RFC 1153 and volume rollover — bounded acceptance verified
 
 Mailman's Digest settings are list settings now: `digests_enabled` (off, the
