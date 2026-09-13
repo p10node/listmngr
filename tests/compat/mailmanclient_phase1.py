@@ -80,6 +80,28 @@ try:
     rules.clear()
     if len(mailing_list.header_matches) != 0:
         raise AssertionError("header matches were not cleared")
+
+    # Site-wide bans: add, membership test, find, block a subscription, remove.
+    banned = "banned@example.invalid"
+    site_ban = client.bans.add(banned)
+    if site_ban.email != banned or site_ban.list_id is not None:
+        raise AssertionError("site ban did not read back as a global ban")
+    if banned not in client.bans or "other@example.invalid" in client.bans:
+        raise AssertionError("site ban membership test is wrong")
+    if client.bans.find_by_email(banned) is None:
+        raise AssertionError("site ban is missing from the collection")
+    if banned in mailing_list.bans:
+        raise AssertionError("a site ban must not appear as a list ban")
+    try:
+        mailing_list.subscribe(banned, pre_verified=True, pre_confirmed=True, pre_approved=True)
+    except Exception as error:  # HTTPError 400: membership is banned
+        if getattr(error, "code", None) != 400:
+            raise
+    else:
+        raise AssertionError("a site-banned address was subscribed")
+    client.bans.remove(banned)
+    if banned in client.bans:
+        raise AssertionError("site ban was not removed")
 finally:
     if mailing_list is not None:
         mailing_list.delete()

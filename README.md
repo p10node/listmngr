@@ -1437,6 +1437,18 @@ SMTP-time rejection, or a rejection notice. Public/email join admission is
 described above; owner routing is unchanged. See `P3-LIST-POSTING-BANS` in
 `docs/FEATURE_PARITY.md`; full Mailman-client parity is not claimed.
 
+Mailman's site-wide bans (`P3-SITE-BANS-REST`) are `GET/POST /bans` and
+`GET/DELETE /bans/{email}` on both prefixes, with the same `email` input,
+canonical identity, `Location` and pagination as the list-scoped resource. A
+site ban matches on every list — posting, public/email join and privileged
+subscription — but is not one of any list's bans, and a list ban is not a site
+ban; the same value site-wide twice is `409`. The rows are server
+administration: the token must hold `lists:read` (reads) or `lists:write`
+(writes) and be bound to no list or domain. Writes take the site-wide
+reservation and commit with their `ban.create`/`ban.delete` audit event on the
+`site` target. mailmanclient's `client.bans` (`add`, `in`, `find_by_email`,
+`remove`) runs against it in the compatibility gate.
+
 Per-list `max_message_size` is now an experimental posting control. Set it via
 list config PATCH on `/api/v1` or `/3.1` (JSON integer or URL-encoded form).
 The unit is KiB (1024 bytes), including original headers and body; `0` (the

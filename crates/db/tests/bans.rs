@@ -269,3 +269,155 @@ async fn exact_mailbox_is_canonical_and_duplicate_is_conflict() {
         Err(Error::Conflict(_))
     ));
 }
+
+/// Site-wide bans: no list, one shared set, matched on every list.
+#[tokio::test]
+async fn site_bans_are_shared_by_every_list_and_kept_apart_from_list_bans() {
+    let (db, id) = fixture().await;
+    let other = add_list(&db, "other.bans.invalid").await;
+    let context = AuditContext::system();
+    let bans = db.bans();
+    assert_eq!(
+        bans.site_create("Spammer@Example.ORG", &context)
+            .await
+            .unwrap(),
+        "spammer@example.org"
+    );
+    assert_eq!(
+        bans.site_create("^bulk@", &context).await.unwrap(),
+        "^bulk@"
+    );
+    // The unique index does not see NULL list ids; the repository does.
+    assert!(matches!(
+        bans.site_create("spammer@example.org", &context).await,
+        Err(Error::Conflict(_))
+    ));
+    assert_eq!(bans.site_count().await.unwrap(), 2);
+    assert_eq!(
+        bans.site_list(10, 0).await.unwrap(),
+        ["^bulk@", "spammer@example.org"]
+    );
+    assert_eq!(bans.site_list(1, 1).await.unwrap(), ["spammer@example.org"]);
+    assert_eq!(
+        bans.site_get("SPAMMER@example.org").await.unwrap(),
+        "spammer@example.org"
+    );
+    assert!(matches!(
+        bans.site_get("nobody@example.org").await,
+        Err(Error::NotFound(_))
+    ));
+    assert!(matches!(
+        bans.site_list(-1, 0).await,
+        Err(Error::Validation(_))
+    ));
+
+    // A site ban bans on every list, but is not one of any list's bans.
+    for list in [&id, &other] {
+        assert!(bans.is_banned(list, "spammer@example.org").await.unwrap());
+        assert!(bans.is_banned(list, "bulk@anywhere.invalid").await.unwrap());
+        assert_eq!(bans.count(list).await.unwrap(), 0);
+        assert!(bans.list(list, 10, 0).await.unwrap().is_empty());
+        assert!(matches!(
+            bans.get(list, "spammer@example.org").await,
+            Err(Error::NotFound(_))
+        ));
+    }
+    // And a list ban is not a site ban.
+    bans.create(&id, "local@example.org", &context)
+        .await
+        .unwrap();
+    assert!(matches!(
+        bans.site_get("local@example.org").await,
+        Err(Error::NotFound(_))
+    ));
+    assert!(matches!(
+        bans.site_delete("local@example.org", &context).await,
+        Err(Error::NotFound(_))
+    ));
+    assert!(bans.is_banned(&id, "local@example.org").await.unwrap());
+    assert!(!bans.is_banned(&other, "local@example.org").await.unwrap());
+
+    bans.site_delete("^bulk@", &context).await.unwrap();
+    assert!(!bans.is_banned(&id, "bulk@anywhere.invalid").await.unwrap());
+    assert!(matches!(
+        bans.site_delete("^bulk@", &context).await,
+        Err(Error::NotFound(_))
+    ));
+    let audited: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT action, target_type, target_id FROM audit_log WHERE action IN ('ban.create','ban.delete') ORDER BY id",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        audited,
+        [
+            ("ban.create".into(), "site".into(), "bans".into()),
+            ("ban.create".into(), "site".into(), "bans".into()),
+            (
+                "ban.create".into(),
+                "list".into(),
+                "first.bans.invalid".into()
+            ),
+            ("ban.delete".into(), "site".into(), "bans".into()),
+        ]
+    );
+}
+
+/// The site-wide rows on a live `PostgreSQL` schema: `NULL` list ids are
+/// distinct to the unique index there too, so the repository's own
+/// duplicate check and the `IS NULL` filters must hold.
+#[tokio::test]
+#[ignore = "requires explicit disposable TEST_POSTGRES_URL; uses own schema"]
+async fn postgres_site_bans_contract() {
+    sqlx::any::install_default_drivers();
+    let url = std::env::var("TEST_POSTGRES_URL").expect("explicit fixture database required");
+    let admin = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&url)
+        .await
+        .unwrap();
+    let schema = format!("site_bans_{}", uuid::Uuid::now_v7().simple());
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&admin)
+        .await
+        .unwrap();
+    let isolated = format!(
+        "{url}{}options=-csearch_path%3D{schema}",
+        if url.contains('?') { '&' } else { '?' }
+    );
+    let result = tokio::spawn(async move {
+        let db = Database::connect(&isolated, 2).await.unwrap();
+        db.migrate().await.unwrap();
+        db.domains().create("bans.invalid", "", None).await.unwrap();
+        let id = add_list(&db, "first.bans.invalid").await;
+        let other = add_list(&db, "other.bans.invalid").await;
+        let context = AuditContext::system();
+        let bans = db.bans();
+        bans.site_create("spammer@example.org", &context)
+            .await
+            .unwrap();
+        assert!(matches!(
+            bans.site_create("spammer@example.org", &context).await,
+            Err(Error::Conflict(_))
+        ));
+        bans.create(&id, "spammer@example.org", &context)
+            .await
+            .unwrap();
+        assert_eq!(bans.site_count().await.unwrap(), 1);
+        assert_eq!(bans.count(&id).await.unwrap(), 1);
+        assert!(bans.is_banned(&other, "spammer@example.org").await.unwrap());
+        bans.site_delete("spammer@example.org", &context)
+            .await
+            .unwrap();
+        assert!(!bans.is_banned(&other, "spammer@example.org").await.unwrap());
+        assert!(bans.is_banned(&id, "spammer@example.org").await.unwrap());
+        assert_eq!(bans.site_list(10, 0).await.unwrap(), Vec::<String>::new());
+    })
+    .await;
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&admin)
+        .await
+        .unwrap();
+    result.unwrap();
+}
