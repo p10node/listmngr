@@ -36,6 +36,12 @@ try:
     mailing_list.settings.save()
     if mailing_list.settings["description"] != "mailmanclient round trip":
         raise AssertionError("list setting did not round-trip")
+    if mailing_list.settings["admin_notify_mchanges"] is not False:
+        raise AssertionError("admin_notify_mchanges must default off as in Mailman")
+    mailing_list.settings["admin_notify_mchanges"] = True
+    mailing_list.settings.save()
+    if mailing_list.settings["admin_notify_mchanges"] is not True:
+        raise AssertionError("admin_notify_mchanges did not round-trip")
     if not any(item.email == subscriber for item in mailing_list.members):
         raise AssertionError("subscriber absent from member roster")
     if member.email != subscriber:

@@ -153,7 +153,21 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
-## P3-SITE-BANS-REST — bounded acceptance verified
+## P3-ADMIN-NOTIFY-MCHANGES — bounded acceptance verified
+
+`mailing_lists.admin_notify_mchanges` (migration `0041`) is read and written
+like `admin_immed_notify` (patch map, `PUT` reset, row projection, form
+boolean normalisation on the config resource). The two membership hooks that
+every insert and delete of a `member` row already pass through —
+`workflows::welcome_new_member` after the insert and
+`workflows::delete_member_with_goodbye` around the `DELETE … RETURNING` —
+now read the flag with the list row and call
+`notify_administrators_of_membership_change`, which selects the owners' and
+moderators' addresses inside the transaction, skips list-pointing ones, and
+enqueues `list:admin:notice:subscribe`/`unsubscribe` per recipient through
+`enqueue_templated_notice` (recipient language, `$member` placeholder, the
+list's `-owner` as sender, no `Reply-To`). The welcome keeps its own switch
+and its ban suppression; the administrator notice depends on neither.
 
 `BanRepo` gained `site_get`, `site_list`, `site_count`, `site_create` and
 `site_delete` over the rows whose `list_id IS NULL`; the list-scoped methods
