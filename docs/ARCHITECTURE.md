@@ -153,7 +153,19 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
-## P2-E2E-ACCEPTANCE — bounded acceptance verified
+## P3-DUAL-BACKEND-CI — bounded acceptance verified
+
+`listmngr_db::test_support::IsolatedSchema` is the one way a test gets a
+PostgreSQL schema: `create(prefix)` reads `TEST_POSTGRES_URL`, refuses a
+non-PostgreSQL URL, creates `prefix_<uuid7>` over a one-connection `Any`
+pool and returns a URL with `options=-csearch_path%3D<schema>`; `drop()`
+removes it with `CASCADE`. It replaced fourteen tests that each demanded a
+fresh empty database through their own `WEBUI_*_POSTGRES_URL` /
+`ARCHIVE_THREAD_POSTGRES_URL` variable, so `scripts/test-postgres-all.sh`
+can run the whole ignored PostgreSQL population (`cargo test … -- --ignored`
+minus the browser and `postmap` fixtures) in parallel on one server; CI runs
+it after the chosen contract set. The helper is library code because
+integration tests of every crate use it; production never calls it.
 
 The e2e harness (`crates/cli/tests/mailpath_e2e.rs`) gained a `child_env`
 builder, `Fixture::start_with(dkim, extra)` (an OpenSSL-generated RSA key
