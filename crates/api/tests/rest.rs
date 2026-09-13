@@ -24,6 +24,8 @@ mod header_matches;
 mod mta_maps;
 #[path = "rest/requests.rs"]
 mod requests;
+#[path = "rest/site_bans.rs"]
+mod site_bans;
 #[path = "rest/smtp_bounces.rs"]
 mod smtp_bounces;
 #[path = "rest/subject_prefix.rs"]
