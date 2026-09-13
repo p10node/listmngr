@@ -760,9 +760,9 @@ and is audited as a discard. See `P3-AUTORESPONDER` in
 
 The command bot at `list-request@` understands two more of Mailman's verbs:
 
-| Command | Effect |
-|---|---|
-| `echo TEXT` | replies with that text, unchanged |
+| Command        | Effect                                                                       |
+|----------------|------------------------------------------------------------------------------|
+| `echo TEXT`    | replies with that text, unchanged                                            |
 | `end` / `stop` | stops reading commands here — a signature or quoted reply below is never run |
 
 `echo` shares `help`'s budget: one bot reply per mailbox, list and hour, plus
@@ -777,12 +777,12 @@ notice, no workflow, the job simply finishes. See `P3-EMAIL-COMMANDS` in
 `subscription_policy` and `unsubscription_policy` now decide what a public
 join or leave request becomes, the way Mailman does:
 
-| Policy | What happens |
-|---|---|
-| `open` | the roster changes at once; welcome/goodbye notices follow, no token |
-| `confirm` | a confirmation mail; replying (or posting the token) applies the change |
-| `moderate` | the request waits for a moderator; the requester gets no token |
-| `confirm_then_moderate` | the address is confirmed first, then a moderator decides |
+| Policy                  | What happens                                                            |
+|-------------------------|-------------------------------------------------------------------------|
+| `open`                  | the roster changes at once; welcome/goodbye notices follow, no token    |
+| `confirm`               | a confirmation mail; replying (or posting the token) applies the change |
+| `moderate`              | the request waits for a moderator; the requester gets no token          |
+| `confirm_then_moderate` | the address is confirmed first, then a moderator decides                |
 
 Moderators work the queue with the CLI:
 
@@ -818,12 +818,12 @@ confirmation: accepting it applies the change and spends the token. See
 `subscription_policy` decides what the subscription still needs, and the
 flags supply those steps in advance:
 
-| Request | Result |
-|---|---|
-| `pre_verified`+`pre_confirmed`+`pre_approved` | `201` with the member |
-| address not yet proven, or the list confirms | `202` `{token, token_owner: "subscriber"}` and a confirmation mail |
-| confirmed but the list moderates | `202` `{token, token_owner: "moderator"}`, no mail |
-| `invitation=true` | `202`, an invitation mail; accepting it subscribes, no moderator |
+| Request                                       | Result                                                             |
+|-----------------------------------------------|--------------------------------------------------------------------|
+| `pre_verified`+`pre_confirmed`+`pre_approved` | `201` with the member                                              |
+| address not yet proven, or the list confirms  | `202` `{token, token_owner: "subscriber"}` and a confirmation mail |
+| confirmed but the list moderates              | `202` `{token, token_owner: "moderator"}`, no mail                 |
+| `invitation=true`                             | `202`, an invitation mail; accepting it subscribes, no moderator   |
 
 The `token` is the request's REST handle (`/requests/{token}`), never the
 secret in the mail. An approval given up front survives the confirmation the
@@ -853,16 +853,16 @@ needs the message re-encoded upstream. See `P2-LMTP-PARAMETERS` in
 `GET /metrics` (unauthenticated, Prometheus text) now reports the mail path
 next to `listmngr_up`:
 
-| Metric | Kind | Meaning |
-|---|---|---|
-| `listmngr_lmtp_recipients_total{result}` | counter | LMTP `RCPT` outcomes: `accepted`, `rejected`, `deferred` |
-| `listmngr_posts_total{disposition}` | counter | in-runner decisions: `accepted`, `held`, `rejected`, `discarded`, `filtered`, `owner`, `command`, `failed` |
-| `listmngr_delivery_recipients_total{result}` | counter | outgoing recipients: `sent`, `transient`, `permanent`, `ambiguous` |
-| `listmngr_smtp_transactions_total{result}` | counter | relay transactions `completed` (DATA answered) or `failed` before DATA |
-| `listmngr_smtp_transaction_seconds` | histogram | duration of one relay transaction |
-| `listmngr_delivery_latency_seconds` | histogram | LMTP acceptance → relay accepting a recipient |
-| `listmngr_queue_jobs{queue,state}` | gauge | jobs per queue and state (what `queue stats` prints) |
-| `listmngr_queue_shunted_jobs`, `listmngr_queue_oldest_ready_age_seconds` | gauge | shunted jobs; how long the oldest ready job has waited |
+| Metric                                                                   | Kind      | Meaning                                                                                                    |
+|--------------------------------------------------------------------------|-----------|------------------------------------------------------------------------------------------------------------|
+| `listmngr_lmtp_recipients_total{result}`                                 | counter   | LMTP `RCPT` outcomes: `accepted`, `rejected`, `deferred`                                                   |
+| `listmngr_posts_total{disposition}`                                      | counter   | in-runner decisions: `accepted`, `held`, `rejected`, `discarded`, `filtered`, `owner`, `command`, `failed` |
+| `listmngr_delivery_recipients_total{result}`                             | counter   | outgoing recipients: `sent`, `transient`, `permanent`, `ambiguous`                                         |
+| `listmngr_smtp_transactions_total{result}`                               | counter   | relay transactions `completed` (DATA answered) or `failed` before DATA                                     |
+| `listmngr_smtp_transaction_seconds`                                      | histogram | duration of one relay transaction                                                                          |
+| `listmngr_delivery_latency_seconds`                                      | histogram | LMTP acceptance → relay accepting a recipient                                                              |
+| `listmngr_queue_jobs{queue,state}`                                       | gauge     | jobs per queue and state (what `queue stats` prints)                                                       |
+| `listmngr_queue_shunted_jobs`, `listmngr_queue_oldest_ready_age_seconds` | gauge     | shunted jobs; how long the oldest ready job has waited                                                     |
 
 Counters and histograms live in the process (the mail role runs inside
 `serve`), so a restart resets them; the queue gauges come from the database
@@ -1112,6 +1112,26 @@ removal and one-click unsubscribe — independently of `send_welcome_message`
 and `send_goodbye_message`, each in the administrator's own language. Owner
 and moderator role changes are not membership changes. See
 `P3-ADMIN-NOTIFY-MCHANGES` in `docs/FEATURE_PARITY.md`.
+
+## Phase 2 end-to-end acceptance — bounded acceptance verified
+
+`crates/cli/tests/mailpath_e2e.rs` runs the real `listmngr serve` binary on a
+disposable SQLite database with a bound LMTP socket, a real SMTP sink and,
+when asked, a DKIM key generated by the system OpenSSL, and covers the plan's
+Phase 2 acceptance matrix (`P2-E2E-ACCEPTANCE`): a member's post reaches an
+enabled member once and never a disabled one; the delivered copy carries
+`Subject: [Dev] …`, `List-Id`, `List-Post`, `List-Unsubscribe`, `List-Archive`,
+`Precedence: list` and the list's footer template, and its `DKIM-Signature`
+verifies (`dkim=pass`) against the fixture's public record; a nonmember's post
+is held; a banned sender receives the rejection notice and the members nothing;
+a post over `max_message_size` is held with the reason; `personalize = full`
+with `verp_personalized_deliveries` sends one copy per member with
+`dev-bounces+local=domain@host` envelopes, a personal `To` and the RFC 8058
+one-click pair; a post accepted while the server is stopped is delivered
+exactly once after start; and a server killed with SIGKILL while the relay
+holds its DATA answer delivers exactly once after restart against the same
+database. Kill points inside the `in` stage are not scheduled by this harness;
+lease expiry and re-claim there are covered by the repository contracts.
 
 ## Mailman handler pipeline — bounded acceptance verified
 
@@ -1864,19 +1884,19 @@ proxies and redirects are disabled. Start `serve` first: a reachable database al
 does not make a stopped HTTP service healthy. `members find` and `members del`
 validate and normalize complete email addresses, including IDNA domains.
 
-| Exit | Meaning |
-|---|---|
-| 0 | Success |
-| 1 | Unexpected internal failure |
-| 2 | Invalid command line, input, or configuration |
-| 3 | HTTP status endpoint unreachable or timed out |
-| 4 | `/healthz` returned a non-success status |
-| 5 | Healthy process, but `/readyz` returned a non-success status |
-| 6 | Resource conflict |
-| 7 | Resource not found |
-| 8 | Authentication, authorization, or rate-limit rejection |
-| 9 | Input/output failure |
-| 10 | Database connection, query, or migration failure |
+| Exit | Meaning                                                      |
+|------|--------------------------------------------------------------|
+| 0    | Success                                                      |
+| 1    | Unexpected internal failure                                  |
+| 2    | Invalid command line, input, or configuration                |
+| 3    | HTTP status endpoint unreachable or timed out                |
+| 4    | `/healthz` returned a non-success status                     |
+| 5    | Healthy process, but `/readyz` returned a non-success status |
+| 6    | Resource conflict                                            |
+| 7    | Resource not found                                           |
+| 8    | Authentication, authorization, or rate-limit rejection       |
+| 9    | Input/output failure                                         |
+| 10   | Database connection, query, or migration failure             |
 
 Runtime errors emit a stable `error[CLI-…]` category and a correlation UUID,
 without raw error chains, input values, or database credentials. Usage errors are
