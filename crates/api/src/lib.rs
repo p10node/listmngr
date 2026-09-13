@@ -8,6 +8,7 @@ mod bounce_config;
 mod bounces;
 mod digest;
 mod header_matches;
+mod queues;
 mod requests;
 
 use axum::{
@@ -133,6 +134,7 @@ macro_rules! page_response {
 page_response!(StringPageResponse, String);
 page_response!(BanPageResponse, bans::BanResponse);
 page_response!(HeaderMatchPageResponse, header_matches::HeaderMatchResponse);
+page_response!(QueuePageResponse, queues::QueueResponse);
 page_response!(RequestPageResponse, requests::RequestResponse);
 page_response!(BouncePageResponse, listmngr_db::bounces::BounceEvent);
 page_response!(CatalogPageResponse, CatalogEntry);
@@ -538,6 +540,10 @@ impl utoipa::Modify for SecurityAddon {
         header_matches::patch,
         header_matches::put,
         header_matches::delete,
+        queues::list,
+        queues::get,
+        queues::job,
+        queues::inject,
         requests::list,
         requests::count,
         requests::get,
@@ -636,6 +642,7 @@ impl utoipa::Modify for SecurityAddon {
         ErrorResponse, StringPageResponse, CatalogPageResponse, CatalogEntry, PageQuery,
         RequestPageResponse, requests::RequestResponse, requests::DecisionInput,
         digest::DigestResponse, digest::DigestActionInput, digest::DigestActionResponse,
+        QueuePageResponse, queues::QueueResponse, queues::JobResponse, queues::InjectInput,
         HeaderMatchPageResponse, header_matches::HeaderMatchResponse, header_matches::HeaderMatchInput, header_matches::HeaderMatchFindInput, header_matches::HeaderMatchPatchInput,
         DomainPageResponse, MailingListPageResponse,
         UserPageResponse, ArchiverPageResponse, TemplatePageResponse, MemberPageResponse,
@@ -992,6 +999,7 @@ fn phase_one_routes() -> Router<AppState> {
         .merge(requests::routes())
         .merge(header_matches::routes())
         .merge(digest::routes())
+        .merge(queues::routes())
         .route("/lists/{id}/held", get(list_held))
         .route("/lists/{id}/held/count", get(list_held_count))
         .route(
