@@ -778,12 +778,14 @@ impl<'a> WorkflowRepo<'a> {
 }
 /// Called only after an actual membership INSERT, inside its audited transaction.
 /// Recipient and list identity come from the stored membership, never a caller.
+/// Sends the member's welcome (`send_welcome_message`) and tells the
+/// administrators (`admin_notify_mchanges`), each by its own switch.
 pub(crate) async fn welcome_new_member(
     tx: &mut Transaction<'_, Any>,
     db: &Database,
     member: listmngr_core::MemberId,
 ) -> Result<()> {
-    let stored = sqlx::query("SELECT m.list_id,a.original_email,l.send_welcome_message,l.display_name FROM members m JOIN addresses a ON a.id=m.address_id JOIN mailing_lists l ON l.list_id=m.list_id WHERE m.id=$1 AND m.role='member'")
+    let stored = sqlx::query("SELECT m.list_id,a.original_email,l.send_welcome_message,l.admin_notify_mchanges,l.display_name FROM members m JOIN addresses a ON a.id=m.address_id JOIN mailing_lists l ON l.list_id=m.list_id WHERE m.id=$1 AND m.role='member'")
         .bind(member.to_string()).fetch_optional(&mut **tx).await.map_err(db_error)?;
     let Some(stored) = stored else {
         return Ok(());
@@ -793,39 +795,95 @@ pub(crate) async fn welcome_new_member(
         .map_err(db_error)?
         .parse()?;
     let email: String = stored.try_get("original_email").map_err(db_error)?;
-    if crate::bans::is_banned(&mut **tx, &list, &email).await? {
-        // Suppress this optional notice without redefining administrative
-        // admission. Public join workflows enforce bans before insertion.
-        return Ok(());
-    }
-    if stored
+    let display_name: String = stored.try_get("display_name").map_err(db_error)?;
+    // A banned address gets no welcome, without redefining administrative
+    // admission (public join workflows enforce bans before insertion); the
+    // administrators still learn of the membership.
+    let welcome = stored
         .try_get::<i64, _>("send_welcome_message")
         .map_err(db_error)?
-        == 0
-    {
-        return Ok(());
+        != 0
+        && !crate::bans::is_banned(&mut **tx, &list, &email).await?;
+    if welcome {
+        let owner = list.owner_address();
+        enqueue_templated_notice(
+            tx,
+            db,
+            &list,
+            Notice {
+                to: &email,
+                reply_to: Some(&owner),
+                subject: "notice-welcome-subject",
+                subject_args: &[("display_name", &display_name)],
+                template: "list:user:notice:welcome",
+            },
+            |values| values.set("user_email", email.clone()),
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await?;
     }
-    let display_name: String = stored.try_get("display_name").map_err(db_error)?;
-    let owner = list.owner_address();
-    enqueue_templated_notice(
-        tx,
-        db,
-        &list,
-        Notice {
-            to: &email,
-            reply_to: Some(&owner),
-            subject: "notice-welcome-subject",
-            subject_args: &[("display_name", &display_name)],
-            template: "list:user:notice:welcome",
-        },
-        |values| values.set("user_email", email.clone()),
-        chrono::Utc::now().timestamp_millis(),
-    )
-    .await
+    if stored
+        .try_get::<i64, _>("admin_notify_mchanges")
+        .map_err(db_error)?
+        != 0
+    {
+        notify_administrators_of_membership_change(tx, db, &list, &email, true).await?;
+    }
+    Ok(())
+}
+
+/// Mailman's `admin_notify_mchanges`: `list:admin:notice:subscribe` or
+/// `list:admin:notice:unsubscribe` to every owner and moderator, each in
+/// their own language, naming the member.
+async fn notify_administrators_of_membership_change(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    list: &ListId,
+    member: &str,
+    subscribed: bool,
+) -> Result<()> {
+    let (subject, template) = if subscribed {
+        (
+            "notice-admin-subscribe-subject",
+            "list:admin:notice:subscribe",
+        )
+    } else {
+        (
+            "notice-admin-unsubscribe-subject",
+            "list:admin:notice:unsubscribe",
+        )
+    };
+    let snapshot = crate::notices::list_snapshot(tx, list).await?;
+    let recipients: Vec<String> = sqlx::query_scalar("SELECT a.original_email FROM addresses a WHERE EXISTS (SELECT 1 FROM members m WHERE m.address_id=a.id AND m.list_id=$1 AND m.role IN ('owner','moderator')) ORDER BY a.email")
+        .bind(list.as_str()).fetch_all(&mut **tx).await.map_err(db_error)?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    for email in &recipients {
+        if listmngr_mail::owner::points_to_list(email, list) {
+            continue;
+        }
+        enqueue_templated_notice(
+            tx,
+            db,
+            list,
+            Notice {
+                to: email,
+                reply_to: None,
+                subject,
+                subject_args: &[("display_name", &snapshot.display_name)],
+                template,
+            },
+            |values| values.set("member", member.to_owned()),
+            now_ms,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Delete first with RETURNING so only the actual deletion winner can notify.
 /// All recipient data is stored authority; the caller owns audit and commit.
+/// Sends the goodbye (`send_goodbye_message`) and tells the administrators
+/// (`admin_notify_mchanges`), each by its own switch.
 pub(crate) async fn delete_member_with_goodbye(
     tx: &mut Transaction<'_, Any>,
     db: &Database,
@@ -847,10 +905,25 @@ pub(crate) async fn delete_member_with_goodbye(
         .map_err(db_error)?
         .parse()?;
     let address: String = removed.try_get("address_id").map_err(db_error)?;
-    let email: Option<String> = sqlx::query_scalar("SELECT a.original_email FROM addresses a JOIN mailing_lists l ON l.list_id=$1 WHERE a.id=$2 AND l.send_goodbye_message=1")
+    let stored = sqlx::query("SELECT a.original_email,l.send_goodbye_message,l.admin_notify_mchanges FROM addresses a JOIN mailing_lists l ON l.list_id=$1 WHERE a.id=$2")
         .bind(list.as_str()).bind(address).fetch_optional(&mut **tx).await.map_err(db_error)?;
-    if let Some(email) = email {
+    let Some(stored) = stored else {
+        return Ok(true);
+    };
+    let email: String = stored.try_get("original_email").map_err(db_error)?;
+    if stored
+        .try_get::<i64, _>("send_goodbye_message")
+        .map_err(db_error)?
+        != 0
+    {
         enqueue_goodbye(tx, db, &list, &email).await?;
+    }
+    if stored
+        .try_get::<i64, _>("admin_notify_mchanges")
+        .map_err(db_error)?
+        != 0
+    {
+        notify_administrators_of_membership_change(tx, db, &list, &email, false).await?;
     }
     Ok(true)
 }
