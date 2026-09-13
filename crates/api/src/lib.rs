@@ -2714,6 +2714,12 @@ async fn list_held_get(
 struct ModerateInput {
     action: String,
     comment: Option<String>,
+    /// Mailman's `forward`: also send a copy of the held post to `forward_to`.
+    #[serde(default, deserialize_with = "mailman_bool")]
+    forward: bool,
+    /// Where the copy goes; required when `forward` is true.
+    #[serde(default)]
+    forward_to: Option<String>,
 }
 #[utoipa::path(
     post,
@@ -2754,12 +2760,22 @@ async fn list_held_moderate(
             ))));
         }
     };
+    let forward_to = match (v.forward, v.forward_to.as_deref()) {
+        (false, _) => None,
+        (true, Some(address)) if !address.trim().is_empty() => Some(address),
+        (true, _) => {
+            return Err(ApiError(Error::Validation(
+                "forward requires forward_to".into(),
+            )));
+        }
+    };
     s.db.moderation()
-        .review(
+        .review_forwarding(
             held_id,
             &audit_context(&auth, addr),
             &action,
             &reason,
+            forward_to,
             now_ms,
         )
         .await?;

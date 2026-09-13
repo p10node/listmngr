@@ -457,6 +457,7 @@ impl Database {
             &AuditContext::new(Some(user), None, None),
             action,
             reason,
+            None,
             chrono::Utc::now().timestamp_millis(),
         )
         .await?;
