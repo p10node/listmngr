@@ -3,13 +3,10 @@
 use listmngr_core::{DeliveryMode, DeliveryStatus, Error, ListId, MemberRole, Result};
 use listmngr_db::{
     Database,
-    digests::{DigestIssue, DigestOutput, DigestRecipient},
+    digests::DigestRecipient,
     mail_queue::{Lease, Queue},
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
+use std::time::Duration;
 use tokio::sync::watch;
 
 async fn collect(db: &Database, lease: &Lease) -> Result<()> {
@@ -67,70 +64,9 @@ async fn collect(db: &Database, lease: &Lease) -> Result<()> {
         )
         .await
 }
-fn render(issue: &DigestIssue) -> Result<Vec<DigestOutput>> {
-    // Per-post exclusions must not accidentally reappear in a shared digest.
-    let mut membership: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
-    for (index, post) in issue.posts.iter().enumerate() {
-        for recipient in &post.recipients {
-            membership
-                .entry((recipient.mode.clone(), recipient.email.clone()))
-                .or_default()
-                .push(index);
-        }
-    }
-    let mut groups: BTreeMap<(String, Vec<usize>), Vec<String>> = BTreeMap::new();
-    for ((mode, email), indices) in membership {
-        groups.entry((mode, indices)).or_default().push(email);
-    }
-    groups
-        .into_iter()
-        .map(|((mode, indices), recipients)| {
-            let messages: Vec<&[u8]> = indices
-                .iter()
-                .map(|i| issue.posts[*i].raw.as_slice())
-                .collect();
-            let history: BTreeSet<_> = messages
-                .iter()
-                .flat_map(|raw| crate::policy_facts::loop_markers(raw))
-                .collect();
-            let raw = listmngr_mail::digest::build(&listmngr_mail::digest::Digest {
-                list: issue.list.clone(),
-                display_name: issue.display_name.clone(),
-                volume: issue.volume,
-                number: issue.number,
-                mode: mode.parse()?,
-                timestamp: issue.timestamp,
-                masthead: issue.masthead.clone(),
-                header: issue.header.clone(),
-                footer: issue.footer.clone(),
-                messages,
-            })
-            .map_err(|e| Error::Validation(e.to_string()))?;
-            let mut headers = crate::digests::headers(&issue.list);
-            headers.push((
-                "Message-ID".into(),
-                format!("<{}@{}>", uuid::Uuid::now_v7(), issue.list.mail_host()),
-            ));
-            headers.extend(history.into_iter().map(|v| ("X-BeenThere".into(), v)));
-            let raw = listmngr_mail::cook_headers(&raw, None, &headers)
-                .map_err(|e| Error::Validation(e.to_string()))?;
-            Ok(DigestOutput {
-                raw,
-                recipients,
-                mode,
-            })
-        })
-        .collect()
-}
-fn headers(list: &ListId) -> Vec<(String, String)> {
-    listmngr_pipeline::list_headers(&listmngr_pipeline::ListHeaderInfo {
-        list_id: list.to_string(),
-        posting_address: list.posting_address(),
-        subscribe_address: list.join_address(),
-        unsubscribe_address: list.leave_address(),
-        archive_url: None,
-    })
-}
+/// The production renderer lives with the repository so the REST layer can
+/// publish on demand too.
+pub use listmngr_db::digests::render;
 /// Force one issue, or publish only if periodic/size threshold is due.
 /// # Errors
 /// Returns collection, rendering, lease or database errors.

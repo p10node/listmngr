@@ -679,6 +679,19 @@ omitted). `summary_digests` remains Mailman's MIME alias. Templates are
 resolved for the list's language with `$volume` and `$issue` added to the
 usual placeholders. See `P3-DIGEST-SETTINGS` in `docs/FEATURE_PARITY.md`.
 
+Mailman's `/lists/{id}/digest` resource (`P3-DIGEST-REST`) is on both
+prefixes: `GET` returns the list's `volume` and `next_digest_number`; `POST`
+takes any of `bump` (advance the volume and restart numbering, audited as
+`digest.bump` with the caller's token), `send` (publish whatever is collected
+as one issue now) and `periodic` (publish only if the list's size or daily
+trigger is due), applied in that order and answered with `202` and how many
+issues were published. Booleans may be spelled `True`/`False` on forms.
+Publication renders the issue and queues it for the outgoing runner; the
+response does not mean SMTP delivery. Reads need `lists:read`, verbs
+`lists:write`, within the token's list bounds. The renderer moved to
+`listmngr_db::digests::render` so the CLI, the digest runner and REST share
+it.
+
 ## Bounce processing — bounded acceptance verified
 
 The mail role now runs Mailman's bounce runner over the `bounces` queue. A

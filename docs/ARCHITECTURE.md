@@ -153,7 +153,21 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
-## P3-ADMIN-NOTIFY-MCHANGES — bounded acceptance verified
+## P3-DIGEST-REST — bounded acceptance verified
+
+`listmngr_api::digest` mounts `/lists/{id}/digest` on both prefixes. `GET`
+projects `volume` and `next_digest_number` from the list row. `POST` parses
+`send`/`bump`/`periodic` through the same `mailman_bool` form deserializer
+the workflow inputs use, then runs `DigestRepo::bump_with_context` (the
+existing bump, now attributed to the caller) and `DigestRepo::live().flush`
+with `force` for `send` and without for `periodic`. The digest renderer
+(`render` and the list-header helper) moved from `listmngr_runners::digests`
+to `listmngr_db::digests` — its inputs were already the repository's
+`DigestIssue`/`DigestOutput` types and `listmngr_mail`/`listmngr_pipeline`,
+both dependencies of `listmngr_db` — so the REST layer needs no runner
+dependency; the runner re-exports it. Publication keeps its single
+transaction: the issue, the outgoing job and its recipient snapshot commit
+together or not at all, and the response's count is what committed.
 
 `mailing_lists.admin_notify_mchanges` (migration `0041`) is read and written
 like `admin_immed_notify` (patch map, `PUT` reset, row projection, form
