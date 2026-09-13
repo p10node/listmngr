@@ -181,6 +181,13 @@ impl<'a> DigestRepo<'a> {
     /// # Errors
     /// Returns missing-list, overflow, database or audit errors.
     pub async fn bump(&self, list: &ListId) -> Result<()> {
+        self.bump_with_context(list, &AuditContext::system()).await
+    }
+
+    /// See [`Self::bump`]; the audit row carries the caller's context.
+    /// # Errors
+    /// Returns missing-list, overflow, database or audit errors.
+    pub async fn bump_with_context(&self, list: &ListId, context: &AuditContext) -> Result<()> {
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
         let current = crate::lock_list_for_patch(&mut tx, list).await?;
         let volume = current
@@ -195,7 +202,7 @@ impl<'a> DigestRepo<'a> {
             .map_err(db_error)?;
         Database::record_tx_with_context(
             &mut tx,
-            &AuditContext::system(),
+            context,
             "digest.bump",
             "list",
             list.as_str(),
@@ -449,4 +456,79 @@ impl<'a> DigestRepo<'a> {
                 .map_err(db_error)?;
         Ok(count == 1)
     }
+}
+
+/// Render one issue into one message per recipient group.
+///
+/// Recipients are grouped by delivery mode and exact post set; each message
+/// carries the MIME or RFC 1153 body from `listmngr_mail::digest`, the list
+/// headers, a fresh `Message-ID` and the posts' loop history.
+/// # Errors
+/// Returns a validation error when a post's mode or the built issue is
+/// invalid.
+pub fn render(issue: &DigestIssue) -> Result<Vec<DigestOutput>> {
+    // Per-post exclusions must not accidentally reappear in a shared digest.
+    let mut membership: std::collections::BTreeMap<(String, String), Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (index, post) in issue.posts.iter().enumerate() {
+        for recipient in &post.recipients {
+            membership
+                .entry((recipient.mode.clone(), recipient.email.clone()))
+                .or_default()
+                .push(index);
+        }
+    }
+    let mut groups: std::collections::BTreeMap<(String, Vec<usize>), Vec<String>> =
+        std::collections::BTreeMap::new();
+    for ((mode, email), indices) in membership {
+        groups.entry((mode, indices)).or_default().push(email);
+    }
+    groups
+        .into_iter()
+        .map(|((mode, indices), recipients)| {
+            let messages: Vec<&[u8]> = indices
+                .iter()
+                .map(|i| issue.posts[*i].raw.as_slice())
+                .collect();
+            let history: std::collections::BTreeSet<_> = messages
+                .iter()
+                .flat_map(|raw| listmngr_mail::facts::loop_markers(raw))
+                .collect();
+            let raw = listmngr_mail::digest::build(&listmngr_mail::digest::Digest {
+                list: issue.list.clone(),
+                display_name: issue.display_name.clone(),
+                volume: issue.volume,
+                number: issue.number,
+                mode: mode.parse()?,
+                timestamp: issue.timestamp,
+                masthead: issue.masthead.clone(),
+                header: issue.header.clone(),
+                footer: issue.footer.clone(),
+                messages,
+            })
+            .map_err(|e| Error::Validation(e.to_string()))?;
+            let mut headers = headers(&issue.list);
+            headers.push((
+                "Message-ID".into(),
+                format!("<{}@{}>", uuid::Uuid::now_v7(), issue.list.mail_host()),
+            ));
+            headers.extend(history.into_iter().map(|v| ("X-BeenThere".into(), v)));
+            let raw = listmngr_mail::cook_headers(&raw, None, &headers)
+                .map_err(|e| Error::Validation(e.to_string()))?;
+            Ok(DigestOutput {
+                raw,
+                recipients,
+                mode,
+            })
+        })
+        .collect()
+}
+fn headers(list: &ListId) -> Vec<(String, String)> {
+    listmngr_pipeline::list_headers(&listmngr_pipeline::ListHeaderInfo {
+        list_id: list.to_string(),
+        posting_address: list.posting_address(),
+        subscribe_address: list.join_address(),
+        unsubscribe_address: list.leave_address(),
+        archive_url: None,
+    })
 }

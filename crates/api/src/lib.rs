@@ -6,6 +6,7 @@ mod archive;
 mod bans;
 mod bounce_config;
 mod bounces;
+mod digest;
 mod header_matches;
 mod requests;
 
@@ -527,6 +528,8 @@ impl utoipa::Modify for SecurityAddon {
         bans::site_get,
         bans::site_create,
         bans::site_delete,
+        digest::get,
+        digest::post,
         header_matches::list,
         header_matches::create,
         header_matches::find,
@@ -632,6 +635,7 @@ impl utoipa::Modify for SecurityAddon {
     components(schemas(
         ErrorResponse, StringPageResponse, CatalogPageResponse, CatalogEntry, PageQuery,
         RequestPageResponse, requests::RequestResponse, requests::DecisionInput,
+        digest::DigestResponse, digest::DigestActionInput, digest::DigestActionResponse,
         HeaderMatchPageResponse, header_matches::HeaderMatchResponse, header_matches::HeaderMatchInput, header_matches::HeaderMatchFindInput, header_matches::HeaderMatchPatchInput,
         DomainPageResponse, MailingListPageResponse,
         UserPageResponse, ArchiverPageResponse, TemplatePageResponse, MemberPageResponse,
@@ -987,6 +991,7 @@ fn phase_one_routes() -> Router<AppState> {
         )
         .merge(requests::routes())
         .merge(header_matches::routes())
+        .merge(digest::routes())
         .route("/lists/{id}/held", get(list_held))
         .route("/lists/{id}/held/count", get(list_held_count))
         .route(
