@@ -153,6 +153,33 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P3-BOUNCE-PROBES — bounded acceptance verified
+
+The threshold branch of `smtp_bounces::score` now forks on
+`Database::bounce_probe_lifetime_ms()`, which `serve` sets from
+`[mailman] bounce_probes` / `bounce_probe_lifetime_secs` (and the
+`[mta] verp_format` the probe's sender follows); a `Database` built without
+it keeps the immediate disable, so the existing contracts stand. `send_probe`
+draws 20 bytes of OS randomness, keeps their hex as the token (case cannot
+survive an MTA and the intake's canonicalization, so base64url cannot be
+used), stores its SHA-256 in `bounce_probes` (migration `0039`, cascading
+from the member) with the lifetime, resets the score, and queues Mailman's
+`list:user:notice:probe` through `enqueue_probe` — a notice that, uniquely,
+carries an envelope sender: `workflow_notices.mail_from`, which
+`prepare_delivery_full` now reads through `WorkflowRepo::notice_sender`, so
+the probe leaves the out runner as `MAIL FROM:<list-bounces+probe=TOKEN@host>`.
+The sender is built by `verp::encode` with `PROBE_LOCAL` as the local part
+and the token in the domain's place, so every existing MTA route admits it.
+
+At intake, `submission_context` recognizes the decoded `probe@TOKEN` shape
+(40 hex characters) and stores `probe_token` instead of `verp_recipient`;
+`bounce_processing` then goes to `disable_after_probe`, which deletes the
+row by hash and list, refuses an expired one, spends every other probe for
+the member, and disables through the shared `disable_member` (score to zero,
+warning cycle reset, owner notice, `bounce.disable`). The `bounce_probes`
+table is the only new state; the disable path is the one the SMTP-time
+failure always used, now a function.
+
 ## P3-BOUNCE-DETECTORS — bounded acceptance verified
 
 `listmngr_mail::bounce::detect` is the heuristic layer under the bounce

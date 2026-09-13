@@ -64,7 +64,7 @@ async fn single_recipient_config_reaches_real_smtp_envelopes() {
     }
 }
 
-async fn capture_envelope(
+pub async fn capture_envelope(
     sink: &tokio::net::TcpListener,
     sender: &str,
     recipients: &[String],

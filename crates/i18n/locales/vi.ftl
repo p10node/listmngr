@@ -2,6 +2,7 @@
 notice-welcome-subject = Chào mừng bạn đến với hộp thư chung "{ $display_name }"
 notice-goodbye-subject = Bạn đã rời khỏi hộp thư chung { $display_name }
 notice-autoresponse-subject = Trả lời tự động cho thư bạn gửi tới hộp thư chung "{ $display_name }"
+notice-probe-subject = Thư dò thư dội từ hộp thư chung { $listname }
 notice-echo-subject = Lệnh echo của hộp thư chung
 notice-help-subject = Hướng dẫn lệnh email của hộp thư chung
 notice-receipt-subject = Yêu cầu { $action ->

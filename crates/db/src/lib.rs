@@ -91,6 +91,12 @@ pub struct Database {
     /// `site.base_url`: the public web origin the mail layer may point at
     /// (`List-Archive`, `Archived-At`). Empty when unknown.
     base_url: String,
+    /// `[mailman] bounce_probes`: probe at the threshold instead of
+    /// disabling at once, and how long the probe's bounce counts. Off by
+    /// default here; `serve` applies the configuration.
+    bounce_probes: Option<i64>,
+    /// `[mta] verp_format` / `verp_delimiter`, for the probe's own sender.
+    verp_format: String,
 }
 
 impl Database {
@@ -126,7 +132,32 @@ impl Database {
             password_min_score: security.password_min_score,
             default_language: "en".into(),
             base_url: String::new(),
+            bounce_probes: None,
+            verp_format: listmngr_core::verp::DEFAULT_FORMAT.into(),
         })
+    }
+    /// Carry `[mailman] bounce_probes` / `bounce_probe_lifetime_secs` and the
+    /// `[mta] verp_format` the probe sender must follow.
+    #[must_use]
+    pub fn with_bounce_probes(
+        mut self,
+        enabled: bool,
+        lifetime_secs: u32,
+        verp_format: &str,
+    ) -> Self {
+        self.bounce_probes = enabled.then_some(i64::from(lifetime_secs).saturating_mul(1000));
+        verp_format.clone_into(&mut self.verp_format);
+        self
+    }
+    /// The probe lifetime in milliseconds when probes are on.
+    #[must_use]
+    pub const fn bounce_probe_lifetime_ms(&self) -> Option<i64> {
+        self.bounce_probes
+    }
+    /// The VERP format probes are addressed with.
+    #[must_use]
+    pub fn verp_format(&self) -> &str {
+        &self.verp_format
     }
     /// Carry `site.default_language` so notices and preference resolution
     /// fall back to the operator's choice rather than English.

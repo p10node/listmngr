@@ -383,6 +383,8 @@ default_nonmember_action = "hold"
 noreply_address = "noreply"
 site_owner_notify = true
 filtered_messages_are_preservable = false # filter_action = preserve keeps a copy in the shunt store
+bounce_probes = true                     # probe at the bounce threshold; false disables at once
+bounce_probe_lifetime_secs = 604800
 
 [archive]
 enabled = true
@@ -842,7 +844,7 @@ Mục tiêu: parity Core hoàn chỉnh (trừ NNTP/DMARC wrap).
 - [x] Subscription/unsubscription workflow state machine + pendings + tokens + policies + invitations + moderation requests + REST `requests`
 - [ ] Email command runner: `confirm`, `join/subscribe`, `leave/unsubscribe`, `help`, `echo`, `end/stop` (done); `-request/-join/-leave/-confirm` routing (done); autoresponder + grace period (done); administrivia (done)
 - [ ] Welcome/goodbye/invite/hold/refuse/rejected/warning/probe notices; template scopes + language fallback; REST templates/uris; ban REST
-- [ ] Bounce runner: VERP decode (done), DSN + ENVID (done), events/scoring/stale/disable/owner notices (done), forward unrecognized (done); detectors port + fixture corpus (done, synthetic corpus); warnings, removal, probes
+- [ ] Bounce runner: VERP decode (done), DSN + ENVID (done), events/scoring/stale/disable/owner notices (done), forward unrecognized (done); detectors port + fixture corpus (done, synthetic corpus); warnings + removal (done, maintenance sweep); probes (done)
 - [ ] Digest runner: mbox append, thresholds/periodic, MIME + RFC1153 builders, volume/number, masthead/header/footer, CLI `digests`
 - [ ] `task` runner: expire pendings/workflows, cleanup orphan messages (refcount), stale bounce reset
 - [ ] `notify` (pending reminders), `admin_notify_mchanges`, `admin_immed_notify`

@@ -65,7 +65,14 @@ fn submission_context(
         "message_id_hash": hash,
     });
     if let Some(recipient) = verp_recipient {
-        context["verp_recipient"] = json!(recipient);
+        // A probe's one-time address encodes its token where a recipient's
+        // domain would be; that is the bounce runner's cue, not a mailbox.
+        match recipient.strip_prefix(concat!("probe", "@")) {
+            Some(token) if token.len() == 40 && token.bytes().all(|b| b.is_ascii_hexdigit()) => {
+                context["probe_token"] = json!(token);
+            }
+            _ => context["verp_recipient"] = json!(recipient),
+        }
     }
     context
 }

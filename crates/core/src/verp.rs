@@ -7,6 +7,13 @@
 
 use crate::{Error, ListId, Result};
 
+/// Mailman's default `verp_format`.
+pub const DEFAULT_FORMAT: &str = "{bounces}+{local}={domain}";
+/// The pseudo local part a bounce probe is addressed with: the probe token
+/// takes the domain's place, so `list-bounces+probe=TOKEN@host` matches
+/// the same MTA routes as any VERP bounce.
+pub const PROBE_LOCAL: &str = "probe";
+
 /// The placeholders `verp_format` must contain.
 const BOUNCES: &str = "{bounces}";
 const LOCAL: &str = "{local}";

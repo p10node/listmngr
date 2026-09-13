@@ -644,7 +644,22 @@ three ways, most trustworthy first:
 
 Each named member of a list with `process_bounces` is scored with exactly the
 rules an SMTP-time failure uses (one point per day, threshold, disable, the
-owner notices), and the report's job finishes in the same transaction. A
+owner notices), and the report's job finishes in the same transaction.
+
+At the threshold the list does what Mailman does: it sends the member a
+**probe** from a one-time bounce address
+(`list-bounces+probe=TOKEN@host`, routed by the same MTA maps as any VERP
+bounce), resets the score, and disables delivery only when that probe
+bounces — a bounce that names the token, verified against its stored hash,
+inside `mailman.bounce_probe_lifetime_secs` (7 days). Everything else about
+the probe token is inert: unknown, spent, expired, or for another list. Set
+`mailman.bounce_probes = false` to disable at the threshold at once instead.
+
+```toml
+[mailman]
+bounce_probes = true               # Mailman's behaviour; false disables at the threshold
+bounce_probe_lifetime_secs = 604800
+``` A
 report that names nobody goes where `forward_unrecognized_bounces_to` says —
 the list's owners and moderators, the site owner, or nowhere — as a sanitized
 owner delivery with a null reverse path. Delays (`Action: delayed`) count as

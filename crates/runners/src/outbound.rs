@@ -21,6 +21,9 @@ mod metrics_tests;
 #[path = "owner_tests.rs"]
 mod owner_tests;
 #[cfg(test)]
+#[path = "probe_tests.rs"]
+mod probe_tests;
+#[cfg(test)]
 #[path = "signing_failure_tests.rs"]
 mod signing_failure_tests;
 #[cfg(test)]
@@ -434,7 +437,15 @@ async fn prepare_delivery_full(
             .await
             .map_err(|_| PrepareError::Dependency)?
         {
-            return Ok(unpersonalized(raw.to_vec(), String::new()));
+            // Notices go out with a null reverse path, except a bounce
+            // probe, whose one-time sender is how its bounce is recognized.
+            let sender = db
+                .workflows()
+                .notice_sender(lease.job.id)
+                .await
+                .map_err(|_| PrepareError::Dependency)?
+                .unwrap_or_default();
+            return Ok(unpersonalized(raw.to_vec(), sender));
         }
         if db
             .digests()

@@ -210,6 +210,20 @@ impl<'a> WorkflowRepo<'a> {
         }
         tx.commit().await.map_err(db_error)
     }
+    /// The envelope sender a notice was given (a probe's one-time bounce
+    /// address); `None` for every other notice, which goes out with a null
+    /// reverse path.
+    /// # Errors
+    /// Returns database errors.
+    pub async fn notice_sender(&self, job: crate::mail_queue::JobId) -> Result<Option<String>> {
+        let sender: Option<Option<String>> = sqlx::query_scalar("SELECT n.mail_from FROM workflow_notices n JOIN queue_jobs q ON q.id=n.job_id WHERE n.job_id=$1 AND q.queue='out'")
+            .bind(job.0.to_string())
+            .fetch_optional(self.db.pool())
+            .await
+            .map_err(db_error)?;
+        Ok(sender.flatten())
+    }
+
     /// Authenticate notice provenance independently of untrusted spool context.
     /// # Errors
     /// Returns database errors.
@@ -986,6 +1000,49 @@ pub(crate) async fn enqueue_removal_notice(
     enqueue_bounce_notice(tx, db, list, member, now_ms, BounceNotice::Removal).await
 }
 
+/// Mailman's probe: a notice to the member from a one-time VERP address,
+/// so that its bounce — and only that — disables delivery.
+pub(crate) async fn enqueue_probe(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    list: &ListId,
+    member: &str,
+    sender: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let snapshot = crate::notices::list_snapshot(tx, list).await?;
+    let language =
+        crate::notices::recipient_language(tx, &snapshot, member, db.default_language()).await?;
+    let subject = listmngr_i18n::message(
+        &language,
+        "notice-probe-subject",
+        &[("listname", &list.posting_address())],
+    );
+    let values =
+        crate::notices::list_placeholders(&snapshot).set("sender_email", member.to_owned());
+    let body =
+        crate::notices::render(tx, &snapshot, "list:user:notice:probe", &language, &values).await?;
+    let id = Uuid::now_v7().to_string();
+    let date = chrono::DateTime::from_timestamp_millis(now_ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc2822();
+    let host = list.mail_host().to_owned();
+    let raw = crate::notices::serialize(
+        &crate::notices::Envelope {
+            from: sender,
+            to: member,
+            reply_to: None,
+            subject: &subject,
+            message_id_local: &id,
+            mail_host: &host,
+            date: &date,
+            auto_submitted: "auto-generated",
+        },
+        &body,
+    )?;
+    enqueue_notice_from(tx, list, member, &id, raw, now_ms, Some(sender)).await
+}
+
 enum BounceNotice {
     Disable,
     Increment(f64),
@@ -1387,6 +1444,20 @@ pub(crate) async fn enqueue_notice(
     raw: Vec<u8>,
     now_ms: i64,
 ) -> Result<()> {
+    enqueue_notice_from(tx, list, email, id, raw, now_ms, None).await
+}
+
+/// [`enqueue_notice`] with an explicit envelope sender (a probe's one-time
+/// bounce address); `None` keeps the null reverse path notices use.
+pub(crate) async fn enqueue_notice_from(
+    tx: &mut Transaction<'_, Any>,
+    list: &ListId,
+    email: &str,
+    id: &str,
+    raw: Vec<u8>,
+    now_ms: i64,
+    mail_from: Option<&str>,
+) -> Result<()> {
     let key = format!("{:x}", Sha256::digest(&raw));
     let message_id = MessageId(Uuid::now_v7());
     sqlx::query("INSERT INTO message_blobs(store_key,raw) VALUES($1,$2)")
@@ -1419,8 +1490,9 @@ pub(crate) async fn enqueue_notice(
         now_ms,
     )
     .await?;
-    sqlx::query("INSERT INTO workflow_notices(job_id) VALUES($1)")
+    sqlx::query("INSERT INTO workflow_notices(job_id,mail_from) VALUES($1,$2)")
         .bind(job.id.0.to_string())
+        .bind(mail_from)
         .execute(&mut **tx)
         .await
         .map_err(db_error)?;
