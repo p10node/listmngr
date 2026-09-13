@@ -3,6 +3,7 @@
 //! Portable PostgreSQL/SQLite repositories for the Phase 1 model.
 
 pub mod archive;
+pub mod autoresponse;
 pub mod bans;
 pub mod bounce_maintenance;
 pub mod bounces;
@@ -1278,6 +1279,38 @@ impl ListRepo<'_> {
             "forward_unrecognized_bounces_to" => {
                 list.forward_unrecognized_bounces_to = parse_enum(key, value)?;
             }
+            "autorespond_owner" => {
+                list.automatic_responses.autorespond_owner = parse_enum(key, value)?;
+            }
+            "autorespond_postings" => {
+                list.automatic_responses.autorespond_postings = parse_enum(key, value)?;
+            }
+            "autorespond_requests" => {
+                list.automatic_responses.autorespond_requests = parse_enum(key, value)?;
+            }
+            "autoresponse_owner_text"
+            | "autoresponse_postings_text"
+            | "autoresponse_request_text" => {
+                let text = value
+                    .as_str()
+                    .filter(|text| text.len() <= SETTING_TEXT_BYTES)
+                    .ok_or_else(invalid)?;
+                let responses = &mut list.automatic_responses;
+                match key {
+                    "autoresponse_owner_text" => responses.autoresponse_owner_text = text.into(),
+                    "autoresponse_postings_text" => {
+                        responses.autoresponse_postings_text = text.into();
+                    }
+                    _ => responses.autoresponse_request_text = text.into(),
+                }
+            }
+            "autoresponse_grace_period" => {
+                list.automatic_responses.autoresponse_grace_period = value
+                    .as_i64()
+                    .filter(|days| (0..=3650).contains(days))
+                    .and_then(|days| i32::try_from(days).ok())
+                    .ok_or_else(invalid)?;
+            }
             "dmarc_addresses" => list.dmarc.dmarc_addresses = parse_address_list(key, value)?,
             "topics_bodylines_limit" => {
                 list.topics_bodylines_limit = value
@@ -1443,6 +1476,13 @@ impl ListRepo<'_> {
             | "dmarc_moderation_notice"
             | "dmarc_wrapped_message_text"
             | "topics_bodylines_limit"
+            | "autorespond_owner"
+            | "autorespond_postings"
+            | "autorespond_requests"
+            | "autoresponse_owner_text"
+            | "autoresponse_postings_text"
+            | "autoresponse_request_text"
+            | "autoresponse_grace_period"
             | "topics" => Self::patch_alter_messages(list, key, value)?,
             "preferred_language" => {
                 let language = value
@@ -1506,6 +1546,19 @@ impl ListRepo<'_> {
             .bind(&list.dmarc.dmarc_moderation_notice)
             .bind(&list.dmarc.dmarc_wrapped_message_text)
             .bind(list.forward_unrecognized_bounces_to.as_str())
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        let responses = &list.automatic_responses;
+        sqlx::query("UPDATE mailing_lists SET autorespond_owner=$1,autoresponse_owner_text=$2,autorespond_postings=$3,autoresponse_postings_text=$4,autorespond_requests=$5,autoresponse_request_text=$6,autoresponse_grace_period=$7 WHERE list_id=$8")
+            .bind(responses.autorespond_owner.as_str())
+            .bind(&responses.autoresponse_owner_text)
+            .bind(responses.autorespond_postings.as_str())
+            .bind(&responses.autoresponse_postings_text)
+            .bind(responses.autorespond_requests.as_str())
+            .bind(&responses.autoresponse_request_text)
+            .bind(i64::from(responses.autoresponse_grace_period))
             .bind(list.id.as_str())
             .execute(&mut **tx)
             .await
@@ -1907,6 +1960,26 @@ fn row_u32(row: &sqlx::any::AnyRow, key: &str) -> Result<u32> {
     u32::try_from(row.try_get::<i64, _>(key).map_err(db_error)?).map_err(db_error)
 }
 
+fn automatic_responses_from_row(
+    row: &sqlx::any::AnyRow,
+) -> Result<listmngr_core::AutomaticResponses> {
+    Ok(listmngr_core::AutomaticResponses {
+        autorespond_owner: enum_column(row, "autorespond_owner")?,
+        autoresponse_owner_text: row.try_get("autoresponse_owner_text").map_err(db_error)?,
+        autorespond_postings: enum_column(row, "autorespond_postings")?,
+        autoresponse_postings_text: row
+            .try_get("autoresponse_postings_text")
+            .map_err(db_error)?,
+        autorespond_requests: enum_column(row, "autorespond_requests")?,
+        autoresponse_request_text: row.try_get("autoresponse_request_text").map_err(db_error)?,
+        autoresponse_grace_period: i32::try_from(
+            row.try_get::<i64, _>("autoresponse_grace_period")
+                .map_err(db_error)?,
+        )
+        .unwrap_or(90),
+    })
+}
+
 fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
     let bounce_flags = bounce_flags_from_row(row)?;
     Ok(MailingList {
@@ -1991,6 +2064,7 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
         posting_pipeline: row.try_get("posting_pipeline").map_err(db_error)?,
         respond_to_post_requests: flag_column(row, "respond_to_post_requests")?,
         admin_immed_notify: flag_column(row, "admin_immed_notify")?,
+        automatic_responses: automatic_responses_from_row(row)?,
         alter_messages: alter_messages_from_row(row)?,
         member_policy: listmngr_core::MemberPolicy {
             subscription_policy: enum_column(row, "subscription_policy")?,

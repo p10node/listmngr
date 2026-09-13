@@ -153,6 +153,26 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P3-AUTORESPONDER — bounded acceptance verified
+
+`AutomaticResponses` is a flattened settings struct on `MailingList`, stored
+by migration `0037` next to its `autoresponse_records` table (one row per
+list, writer and kind, pruned as the grace period is checked, so it never
+accumulates). `AutoresponseRepo::respond` reads the action and text for the
+kind, refuses to answer a null, malformed or list-owned writer, applies the
+grace period, and — in one transaction — records the reply, composes it in
+the writer's language (the owner's text through the placeholder expander,
+or the built-in `list:user:notice:autoresponse` template), queues it with
+`Auto-Submitted: auto-replied` and audits `list.autoresponse`. It always
+returns the configured action, so `respond_and_discard` discards even when
+the grace period kept the reply back, which is Mailman's behaviour.
+
+The `in` runner calls it first, before owner forwarding, the command bot or
+the posting chain, deriving the kind from the stored context; a discard goes
+through `ModerationRepo::refuse` under the handler name `replybot`, so it is
+audited like every other discard. `Envelope` gained an `auto_submitted`
+field for this, validated to RFC 3834's two values.
+
 ## P3-EMAIL-COMMANDS — bounded acceptance verified
 
 `EmailCommand` gains `Echo(String)` and `End`. The parser reads `echo`'s

@@ -102,6 +102,9 @@ pub struct Envelope<'a> {
     pub message_id_local: &'a str,
     pub mail_host: &'a str,
     pub date: &'a str,
+    /// RFC 3834 `Auto-Submitted` value: `auto-generated` for a notice the
+    /// server originates, `auto-replied` for an answer to a message.
+    pub auto_submitted: &'a str,
 }
 
 fn safe_mailbox(value: &str) -> Result<()> {
@@ -169,7 +172,7 @@ fn transport_headers(envelope: &Envelope<'_>, subject: &str, body_len: usize) ->
         envelope.message_id_local, envelope.mail_host
     );
     let _ = write!(raw, "Date: {}\r\n", envelope.date);
-    raw.push_str("Auto-Submitted: auto-generated\r\n");
+    let _ = write!(raw, "Auto-Submitted: {}\r\n", envelope.auto_submitted);
     raw.push_str("MIME-Version: 1.0\r\n");
     raw
 }
@@ -177,6 +180,9 @@ fn transport_headers(envelope: &Envelope<'_>, subject: &str, body_len: usize) ->
 fn validate_envelope(envelope: &Envelope<'_>) -> Result<()> {
     safe_mailbox(envelope.from)?;
     safe_mailbox(envelope.to)?;
+    if !matches!(envelope.auto_submitted, "auto-generated" | "auto-replied") {
+        return Err(Error::Validation("unsupported Auto-Submitted value".into()));
+    }
     if let Some(reply_to) = envelope.reply_to {
         safe_mailbox(reply_to)?;
     }
@@ -285,6 +291,7 @@ mod tests {
             message_id_local: "abc",
             mail_host: "example.invalid",
             date: "Mon, 1 Sep 2026 10:00:00 +0000",
+            auto_submitted: "auto-generated",
         }
     }
 

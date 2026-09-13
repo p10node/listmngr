@@ -255,6 +255,8 @@ pub struct ListConfigResponse {
     pub alter_messages: listmngr_core::AlterMessages,
     #[serde(flatten)]
     pub member_policy: listmngr_core::MemberPolicy,
+    #[serde(flatten)]
+    pub automatic_responses: listmngr_core::AutomaticResponses,
     /// Where bounces that match no member are forwarded.
     #[schema(default = "administrators")]
     pub forward_unrecognized_bounces_to: listmngr_core::UnrecognizedBounceDisposition,
@@ -382,6 +384,19 @@ pub struct ListConfigInput {
     pub dmarc_wrapped_message_text: Option<String>,
     #[schema(default = "administrators")]
     pub forward_unrecognized_bounces_to: Option<listmngr_core::UnrecognizedBounceDisposition>,
+    #[schema(default = "none")]
+    pub autorespond_owner: Option<listmngr_core::ResponseAction>,
+    /// Reply body for mail to the owner address; empty uses the built-in text.
+    pub autoresponse_owner_text: Option<String>,
+    #[schema(default = "none")]
+    pub autorespond_postings: Option<listmngr_core::ResponseAction>,
+    pub autoresponse_postings_text: Option<String>,
+    #[schema(default = "none")]
+    pub autorespond_requests: Option<listmngr_core::ResponseAction>,
+    pub autoresponse_request_text: Option<String>,
+    /// Days before the same writer is answered again; 0 answers every message.
+    #[schema(default = 90, minimum = 0, maximum = 3650)]
+    pub autoresponse_grace_period: Option<i32>,
     pub topics_enabled: Option<bool>,
     #[schema(default = 5, minimum = -1, maximum = 10_000)]
     pub topics_bodylines_limit: Option<i32>,
@@ -2043,6 +2058,7 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
         "bounce_you_are_disabled_warnings_interval",
         "next_digest_number",
         "topics_bodylines_limit",
+        "autoresponse_grace_period",
     ] {
         if let Some(Value::String(text)) = value.get(field) {
             let number = text

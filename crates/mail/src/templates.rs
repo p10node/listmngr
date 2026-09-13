@@ -34,6 +34,7 @@ pub const NAMES: &[&str] = &[
     "list:member:regular:footer",
     "list:member:regular:header",
     "list:user:action:invite",
+    "list:user:notice:autoresponse",
     "list:user:action:subscribe",
     "list:user:action:unsubscribe",
     "list:user:notice:echo",
@@ -211,6 +212,13 @@ pub fn builtin(name: &str) -> Option<&'static str> {
              \n\
              If you have any questions, you may contact\n\
              \n    $owner_email\n"
+        }
+        "list:user:notice:autoresponse" => {
+            "This is an automatic reply from the $listname mailing list at $domain.\n\
+             Your message has been received. Nobody has read it yet; it will be dealt\n\
+             with in due course. If it needs a person now, write to $owner_email.\n\
+             \n\
+             You will not be answered again by this address for a while.\n"
         }
         "list:user:notice:echo" => {
             "This is the $listname command bot at $domain answering your `echo`\n\

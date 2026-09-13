@@ -1257,6 +1257,7 @@ pub(crate) async fn enqueue_post_acknowledgement(
             message_id_local: &id,
             mail_host: &host,
             date: &date,
+            auto_submitted: "auto-generated",
         },
         &body,
     )?;
@@ -1309,6 +1310,7 @@ pub(crate) async fn enqueue_content_filter_forward(
                 message_id_local: &id,
                 mail_host: &host,
                 date: &date,
+                auto_submitted: "auto-generated",
             },
             &body,
             &original,
@@ -1368,6 +1370,7 @@ async fn enqueue_templated_notice(
             message_id_local: &id,
             mail_host: &host,
             date: &date,
+            auto_submitted: "auto-generated",
         },
         &body,
     )?;
@@ -1376,7 +1379,7 @@ async fn enqueue_templated_notice(
 
 // Private raw producer for generated subscription/moderation MIME only.
 // The historical workflow_notices table is deliberately just job_id provenance.
-async fn enqueue_notice(
+pub(crate) async fn enqueue_notice(
     tx: &mut Transaction<'_, Any>,
     list: &ListId,
     email: &str,
