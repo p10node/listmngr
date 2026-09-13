@@ -135,6 +135,14 @@ pub fn builtin(name: &str) -> Option<&'static str> {
              Nếu có thắc mắc, bạn có thể liên hệ\n\
              \n    $owner_email\n"
         }
+        "list:user:notice:autoresponse" => {
+            "Đây là thư trả lời tự động từ hộp thư chung $listname tại $domain.\n\
+             Thư của bạn đã được nhận. Chưa ai đọc nó; thư sẽ được xử lý sau. Nếu cần\n\
+             người trả lời ngay, hãy viết tới $owner_email.\n\
+             \n\
+             Địa chỉ này sẽ không trả lời tự động cho bạn thêm lần nữa trong một\n\
+             thời gian.\n"
+        }
         "list:user:notice:echo" => {
             "Đây là bot lệnh của $listname tại $domain trả lời lệnh `echo` của bạn\n\
              cùng đoạn văn bản mà nó mang theo:\n\

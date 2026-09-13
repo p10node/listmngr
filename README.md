@@ -624,6 +624,27 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Automatic responses — bounded acceptance verified
+
+Mailman's Automatic Responses are list settings now: `autorespond_owner`,
+`autorespond_postings` and `autorespond_requests` (each `none`, `respond` or
+`respond_and_discard`), the matching `autoresponse_*_text` (the reply body,
+with the usual `$listname`-style placeholders; empty means the built-in
+text) and `autoresponse_grace_period` (days; `0` answers every message).
+
+```sh
+listmngr … # or PATCH /3.1/lists/dev.example.com/config
+autorespond_owner=respond_and_discard&autoresponse_owner_text=Owners%20read%20mail%20weekly.&autoresponse_grace_period=30
+```
+
+A writer is answered at most once per address, kind and grace period; the
+reply is `Auto-Submitted: auto-replied`, and automatic or null-sender mail
+is never answered, so two responders cannot loop. `respond_and_discard`
+swallows the original — the owner mail is not forwarded, the command is not
+run, the post is not delivered — whether or not a reply went out this time,
+and is audited as a discard. See `P3-AUTORESPONDER` in
+`docs/FEATURE_PARITY.md`.
+
 ## Email commands: echo, end and stop — bounded acceptance verified
 
 The command bot at `list-request@` understands two more of Mailman's verbs:

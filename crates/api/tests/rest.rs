@@ -1,5 +1,7 @@
 #[path = "rest/alter_messages.rs"]
 mod alter_messages;
+#[path = "rest/autoresponder.rs"]
+mod autoresponder;
 #[path = "rest/bans.rs"]
 mod bans;
 #[path = "rest/bounce_increment.rs"]

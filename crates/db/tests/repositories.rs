@@ -144,6 +144,7 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/site-secrets-schema.snapshot").lines())
             .chain(include_str!("fixtures/subscription-state-schema.snapshot").lines())
             .chain(include_str!("fixtures/subscription-invitation-schema.snapshot").lines())
+            .chain(include_str!("fixtures/autoresponder-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )

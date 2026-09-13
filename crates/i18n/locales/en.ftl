@@ -1,6 +1,7 @@
 # Notice subjects. Bodies live in the template catalog (listmngr-mail).
 notice-welcome-subject = Welcome to the "{ $display_name }" mailing list
 notice-goodbye-subject = You have been unsubscribed from the { $display_name } mailing list
+notice-autoresponse-subject = Auto-response for your message to the "{ $display_name }" mailing list
 notice-echo-subject = List command echo
 notice-help-subject = List email command help
 notice-receipt-subject = List { $action } request completed

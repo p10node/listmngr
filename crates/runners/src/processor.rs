@@ -6,8 +6,9 @@
 //! `listmngr_db::mail_queue`/`moderation` primitives.
 use crate::MailRoleConfig;
 use crate::policy_facts::gather_context;
-use listmngr_core::{Config, ListId};
+use listmngr_core::{Config, ListId, ResponseAction};
 use listmngr_db::Database;
+use listmngr_db::autoresponse::ResponseKind;
 use listmngr_db::mail_queue::{AcceptEffects, AcknowledgeRequest, ChildJob, Lease, Queue};
 use listmngr_db::moderation::{PostRefusal, Refusal};
 use listmngr_pipeline::handlers::{Effect, FanOut};
@@ -196,6 +197,52 @@ async fn forward_to_owners(
     result
 }
 
+/// The list's automatic response for `kind`, sent to the writer when the
+/// message allows a reply at all: an automatic or null-sender message is
+/// never answered, which is also what keeps two responders from looping.
+async fn autorespond(
+    db: &Database,
+    list_id: &ListId,
+    kind: ResponseKind,
+    envelope_sender: Option<&str>,
+    raw: &[u8],
+) -> Result<ResponseAction, listmngr_core::Error> {
+    let Some(sender) = envelope_sender.filter(|sender| !sender.is_empty()) else {
+        return Ok(ResponseAction::None);
+    };
+    if !listmngr_mail::commands::allows_reply(raw) {
+        return Ok(ResponseAction::None);
+    }
+    db.autoresponse()
+        .respond(list_id, kind, sender, chrono::Utc::now().timestamp_millis())
+        .await
+}
+
+/// `respond_and_discard`: the original ends here, audited like any other
+/// discard.
+async fn discard_after_response(
+    db: &Database,
+    lease: &Lease,
+    list_id: &ListId,
+    envelope_sender: Option<&str>,
+) -> Result<(), listmngr_core::Error> {
+    db.moderation()
+        .live()
+        .refuse(
+            lease,
+            list_id,
+            &PostRefusal {
+                sender: envelope_sender.unwrap_or(""),
+                handler: "replybot",
+                reason: "automatic response discards the original",
+                action: Refusal::Discard,
+                preservable: false,
+            },
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await
+}
+
 /// `validate-authenticity`: SPF/DKIM/DMARC against DNS, before the chain
 /// so `dmarc-mitigation` sees the From domain's policy.
 async fn authenticity_verdict(
@@ -212,47 +259,23 @@ async fn authenticity_verdict(
     }
 }
 
-async fn process_one(
+/// Run the posting chain on an ordinary post and apply its disposition
+/// durably; returns the `listmngr_posts_total` label.
+async fn admit_post(
     db: &Database,
     config: &Config,
     role: &MailRoleConfig,
     lease: &Lease,
-) -> Result<(), listmngr_core::Error> {
-    let message = db.mail_queue().live().message(lease.job.message_id).await?;
-    let context = parsed_context(&message.context);
-    let metrics = listmngr_core::metrics::global();
-    if context["owner_route"] == true {
-        forward_to_owners(db, role, lease).await?;
-        metrics.posts.inc("owner");
-        return Ok(());
-    }
-    if context.get("subscription_command").is_some() {
-        db.workflows()
-            .live()
-            .request_from_lease(lease, chrono::Utc::now().timestamp_millis())
-            .await?;
-        metrics.posts.inc("command");
-        return Ok(());
-    }
-    let list_id: ListId = context["list_id"]
-        .as_str()
-        .ok_or_else(|| listmngr_core::Error::Validation("submission missing list_id".into()))?
-        .parse()?;
-    let envelope_sender = context["envelope_sender"].as_str().map(str::to_owned);
-    let subject = listmngr_mail::header_value(&message.raw, "subject").unwrap_or_default();
-
-    let mut ctx = gather_context(
-        db,
-        config,
-        &list_id,
-        envelope_sender.as_deref(),
-        &message.raw,
-    )
-    .await?;
-    let verdict = authenticity_verdict(role, &message.raw, envelope_sender.as_deref()).await;
+    list_id: &ListId,
+    envelope_sender: Option<&str>,
+    raw: &[u8],
+) -> Result<&'static str, listmngr_core::Error> {
+    let subject = listmngr_mail::header_value(raw, "subject").unwrap_or_default();
+    let mut ctx = gather_context(db, config, list_id, envelope_sender, raw).await?;
+    let verdict = authenticity_verdict(role, raw, envelope_sender).await;
     ctx.sender.dmarc_policy_restrictive = verdict.dmarc_policy_restrictive;
     let outcome = decide_posting_traced(&ctx);
-    let disposition = match outcome.disposition {
+    Ok(match outcome.disposition {
         Disposition::Accept => {
             accept_post(
                 db,
@@ -260,10 +283,10 @@ async fn process_one(
                 role,
                 lease,
                 &Submission {
-                    list_id: &list_id,
-                    envelope_sender: envelope_sender.as_deref(),
+                    list_id,
+                    envelope_sender,
                     subject: &subject,
-                    raw: &message.raw,
+                    raw,
                     dmarc_mitigate: outcome
                         .tags
                         .iter()
@@ -278,8 +301,8 @@ async fn process_one(
                 .live()
                 .hold(
                     lease,
-                    &list_id,
-                    envelope_sender.as_deref().unwrap_or(""),
+                    list_id,
+                    envelope_sender.unwrap_or(""),
                     &subject,
                     &reason,
                     chrono::Utc::now().timestamp_millis(),
@@ -293,8 +316,8 @@ async fn process_one(
             refuse_by_chain(
                 db,
                 lease,
-                &list_id,
-                envelope_sender.as_deref(),
+                list_id,
+                envelope_sender,
                 &reason,
                 Refusal::Reject,
             )
@@ -305,15 +328,70 @@ async fn process_one(
             refuse_by_chain(
                 db,
                 lease,
-                &list_id,
-                envelope_sender.as_deref(),
+                list_id,
+                envelope_sender,
                 &reason,
                 Refusal::Discard,
             )
             .await?;
             "discarded"
         }
+    })
+}
+
+async fn process_one(
+    db: &Database,
+    config: &Config,
+    role: &MailRoleConfig,
+    lease: &Lease,
+) -> Result<(), listmngr_core::Error> {
+    let message = db.mail_queue().live().message(lease.job.message_id).await?;
+    let context = parsed_context(&message.context);
+    let metrics = listmngr_core::metrics::global();
+    let list_id: ListId = context["list_id"]
+        .as_str()
+        .ok_or_else(|| listmngr_core::Error::Validation("submission missing list_id".into()))?
+        .parse()?;
+    let envelope_sender = context["envelope_sender"].as_str().map(str::to_owned);
+    // Mailman's `replybot` answers first; `respond_and_discard` ends the
+    // message here, before it is forwarded, run or admitted.
+    let kind = if context["owner_route"] == true {
+        ResponseKind::Owner
+    } else if context.get("subscription_command").is_some() {
+        ResponseKind::Requests
+    } else {
+        ResponseKind::Postings
     };
+    if autorespond(db, &list_id, kind, envelope_sender.as_deref(), &message.raw).await?
+        == ResponseAction::RespondAndDiscard
+    {
+        discard_after_response(db, lease, &list_id, envelope_sender.as_deref()).await?;
+        metrics.posts.inc("discarded");
+        return Ok(());
+    }
+    if kind == ResponseKind::Owner {
+        forward_to_owners(db, role, lease).await?;
+        metrics.posts.inc("owner");
+        return Ok(());
+    }
+    if kind == ResponseKind::Requests {
+        db.workflows()
+            .live()
+            .request_from_lease(lease, chrono::Utc::now().timestamp_millis())
+            .await?;
+        metrics.posts.inc("command");
+        return Ok(());
+    }
+    let disposition = admit_post(
+        db,
+        config,
+        role,
+        lease,
+        &list_id,
+        envelope_sender.as_deref(),
+        &message.raw,
+    )
+    .await?;
     metrics.posts.inc(disposition);
     Ok(())
 }

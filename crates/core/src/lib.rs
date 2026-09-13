@@ -298,6 +298,8 @@ string_enum!(ArchiveRenderingMode { Text => "text", Markdown => "markdown" });
 string_enum!(FilterAction { Discard => "discard", Reject => "reject", Forward => "forward", Preserve => "preserve" });
 string_enum!(ReplyToMunging { NoMunging => "no_munging", PointToList => "point_to_list", ExplicitHeader => "explicit_header", ExplicitHeaderOnly => "explicit_header_only" });
 string_enum!(Personalization { None => "none", Individual => "individual", Full => "full" });
+// Mailman's `ResponseAction`: what the list does with mail it answers.
+string_enum!(ResponseAction { None => "none", Respond => "respond", RespondAndDiscard => "respond_and_discard" });
 string_enum!(SubscriptionPolicy { Open => "open", Confirm => "confirm", Moderate => "moderate", ConfirmThenModerate => "confirm_then_moderate" });
 string_enum!(RosterVisibility { Public => "public", Members => "members", Moderators => "moderators" });
 string_enum!(UnrecognizedBounceDisposition { Discard => "discard", SiteOwner => "site_owner", Administrators => "administrators" });
@@ -464,6 +466,43 @@ pub struct DmarcSettings {
 }
 
 /// Mailman's *Alter Messages* settings: content filtering, header munging
+/// Mailman's Automatic Responses: the list answers its own addresses, at
+/// most once per address per grace period.
+///
+/// Each `autorespond_*` says whether that address is answered and whether
+/// the original is then discarded; the matching text is the reply body, and
+/// an empty one uses the built-in template.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(default)]
+pub struct AutomaticResponses {
+    #[schema(default = "none")]
+    pub autorespond_owner: ResponseAction,
+    pub autoresponse_owner_text: String,
+    #[schema(default = "none")]
+    pub autorespond_postings: ResponseAction,
+    pub autoresponse_postings_text: String,
+    #[schema(default = "none")]
+    pub autorespond_requests: ResponseAction,
+    pub autoresponse_request_text: String,
+    /// Days before the same address is answered again; `0` answers always.
+    #[schema(default = 90)]
+    pub autoresponse_grace_period: i32,
+}
+
+impl Default for AutomaticResponses {
+    fn default() -> Self {
+        Self {
+            autorespond_owner: ResponseAction::None,
+            autoresponse_owner_text: String::new(),
+            autorespond_postings: ResponseAction::None,
+            autoresponse_postings_text: String::new(),
+            autorespond_requests: ResponseAction::None,
+            autoresponse_request_text: String::new(),
+            autoresponse_grace_period: 90,
+        }
+    }
+}
+
 /// and personalization. Serialized as flat compatibility keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(default)]
@@ -650,6 +689,8 @@ pub struct MailingList {
     #[schema(default = true)]
     pub admin_immed_notify: bool,
     #[serde(flatten)]
+    pub automatic_responses: AutomaticResponses,
+    #[serde(flatten)]
     pub alter_messages: AlterMessages,
     #[serde(flatten)]
     pub member_policy: MemberPolicy,
@@ -747,6 +788,7 @@ impl MailingList {
             discard_these_nonmembers: Vec::new(),
             posting_pipeline: default_posting_pipeline(),
             respond_to_post_requests: true,
+            automatic_responses: AutomaticResponses::default(),
             admin_immed_notify: true,
             alter_messages: AlterMessages::default(),
             member_policy: MemberPolicy::default(),
