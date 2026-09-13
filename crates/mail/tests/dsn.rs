@@ -151,6 +151,10 @@ fn optional_returned_message_is_not_scanned_for_recipient_authority() {
     }
 }
 
+fn recipient_block(recipient: &str, action: &str, status: &str) -> String {
+    format!("Final-Recipient: rfc822; {recipient}\r\nAction: {action}\r\nStatus: {status}")
+}
+
 fn body(recipient: &str, action: &str, status: &str) -> String {
     format!(
         "Reporting-MTA: dns; mx.example.invalid\r\n\r\nFinal-Recipient: rfc822; {recipient}\r\nAction: {action}\r\nStatus: {status}"
@@ -206,4 +210,33 @@ fn preserves_distinct_claims_and_accepts_rfc_failed_temporary_status() {
     let report = dsn::parse(&message(&folded)).unwrap();
     assert_eq!(report[0].final_recipient, "alice@example.invalid");
     assert_eq!(report[0].action, "failed");
+}
+
+#[test]
+fn the_original_envelope_id_is_read_when_the_reporting_mta_echoes_it() {
+    let with_envid = format!(
+        "Reporting-MTA: dns; mx.example.invalid\r\nOriginal-Envelope-Id: lm-ENVID-1234\r\n\r\n{}",
+        recipient_block("alice@example.invalid", "failed", "5.1.1")
+    );
+    let report = dsn::parse_report(&message(&with_envid)).unwrap();
+    assert_eq!(
+        report.original_envelope_id.as_deref(),
+        Some("lm-ENVID-1234")
+    );
+    assert_eq!(report.recipients.len(), 1);
+    let without =
+        dsn::parse_report(&message(&body("alice@example.invalid", "failed", "5.1.1"))).unwrap();
+    assert_eq!(without.original_envelope_id, None);
+    let oversized = format!(
+        "Reporting-MTA: dns; mx.example.invalid\r\nOriginal-Envelope-Id: {}\r\n\r\n{}",
+        "x".repeat(101),
+        recipient_block("alice@example.invalid", "failed", "5.1.1")
+    );
+    assert_eq!(
+        dsn::parse_report(&message(&oversized))
+            .unwrap()
+            .original_envelope_id,
+        None,
+        "an oversized id is dropped, not truncated"
+    );
 }

@@ -6,6 +6,7 @@ pub mod archive;
 pub mod autoresponse;
 pub mod bans;
 pub mod bounce_maintenance;
+pub mod bounce_processing;
 pub mod bounces;
 pub mod digests;
 pub mod header_matches;

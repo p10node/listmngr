@@ -19,12 +19,27 @@ pub struct RecipientReport {
     pub status: String,
 }
 
+/// A parsed delivery-status report: the per-message `Original-Envelope-Id`
+/// (the ENVID this server issued, when the reporting MTA echoed it) and the
+/// per-recipient claims.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    pub original_envelope_id: Option<String>,
+    pub recipients: Vec<RecipientReport>,
+}
+
 /// Read recipient claims from a multipart/report delivery-status message.
 ///
 /// Unsupported or malformed input returns `None`, without reflecting raw data.
 /// A parsed report is not authorization to change any member or queue state.
 #[must_use]
 pub fn parse(raw: &[u8]) -> Option<Vec<RecipientReport>> {
+    parse_report(raw).map(|report| report.recipients)
+}
+
+/// [`parse`], keeping the per-message envelope id as well.
+#[must_use]
+pub fn parse_report(raw: &[u8]) -> Option<Report> {
     if raw.len() > MAX_REPORT_BYTES {
         return None;
     }
@@ -92,37 +107,53 @@ pub fn parse(raw: &[u8]) -> Option<Vec<RecipientReport>> {
     let mut blocks = body.trim_end_matches("\r\n").split("\r\n\r\n");
     let message_fields = fields(blocks.next()?)?;
     typed_value(message_fields.get("reporting-mta")?, "dns")?;
+    // RFC 3464 §2.2.1: the ENVID as the sender gave it, bounded like the
+    // SMTP parameter it came from.
+    let original_envelope_id = message_fields
+        .get("original-envelope-id")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty() && value.len() <= 100 && value.is_ascii())
+        .map(str::to_owned);
     let mut recipients = Vec::new();
     for block in blocks {
         if recipients.len() == MAX_RECIPIENTS {
             return None;
         }
-        let fields = fields(block)?;
-        let recipient = typed_value(fields.get("final-recipient")?, "rfc822")?;
-        let action = fields.get("action")?.to_ascii_lowercase();
-        if !matches!(
-            action.as_str(),
-            "failed" | "delayed" | "delivered" | "relayed" | "expanded"
-        ) {
-            return None;
-        }
-        let status = fields.get("status")?;
-        let parts: Vec<_> = status.split('.').collect();
-        if parts.len() != 3
-            || !matches!(parts[0], "2" | "4" | "5")
-            || !parts[1..]
-                .iter()
-                .all(|p| (1..=3).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()))
-        {
-            return None;
-        }
-        recipients.push(RecipientReport {
-            final_recipient: recipient.into(),
-            action,
-            status: status.clone(),
-        });
+        recipients.push(recipient_block(block)?);
     }
-    (!recipients.is_empty()).then_some(recipients)
+    (!recipients.is_empty()).then_some(Report {
+        original_envelope_id,
+        recipients,
+    })
+}
+
+/// One per-recipient block: a typed `Final-Recipient`, a known `Action`
+/// and a three-part `Status`, or nothing.
+fn recipient_block(block: &str) -> Option<RecipientReport> {
+    let fields = fields(block)?;
+    let recipient = typed_value(fields.get("final-recipient")?, "rfc822")?;
+    let action = fields.get("action")?.to_ascii_lowercase();
+    if !matches!(
+        action.as_str(),
+        "failed" | "delayed" | "delivered" | "relayed" | "expanded"
+    ) {
+        return None;
+    }
+    let status = fields.get("status")?;
+    let parts: Vec<_> = status.split('.').collect();
+    if parts.len() != 3
+        || !matches!(parts[0], "2" | "4" | "5")
+        || !parts[1..]
+            .iter()
+            .all(|p| (1..=3).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    Some(RecipientReport {
+        final_recipient: recipient.into(),
+        action,
+        status: status.clone(),
+    })
 }
 
 // Cross-check best-effort MIME offsets against actual CRLF delimiter lines.

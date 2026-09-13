@@ -158,6 +158,9 @@ pub struct Metrics {
     pub smtp_transaction_seconds: Histogram<12>,
     /// Acceptance at LMTP to the relay accepting a recipient.
     pub delivery_latency_seconds: Histogram<12>,
+    /// Bounce reports by what the runner made of them; `scored` counts
+    /// members, the others count reports.
+    pub bounces: LabeledCounter<4>,
 }
 
 impl Default for Metrics {
@@ -217,6 +220,12 @@ impl Metrics {
                     0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 300.0, 900.0, 3600.0,
                 ],
             ),
+            bounces: LabeledCounter::new(
+                "listmngr_bounces_total",
+                "Bounce reports: recognized, unrecognized or failed; scored counts members.",
+                "result",
+                ["recognized", "unrecognized", "failed", "scored"],
+            ),
         }
     }
 
@@ -230,6 +239,7 @@ impl Metrics {
         self.smtp_transactions.render(&mut out);
         self.smtp_transaction_seconds.render(&mut out);
         self.delivery_latency_seconds.render(&mut out);
+        self.bounces.render(&mut out);
         out
     }
 }

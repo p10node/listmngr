@@ -624,6 +624,29 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Bounce processing — bounded acceptance verified
+
+The mail role now runs Mailman's bounce runner over the `bounces` queue. A
+report that reached `list-bounces@` names the member it concerns in one of
+three ways, most trustworthy first:
+
+1. a VERP bounce address (`list-bounces+local=domain@host`), decoded at
+   intake;
+2. a delivery-status report whose `Original-Envelope-Id` this server issued
+   (`mta.dsn_issuance_enabled`), verified against the stored issuance — the
+   report's own claims are then ignored;
+3. the report's `Final-Recipient` lines with `Action: failed`.
+
+Each named member of a list with `process_bounces` is scored with exactly the
+rules an SMTP-time failure uses (one point per day, threshold, disable, the
+owner notices), and the report's job finishes in the same transaction. A
+report that names nobody goes where `forward_unrecognized_bounces_to` says —
+the list's owners and moderators, the site owner, or nowhere — as a sanitized
+owner delivery with a null reverse path. Delays (`Action: delayed`) count as
+recognized but change nothing. `/metrics` gains
+`listmngr_bounces_total{result}`. See `P3-BOUNCE-RUNNER` in
+`docs/FEATURE_PARITY.md`.
+
 ## Automatic responses — bounded acceptance verified
 
 Mailman's Automatic Responses are list settings now: `autorespond_owner`,
@@ -1163,9 +1186,9 @@ Use `listmngr queue ls --queue bounces --state ready` for the pending backlog.
 The optional state accepts ready/leased/done/shunted and filters before LIMIT 1000;
 omitting it preserves the existing retained-job listing. Show/raw exports still
 work after acknowledgement. This is trusted local operator bookkeeping, not
-proof of delivery failure. The inbox has **no automatic consumer, scoring,
-disablement, forwarding or cleanup policy**; all rows/raw remain stored and disk
-usage must be monitored. This closes intake loss, not DSN/VERP authentication or full bounce
+proof of delivery failure. Since `P3-BOUNCE-RUNNER` the mail role consumes
+this inbox (see "Bounce processing" below); the operator commands remain for
+whatever the runner has not yet reached or has shunted. This closes intake loss, not DSN/VERP authentication or full bounce
 processing. Existing MTA maps require explicit regeneration/review; no live MTA
 configuration is changed. See `P3-BOUNCE-INBOX` in `docs/FEATURE_PARITY.md`.
 

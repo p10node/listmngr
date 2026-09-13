@@ -4,7 +4,7 @@ C|bounce_events|recipient|text|required|-
 C|bounce_events|job_id|text|required|-
 C|bounce_events|message_id|text|required|-
 C|bounce_events|created_at|integer|required|-
-C|bounce_events|source|text|required|-
+C|bounce_events|source|text|required|smtp_permanent_failure
 C|bounce_events|context|text|required|-
 C|bounce_events|processed|integer|required|0
 F|bounce_events|list_id|mailing_lists|list_id|cascade
