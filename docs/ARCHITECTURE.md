@@ -153,7 +153,22 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
-## P2-QUEUES-REST — bounded acceptance verified
+## P2-HELD-FORWARD — bounded acceptance verified
+
+`ModerationRepo::review_forwarding(id, context, action, reason, forward_to,
+now)` is `review` with Mailman's `forward`; `review` delegates with `None` and
+the browser review path passes `None`. Inside `review_tx` the address is
+canonicalised and validated before any write (`forward_address`: a
+`safe_mailbox` under 255 bytes that parses as an `Address`), the decision is
+applied as before, and when the address does not point at the list
+(`points_to_list`) `workflows::enqueue_moderated_forward` loads the stored
+original, renders `notice-forward-subject`/`forward-moderated-body` in the
+recipient's language, wraps the original with `notices::serialize_with_message`
+from the list's bounces address and enqueues it through the shared
+`enqueue_notice`; `moderation_log.forward_to` (migration `0042`) and the
+`moderation.<name>` audit diff record the address. The REST handler maps
+`forward`/`forward_to` (form booleans via `mailman_bool`) onto it and refuses
+`forward` without an address before touching the repository.
 
 `listmngr_api::queues` mounts `/queues`, `/queues/{name}` and
 `/queues/{name}/{id}` on both prefixes. `Queue::ALL`, `Queue::name` and

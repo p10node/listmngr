@@ -1937,9 +1937,20 @@ MTA snippets disabled pending full acceptance and operational review.
 posting policy, and inbound/outbound workers with lease renewal and shutdown
 supervision. Held REST under `/api/v1` and `/3.1` supports read/count and
 accept/reject/discard/defer with authorization, pending-state fencing, persisted
-comments, and transactional user/token/peer-IP audit attribution. Unsupported
-forwarding fields/actions fail closed. Reject records a disposition and publishes
-a guarded author notice; automatic posting-policy rejections still send no notice.
+comments, and transactional user/token/peer-IP audit attribution. Reject records
+a disposition and publishes a guarded author notice; automatic posting-policy
+rejections still send no notice.
+
+Mailman's `forward` (`P2-HELD-FORWARD`) is on the same `POST`: `forward=True`
+with `forward_to=<mailbox>` (Postorius's form spelling; JSON booleans work too)
+sends a copy of the held post, wrapped as `message/rfc822` under
+"Forward of moderated message", from the list's `-bounces` address to that one
+mailbox, in the same transaction as the decision — with `defer` the post stays
+held, with `accept`/`reject`/`discard` the decision applies as before. The
+address is validated first (a mailbox, not one of the list's own addresses),
+so a bad `forward_to` refuses the whole request and nothing changes;
+`forward` without `forward_to` is `400`; `forward=False` ignores `forward_to`.
+The moderation log row and the `moderation.*` audit event carry `forward_to`.
 
 Before SMTP commands, `begin_delivery` commits selected recipients as
 ambiguous/in-flight with an owning attempt token and `queue.delivery_begin` audit.
