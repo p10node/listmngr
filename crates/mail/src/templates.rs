@@ -36,6 +36,7 @@ pub const NAMES: &[&str] = &[
     "list:user:action:invite",
     "list:user:action:subscribe",
     "list:user:action:unsubscribe",
+    "list:user:notice:echo",
     "list:user:notice:goodbye",
     "list:user:notice:help",
     "list:user:notice:hold",
@@ -211,6 +212,14 @@ pub fn builtin(name: &str) -> Option<&'static str> {
              If you have any questions, you may contact\n\
              \n    $owner_email\n"
         }
+        "list:user:notice:echo" => {
+            "This is the $listname command bot at $domain answering your `echo`\n\
+             command with the text it carried:\n\
+             \n    $echo\n\
+             \n\
+             Nothing was changed. Send `help` to $request_email for the commands\n\
+             this list understands.\n"
+        }
         "list:user:notice:help" => {
             "Send one command in the subject, or first nonblank text/plain body line\n\
              with an empty subject, to $request_email.\n\
@@ -223,6 +232,8 @@ pub fn builtin(name: &str) -> Option<&'static str> {
              leave or unsubscribe: request removal of your envelope mailbox.\n\
              confirm TOKEN: confirm the one-time challenge sent to that mailbox.\n\
              help: this bounded help, at most once per mailbox/list/hour.\n\
+             echo TEXT: send that text straight back, under the same budget.\n\
+             end or stop: stop reading commands here (before a signature, say).\n\
              No mailbox arguments, passwords, moderator commands or multi-command\n\
              scripts are supported.\n"
         }

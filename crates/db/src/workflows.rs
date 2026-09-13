@@ -256,7 +256,24 @@ impl<'a> WorkflowRepo<'a> {
         let command: EmailCommand = serde_json::from_value(context["subscription_command"].clone())
             .map_err(|_| Error::Validation("invalid subscription command".into()))?;
         match command {
-            EmailCommand::Help => self.help_owned(&list, email, lease, now_ms, started).await,
+            EmailCommand::Help => {
+                self.bot_reply(&list, email, &BotReply::Help, lease, now_ms, started)
+                    .await
+            }
+            EmailCommand::Echo(text) => {
+                self.bot_reply(&list, email, &BotReply::Echo(&text), lease, now_ms, started)
+                    .await
+            }
+            // Mailman's halt: the message carried no command to run.
+            EmailCommand::End => {
+                let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+                lock(&mut tx).await?;
+                let now_ms = now_ms.saturating_add(
+                    i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
+                );
+                let now_ms = self.command_time(&mut tx, Some(lease), now_ms).await?;
+                self.commit_command(tx, Some(lease), now_ms).await
+            }
             EmailCommand::Confirm(token) => {
                 self.confirm_owned(&list, &token, Some(lease), now_ms).await
             }
@@ -386,10 +403,13 @@ impl<'a> WorkflowRepo<'a> {
         self.commit_command(tx, lease, now_ms).await
     }
 
-    async fn help_owned(
+    /// One bounded reply from the command bot, under the same per-address
+    /// hourly budget whichever verb asked for it.
+    async fn bot_reply(
         &self,
         list: &ListId,
         email: &str,
+        reply: &BotReply<'_>,
         lease: &Lease,
         now_ms: i64,
         started: std::time::Instant,
@@ -420,6 +440,7 @@ impl<'a> WorkflowRepo<'a> {
         }
         sqlx::query("INSERT INTO email_help_requests(list_id,email,requested_at) VALUES($1,$2,$3) ON CONFLICT(list_id,email) DO UPDATE SET requested_at=excluded.requested_at").bind(list.as_str()).bind(&address.email).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
         let request_address = list.request_address();
+        let echoed = reply.echoed().to_owned();
         enqueue_templated_notice(
             &mut tx,
             self.db,
@@ -427,18 +448,18 @@ impl<'a> WorkflowRepo<'a> {
             Notice {
                 to: &address.original_email,
                 reply_to: Some(&request_address),
-                subject: "notice-help-subject",
+                subject: reply.subject(),
                 subject_args: &[],
-                template: "list:user:notice:help",
+                template: reply.template(),
             },
-            |values| values,
+            |values| values.set("echo", echoed),
             now_ms,
         )
         .await?;
         Database::record_tx_with_context(
             &mut tx,
             &AuditContext::system(),
-            "subscription.help",
+            reply.audit(),
             "list",
             list.as_str(),
             serde_json::json!({}),
@@ -1602,4 +1623,37 @@ fn notice_mailbox(email: &str) -> Result<()> {
         return Err(Error::Validation("unsupported notice mailbox".into()));
     }
     Ok(())
+}
+
+/// What the command bot is about to send back.
+enum BotReply<'a> {
+    Help,
+    Echo(&'a str),
+}
+
+impl BotReply<'_> {
+    const fn subject(&self) -> &'static str {
+        match self {
+            Self::Help => "notice-help-subject",
+            Self::Echo(_) => "notice-echo-subject",
+        }
+    }
+    const fn template(&self) -> &'static str {
+        match self {
+            Self::Help => "list:user:notice:help",
+            Self::Echo(_) => "list:user:notice:echo",
+        }
+    }
+    const fn audit(&self) -> &'static str {
+        match self {
+            Self::Help => "subscription.help",
+            Self::Echo(_) => "subscription.echo",
+        }
+    }
+    const fn echoed(&self) -> &str {
+        match self {
+            Self::Help => "",
+            Self::Echo(text) => text,
+        }
+    }
 }

@@ -135,6 +135,14 @@ pub fn builtin(name: &str) -> Option<&'static str> {
              Nếu có thắc mắc, bạn có thể liên hệ\n\
              \n    $owner_email\n"
         }
+        "list:user:notice:echo" => {
+            "Đây là bot lệnh của $listname tại $domain trả lời lệnh `echo` của bạn\n\
+             cùng đoạn văn bản mà nó mang theo:\n\
+             \n    $echo\n\
+             \n\
+             Không có gì thay đổi. Gửi `help` tới $request_email để xem các lệnh hộp\n\
+             thư chung này hiểu.\n"
+        }
         "list:user:notice:help" => {
             "Gửi một lệnh ở tiêu đề, hoặc ở dòng text/plain đầu tiên không trống của\n\
              nội dung khi tiêu đề để trống, tới $request_email.\n\
@@ -147,6 +155,8 @@ pub fn builtin(name: &str) -> Option<&'static str> {
              leave hoặc unsubscribe: xin rời đi bằng địa chỉ gửi thư của bạn.\n\
              confirm TOKEN: xác nhận mã một lần đã gửi tới địa chỉ đó.\n\
              help: hướng dẫn giới hạn này, tối đa một lần mỗi địa chỉ/hộp thư/giờ.\n\
+             echo TEXT: trả lại đúng đoạn văn bản đó, cùng hạn mức như help.\n\
+             end hoặc stop: dừng đọc lệnh (ví dụ trước chữ ký).\n\
              Không hỗ trợ tham số địa chỉ, mật khẩu, lệnh điều hành hay chuỗi nhiều\n\
              lệnh.\n"
         }

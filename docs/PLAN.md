@@ -840,7 +840,7 @@ P2-STORE/P2-QUEUE/P2-CLI/P2-RUNTIME, held, and O2/O3 evidence.
 Mục tiêu: parity Core hoàn chỉnh (trừ NNTP/DMARC wrap).
 
 - [x] Subscription/unsubscription workflow state machine + pendings + tokens + policies + invitations + moderation requests + REST `requests`
-- [ ] Email command runner: `confirm`, `join/subscribe`, `leave/unsubscribe`, `help`, `echo`, `end/stop`; `-request/-join/-leave/-confirm` routing; autoresponder + grace period; administrivia
+- [ ] Email command runner: `confirm`, `join/subscribe`, `leave/unsubscribe`, `help`, `echo`, `end/stop` (done); `-request/-join/-leave/-confirm` routing (done); autoresponder + grace period; administrivia
 - [ ] Welcome/goodbye/invite/hold/refuse/rejected/warning/probe notices; template scopes + language fallback; REST templates/uris; ban REST
 - [ ] Bounce runner: VERP decode, detectors port + fixture corpus (từ flufl.bounce test data), events, scoring, stale, warnings, disable, removal, probes, owner notices, forward unrecognized
 - [ ] Digest runner: mbox append, thresholds/periodic, MIME + RFC1153 builders, volume/number, masthead/header/footer, CLI `digests`

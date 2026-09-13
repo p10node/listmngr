@@ -153,6 +153,23 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P3-EMAIL-COMMANDS — bounded acceptance verified
+
+`EmailCommand` gains `Echo(String)` and `End`. The parser reads `echo`'s
+argument from the rest of the line rather than the word iterator (it is the
+only verb with free text) through `echo_text`, which bounds it to
+`MAX_ECHO_CHARS` and rejects control and bidirectional characters, so a reply
+can never be steered by what it quotes; `end`/`stop` take no argument and
+stand for Mailman's halt, which in a one-command-per-message runtime means
+"this message carried no command".
+
+`help_owned` becomes `bot_reply`, taking a `BotReply` that names the subject
+key, template and audit action. Both verbs therefore share one durable
+budget — the `email_help_requests` row per list and address per hour, plus
+the site-wide `subscription_rate` window — so adding a verb adds no new way
+to make the server send mail. `End` commits the lease with no notice, no
+workflow row and no audit event, finishing the job rather than retrying it.
+
 ## P3-SUBSCRIPTION-POLICY — bounded acceptance verified
 
 `subscription_workflows` gains `state`

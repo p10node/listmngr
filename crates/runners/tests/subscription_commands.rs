@@ -256,3 +256,73 @@ async fn help_is_durable_bounded_and_never_a_subscription() {
     assert!(text.contains("confirm TOKEN"));
     assert!(text.len() < 2048);
 }
+
+/// One command message from the same mailbox through the LMTP handler.
+async fn deliver(handler: &mut InboundHandler, id: &str, subject: &str) -> u16 {
+    let raw = format!(
+        "From: Case@example.com\r\nMessage-ID: <{id}@example.com>\r\nSubject: {subject}\r\n\r\n"
+    );
+    handler
+        .deliver(
+            Some("Case@example.com"),
+            &["test-request@example.com".to_owned()],
+            raw.as_bytes(),
+        )
+        .await[0]
+        .code
+}
+
+#[tokio::test]
+async fn echo_answers_with_its_own_text_and_end_answers_nothing() {
+    let (db, mut handler) = fixture().await;
+    assert_eq!(
+        deliver(&mut handler, "echo1", "echo sandbox check").await,
+        250
+    );
+    consume_command(&db, "echo").await;
+    let text: String = sqlx::query_scalar("SELECT b.raw FROM message_blobs b JOIN messages m ON m.store_key=b.store_key JOIN queue_jobs q ON q.message_id=m.id WHERE q.queue='out'")
+        .fetch_one(db.pool())
+        .await
+        .map(|raw: Vec<u8>| String::from_utf8(raw).unwrap())
+        .unwrap();
+    assert!(text.contains("Subject: List command echo"), "{text}");
+    assert!(text.contains("sandbox check"), "{text}");
+    assert!(text.contains("Reply-To: test-request@example.com"));
+    let workflows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(workflows, 0, "an echo never subscribes anybody");
+    let audit: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action='subscription.echo'")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(audit, 1);
+
+    // The echo shares the bot's hourly budget with help.
+    assert_eq!(deliver(&mut handler, "help1", "help").await, 250);
+    consume_command(&db, "echo").await;
+    let notices: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM queue_jobs WHERE queue='out'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(notices, 1, "one bot reply per mailbox and hour");
+
+    // `end` is accepted and does nothing at all.
+    let (db, mut handler) = fixture().await;
+    assert_eq!(deliver(&mut handler, "end1", "end").await, 250);
+    consume_command(&db, "end").await;
+    let after: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM queue_jobs WHERE queue='out')+(SELECT COUNT(*) FROM subscription_workflows)",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(after, 0);
+    let done: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM queue_jobs WHERE state='done'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(done, 1, "the command job is finished, not retried");
+}

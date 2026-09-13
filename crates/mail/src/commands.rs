@@ -52,6 +52,11 @@ pub fn parse(raw: &[u8]) -> Option<Command> {
     };
     let mut words = line.split_whitespace();
     let command = words.next()?.to_ascii_lowercase();
+    // `echo` is the one verb whose argument is free text, so it is read from
+    // the rest of the line rather than from the word iterator.
+    if command == "echo" {
+        return echo_text(&line[command.len()..]).map(Command::Echo);
+    }
     if command != "confirm" {
         if words.next().is_some() {
             return None;
@@ -60,6 +65,9 @@ pub fn parse(raw: &[u8]) -> Option<Command> {
             "join" | "subscribe" => Some(Command::Join),
             "leave" | "unsubscribe" => Some(Command::Leave),
             "help" => Some(Command::Help),
+            // Mailman's halt: everything after it (a signature, a quoted
+            // reply) is deliberately not read as a command.
+            "end" | "stop" => Some(Command::End),
             _ => None,
         };
     }
@@ -74,6 +82,23 @@ pub fn parse(raw: &[u8]) -> Option<Command> {
     }
     Some(Command::Confirm(token.to_owned()))
 }
+
+/// The text an `echo` carries back: printable, single-line and bounded, so a
+/// reply can never be steered by control characters or grown without limit.
+fn echo_text(rest: &str) -> Option<String> {
+    let text = rest.trim();
+    if text.chars().count() > MAX_ECHO_CHARS
+        || text.chars().any(|c| {
+            c.is_control() || matches!(c, '\u{200e}'..='\u{200f}' | '\u{202a}'..='\u{202e}')
+        })
+    {
+        return None;
+    }
+    Some(text.to_owned())
+}
+
+/// Characters an `echo` may carry back.
+pub const MAX_ECHO_CHARS: usize = 200;
 
 /// Whether an otherwise admitted message permits a command confirmation reply.
 /// Missing/malformed MIME fails closed; Auto-Submitted must be absent or `no`.

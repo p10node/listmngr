@@ -99,3 +99,47 @@ fn html_body_is_not_an_email_command() {
         None
     );
 }
+
+#[test]
+fn echo_carries_bounded_text_and_end_or_stop_halts_processing() {
+    for (line, expected) in [
+        ("echo hello there", Command::Echo("hello there".into())),
+        (
+            "ECHO   spaced   out  ",
+            Command::Echo("spaced   out".into()),
+        ),
+        ("echo", Command::Echo(String::new())),
+        ("end", Command::End),
+        ("STOP", Command::End),
+        // A signature after the halt is not a command.
+        ("end", Command::End),
+    ] {
+        let raw = format!("From: sender@example.com\r\nSubject: {line}\r\n\r\njoin\r\n");
+        assert_eq!(parse(raw.as_bytes()), Some(expected), "{line}");
+    }
+    // `end`/`stop` take no arguments, and echoed text stays printable and short.
+    for line in [
+        "end now",
+        "stop it",
+        "echo with a \u{7}bell",
+        "echo \u{202e}reversed",
+    ] {
+        let raw = format!("From: sender@example.com\r\nSubject: {line}\r\n\r\n");
+        assert_eq!(parse(raw.as_bytes()), None, "{line}");
+    }
+    let long = format!("echo {}", "x".repeat(201));
+    let raw = format!("From: sender@example.com\r\nSubject: {long}\r\n\r\n");
+    assert_eq!(parse(raw.as_bytes()), None, "an echo is bounded");
+    let at_limit = format!("echo {}", "x".repeat(200));
+    let raw = format!("From: sender@example.com\r\nSubject: {at_limit}\r\n\r\n");
+    assert_eq!(
+        parse(raw.as_bytes()),
+        Some(Command::Echo("x".repeat(200))),
+        "the limit itself is accepted"
+    );
+    // A body whose first nonblank line halts processing stops there.
+    assert_eq!(
+        parse(b"From: sender@example.com\r\n\r\n\r\nend\r\njoin\r\n"),
+        Some(Command::End)
+    );
+}

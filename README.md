@@ -624,6 +624,22 @@ than bypassing the limit. This conservative admission is not full RFC mailbox
 grammar or all Mailman message-acceptance parity. See `P2-RECIPIENT-LIMIT` in
 `docs/FEATURE_PARITY.md` for verification status.
 
+## Email commands: echo, end and stop — bounded acceptance verified
+
+The command bot at `list-request@` understands two more of Mailman's verbs:
+
+| Command | Effect |
+|---|---|
+| `echo TEXT` | replies with that text, unchanged |
+| `end` / `stop` | stops reading commands here — a signature or quoted reply below is never run |
+
+`echo` shares `help`'s budget: one bot reply per mailbox, list and hour, plus
+the site-wide notice budget. Its text is bounded at 200 characters and must be
+printable and single-line, so a reply can never be steered by control or
+bidirectional characters. `end` is accepted and does nothing at all: no
+notice, no workflow, the job simply finishes. See `P3-EMAIL-COMMANDS` in
+`docs/FEATURE_PARITY.md`.
+
 ## Subscription policies and the moderator queue — bounded acceptance verified
 
 `subscription_policy` and `unsubscription_policy` now decide what a public
