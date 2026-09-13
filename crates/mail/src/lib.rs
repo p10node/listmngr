@@ -16,6 +16,7 @@ mod munge;
 pub use cook::{cook_headers, cook_individual_post, cook_post, header_body_split};
 pub mod attachments;
 pub mod authenticity;
+pub mod bounce;
 pub mod commands;
 pub mod decorate;
 pub mod digest;

@@ -1,0 +1,16 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Undeliverable: hello list
+Content-Type: text/plain
+
+Your message did not reach some or all of the intended recipients.
+
+      Subject:	hello list
+      Sent:	9/1/2026 10:00 AM
+
+The following recipient(s) cannot be reached:
+
+      Heidi Example on 9/1/2026 10:00 AM
+            The e-mail account does not exist at the organization this message was sent to.
+            <mail.example.net #5.1.1 smtp;550 5.1.1 heidi@example.net... User unknown>

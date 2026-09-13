@@ -409,3 +409,21 @@ async fn a_verified_envelope_id_names_the_recipient_the_report_cannot_forge() {
     assert_eq!(outcome.scored, vec!["member@example.net".to_owned()]);
     assert_eq!(events(&db).await[1].1, "dsn");
 }
+
+#[tokio::test]
+async fn an_mta_that_writes_prose_is_read_by_the_detectors() {
+    let (db, _) = fixture(json!({})).await;
+    let raw = b"From: MAILER-DAEMON@mx.example.net\r\nTo: dev-bounces@example.invalid\r\nSubject: failure notice\r\nMessage-ID: <qmail@mx.example.net>\r\n\r\nHi. This is the qmail-send program at mx.example.net.\r\nI'm afraid I wasn't able to deliver your message to the following addresses.\r\nThis is a permanent error; I've given up. Sorry it didn't work out.\r\n\r\n<member@example.net>:\r\nSorry, no mailbox here by that name. (#5.1.1)\r\n\r\n--- Below this line is a copy of the message.\r\n".to_vec();
+    let (outcome, state) = bounce(&db, raw, None, DAY_MS).await;
+    assert_eq!(outcome.scored, vec!["member@example.net".to_owned()]);
+    assert!(!outcome.unrecognized);
+    assert_eq!(state, JobState::Done);
+    assert_eq!(events(&db).await[0].1, "heuristic");
+
+    // A delay written as prose is recognized and inert, like a DSN delay.
+    let raw = b"From: MAILER-DAEMON@mx.example.net\r\nSubject: Warning: could not send message for past 4 hours\r\nMessage-ID: <w@mx.example.net>\r\n\r\n    **      THIS IS A WARNING MESSAGE ONLY      **\r\n\r\nYour message to <member@example.net> has not yet been delivered; it will be retried.\r\n".to_vec();
+    let (outcome, _) = bounce(&db, raw, None, 2 * DAY_MS).await;
+    assert!(outcome.scored.is_empty());
+    assert!(!outcome.unrecognized);
+    assert_eq!(score(&db).await.0, 1.0);
+}

@@ -635,7 +635,12 @@ three ways, most trustworthy first:
 2. a delivery-status report whose `Original-Envelope-Id` this server issued
    (`mta.dsn_issuance_enabled`), verified against the stored issuance — the
    report's own claims are then ignored;
-3. the report's `Final-Recipient` lines with `Action: failed`.
+3. the report's `Final-Recipient` lines with `Action: failed`;
+4. for MTAs that write prose instead of a report, the heuristic detectors
+   (`listmngr_mail::bounce`, after `flufl.bounce`): Postfix, qmail, Exim,
+   Sendmail, Yahoo, Exchange, and a generic permanent-failure phrase
+   matcher, with a delay/warning matcher that recognizes a message as
+   temporary rather than a failure.
 
 Each named member of a list with `process_bounces` is scored with exactly the
 rules an SMTP-time failure uses (one point per day, threshold, disable, the
