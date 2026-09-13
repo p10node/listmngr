@@ -15,6 +15,7 @@ mod lifecycle_tests;
 
 mod archive;
 pub mod bounce_maintenance;
+mod bounces;
 pub mod delivery_policy;
 pub mod digests;
 mod heartbeat;
@@ -24,6 +25,7 @@ mod policy_facts;
 mod processor;
 mod visible_recipients;
 
+pub use bounces::run as run_bounce_processor;
 pub use inbound::{COMMAND_SUFFIXES, InboundHandler};
 pub use outbound::run as run_out_processor;
 pub use outbound::{PrepareError, prepare_individual};
@@ -240,6 +242,7 @@ pub async fn serve_mail_role(
     tasks.spawn(acceptor);
     // The `in` processor's future is large (chain, pipeline and templated
     // notices all inline); keep it on the heap rather than in this frame.
+    let site_owner = config.site.site_owner.clone();
     let inbound = Box::pin(processor::run(
         db.clone(),
         config,
@@ -249,6 +252,17 @@ pub async fn serve_mail_role(
     ));
     tasks.spawn(async move {
         inbound.await;
+        Ok(())
+    });
+    let bounces = bounces::run(
+        db.clone(),
+        role.clone(),
+        site_owner,
+        "bounces-0".into(),
+        shutdown.clone(),
+    );
+    tasks.spawn(async move {
+        Box::pin(bounces).await;
         Ok(())
     });
     let digest = digests::run(db.clone(), shutdown.clone());

@@ -65,7 +65,7 @@ pub async fn lock_preferences(tx: &mut Transaction<'_, Any>, member: &str) -> Re
     Ok(())
 }
 
-async fn score(
+pub async fn score(
     tx: &mut Transaction<'_, Any>,
     db: &crate::Database,
     list: &ListId,

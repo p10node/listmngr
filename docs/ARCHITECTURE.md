@@ -153,6 +153,30 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P3-BOUNCE-RUNNER — bounded acceptance verified
+
+`BounceProcessingRepo::process` is the consumer the bounce inbox lacked. It
+runs under the lease's fenced clock, locks the list row, and asks
+`named_recipients` who the report is about: the VERP recipient the intake
+already decoded; else a `dsn::Report` (the parser now keeps the per-message
+`Original-Envelope-Id`) whose ENVID is looked up in `dsn_issuances` and
+verified with the same `Issuer` that minted it — the issuance's recipient
+then replaces whatever the report claims; else the report's failed
+`Final-Recipient`s. Each member named is recorded as a `bounce_events` row
+(migration `0038` widens `source` to `verp`, `dsn`, `dsn_envid`) and scored
+through `smtp_bounces::score`, now shared, so the day rule, the stale-after
+reset, the threshold, the disable and the owner notices are one code path
+for every bounce origin. A report that names nobody is forwarded as an owner
+delivery (sanitized by `owner::cook`, null reverse path) to the
+administrators, the site owner or nobody, per
+`forward_unrecognized_bounces_to`. The job is acknowledged in the same
+transaction, audited as `bounce.process`.
+
+`runners::bounces` claims `Queue::Bounces` under lease renewal, feeds
+`listmngr_bounces_total`, and retries with the delivery backoff on error; it
+is spawned by `serve_mail_role` next to the other queue processors, with the
+site owner's address from `[site]`.
+
 ## P3-AUTORESPONDER — bounded acceptance verified
 
 `AutomaticResponses` is a flattened settings struct on `MailingList`, stored
