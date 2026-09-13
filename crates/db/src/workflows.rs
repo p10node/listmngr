@@ -1450,6 +1450,50 @@ pub(crate) async fn enqueue_content_filter_forward(
     Ok(())
 }
 
+/// Mailman's `forward` on a moderator decision: the held post, wrapped as
+/// `message/rfc822`, to one address from the list's bounces address.
+pub(crate) async fn enqueue_moderated_forward(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    list: &ListId,
+    message_id: crate::mail_queue::MessageId,
+    to: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let snapshot = crate::notices::list_snapshot(tx, list).await?;
+    let original: Vec<u8> = sqlx::query_scalar("SELECT b.raw FROM messages m JOIN message_blobs b ON b.store_key=m.store_key WHERE m.id=$1")
+        .bind(message_id.0.to_string()).fetch_one(&mut **tx).await.map_err(db_error)?;
+    let language =
+        crate::notices::recipient_language(tx, &snapshot, to, db.default_language()).await?;
+    let subject = listmngr_i18n::message(&language, "notice-forward-subject", &[]);
+    let body = listmngr_i18n::message(
+        &language,
+        "forward-moderated-body",
+        &[("display_name", &snapshot.display_name)],
+    );
+    let date = chrono::DateTime::from_timestamp_millis(now_ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc2822();
+    let host = list.mail_host().to_owned();
+    let from = list.bounces_address();
+    let id = Uuid::now_v7().to_string();
+    let raw = crate::notices::serialize_with_message(
+        &crate::notices::Envelope {
+            from: &from,
+            to,
+            reply_to: None,
+            subject: &subject,
+            message_id_local: &id,
+            mail_host: &host,
+            date: &date,
+            auto_submitted: "auto-generated",
+        },
+        &body,
+        &original,
+    )?;
+    enqueue_notice(tx, list, to, &id, raw, now_ms).await
+}
+
 /// One templated notice to enqueue: who receives it, which template renders
 /// the body, and which catalog message (with arguments) is its subject.
 pub(crate) struct Notice<'a> {

@@ -44,6 +44,7 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/bounce-probes-schema.snapshot").lines())
             .chain(include_str!("fixtures/digest-settings-schema.snapshot").lines())
             .chain(include_str!("fixtures/admin-notify-mchanges-schema.snapshot").lines())
+            .chain(include_str!("fixtures/moderation-forward-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )

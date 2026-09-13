@@ -742,3 +742,128 @@ async fn unauthenticated_and_wrong_scope_requests_are_rejected_without_writes() 
             .is_none()
     );
 }
+
+/// One moderation POST with an arbitrary body.
+async fn post_body(f: &Fixture, uri: &str, body: String, json: bool) -> Response {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {}", f.admin_token))
+        .header(
+            header::CONTENT_TYPE,
+            if json {
+                "application/json"
+            } else {
+                "application/x-www-form-urlencoded"
+            },
+        )
+        .body(Body::from(body))
+        .unwrap();
+    request.extensions_mut().insert(axum::extract::ConnectInfo(
+        "127.0.0.1:4242".parse::<std::net::SocketAddr>().unwrap(),
+    ));
+    f.app.clone().oneshot(request).await.unwrap()
+}
+
+/// The next outgoing job, if any.
+async fn next_outgoing(db: &Database) -> Option<listmngr_db::mail_queue::Lease> {
+    db.mail_queue()
+        .claim(
+            Queue::Out,
+            "out",
+            chrono::Utc::now().timestamp_millis() + 1_000,
+            100,
+        )
+        .await
+        .unwrap()
+}
+
+/// Mailman's `forward`: the decision also sends the held post, wrapped, to
+/// the named address; `forward` without a usable `forward_to` is refused.
+#[tokio::test]
+async fn forward_sends_the_held_post_to_the_named_address_with_any_action() {
+    let f = fixture().await;
+    let id = seed_held(&f.db, &f.list_id, "sender@example.invalid", "Forward me").await;
+    let uri = format!("/3.1/lists/{}/held/{}", f.list_id, id.0);
+    // Postorius posts a form: forward=True with the address.
+    for (body, json) in [
+        ("action=defer&forward=True".to_owned(), false),
+        (
+            serde_json::json!({"action":"defer","forward":true,"forward_to":""}).to_string(),
+            true,
+        ),
+        (
+            serde_json::json!({"action":"defer","forward":true,"forward_to":"not a mailbox"})
+                .to_string(),
+            true,
+        ),
+        (
+            format!(
+                "action=defer&forward=True&forward_to={}",
+                f.list_id.posting_address().replace('@', "%40")
+            ),
+            false,
+        ),
+    ] {
+        assert_eq!(
+            post_body(&f, &uri, body.clone(), json).await.status(),
+            StatusCode::BAD_REQUEST,
+            "{body}"
+        );
+    }
+    assert!(
+        next_outgoing(&f.db).await.is_none(),
+        "a refused forward sends nothing"
+    );
+    assert_eq!(
+        post_body(
+            &f,
+            &uri,
+            "action=defer&forward=True&forward_to=Reviewer%40Example.NET".into(),
+            false
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let lease = next_outgoing(&f.db).await.expect("the forward is queued");
+    assert_eq!(
+        f.db.mail_queue()
+            .pending_recipients(lease.job.id)
+            .await
+            .unwrap(),
+        ["reviewer@example.net"]
+    );
+    let raw =
+        f.db.mail_queue()
+            .message(lease.job.message_id)
+            .await
+            .unwrap()
+            .raw;
+    let text = String::from_utf8_lossy(&raw);
+    assert!(
+        text.contains("Subject: Forward of moderated message"),
+        "{text}"
+    );
+    assert!(text.contains("Content-Type: message/rfc822"), "{text}");
+    assert!(text.contains("Subject: Forward me"), "{text}");
+    // Deferred, so still held; the log carries the address.
+    let (disposition, forward_to): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT h.disposition, l.forward_to FROM held_messages h JOIN moderation_log l ON l.held_id=h.id WHERE h.id=$1",
+    )
+    .bind(id.0.to_string())
+    .fetch_one(f.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(disposition, None);
+    assert_eq!(forward_to.as_deref(), Some("reviewer@example.net"));
+    // forward=false ignores forward_to and forwards nothing.
+    let body =
+        serde_json::json!({"action":"discard","forward":false,"forward_to":"other@example.net"})
+            .to_string();
+    assert_eq!(
+        post_body(&f, &uri, body, true).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(next_outgoing(&f.db).await.is_none());
+}

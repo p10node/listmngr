@@ -265,7 +265,7 @@ impl<'a> ModerationRepo<'a> {
             crate::mail_queue::plan::bind(&mut tx, job.id, plan).await?;
         }
         crate::archive::schedule_accepted(&mut tx, &held.list_id, held.message_id, now_ms).await?;
-        insert_moderation_log(&mut tx, id, "accept", "", moderator, now_ms).await?;
+        insert_moderation_log(&mut tx, id, "accept", "", moderator, None, now_ms).await?;
         audit_held(&mut tx, id, "moderation.accept", moderator, "", now_ms).await?;
         tx.commit().await.map_err(db_error)?;
         Ok((held, job))
@@ -394,11 +394,36 @@ impl<'a> ModerationRepo<'a> {
         reason: &str,
         now_ms: i64,
     ) -> Result<()> {
+        self.review_forwarding(id, context, action, reason, None, now_ms)
+            .await
+    }
+
+    /// [`Self::review`] with Mailman's `forward`: a copy of the held post,
+    /// wrapped as `message/rfc822`, goes to `forward_to` from the list's
+    /// bounces address in the same transaction as the decision, whatever
+    /// the decision is (a deferred post stays held).
+    ///
+    /// # Errors
+    /// Returns validation for a `forward_to` that is not a mailbox or points
+    /// at the list, conflict for disposed messages, or a database error.
+    pub async fn review_forwarding(
+        &self,
+        id: HeldId,
+        context: &crate::AuditContext,
+        action: &ReviewAction,
+        reason: &str,
+        forward_to: Option<&str>,
+        now_ms: i64,
+    ) -> Result<()> {
         let mut tx = self.db.browser_write_tx().await?;
-        Self::review_tx(&mut tx, self.db, id, context, action, reason, now_ms).await?;
+        Self::review_tx(
+            &mut tx, self.db, id, context, action, reason, forward_to, now_ms,
+        )
+        .await?;
         tx.commit().await.map_err(db_error)
     }
 
+    #[allow(clippy::too_many_arguments)] // One decision, every part of it.
     pub(crate) async fn review_tx(
         tx: &mut Transaction<'_, Any>,
         db: &Database,
@@ -406,9 +431,12 @@ impl<'a> ModerationRepo<'a> {
         context: &crate::AuditContext,
         action: &ReviewAction,
         reason: &str,
+        forward_to: Option<&str>,
         now_ms: i64,
     ) -> Result<()> {
         let moderator = context.user_id;
+        // Validate before any write so a bad address leaves the post held.
+        let forward_to = forward_to.map(forward_address).transpose()?;
         let (name, disposition) = match action {
             ReviewAction::Accept { .. } => ("accept", Some("accepted")),
             ReviewAction::Reject => ("rejected", Some("rejected")),
@@ -453,14 +481,39 @@ impl<'a> ModerationRepo<'a> {
         if matches!(action, ReviewAction::Reject) {
             rejection_notice(tx, db, &held, reason, now_ms).await?;
         }
-        insert_moderation_log(tx, id, name, reason, moderator, now_ms).await?;
+        if let Some(forward_to) = &forward_to {
+            if listmngr_mail::owner::points_to_list(forward_to, &held.list_id) {
+                return Err(Error::Validation(
+                    "forward_to must not be one of the list's own addresses".into(),
+                ));
+            }
+            crate::workflows::enqueue_moderated_forward(
+                tx,
+                db,
+                &held.list_id,
+                held.message_id,
+                forward_to,
+                now_ms,
+            )
+            .await?;
+        }
+        insert_moderation_log(
+            tx,
+            id,
+            name,
+            reason,
+            moderator,
+            forward_to.as_deref(),
+            now_ms,
+        )
+        .await?;
         Database::record_tx_with_context(
             tx,
             context,
             &format!("moderation.{name}"),
             "held_message",
             &id.0.to_string(),
-            serde_json::json!({"reason":reason}),
+            serde_json::json!({"reason": reason, "forward_to": forward_to}),
         )
         .await?;
         Ok(())
@@ -479,7 +532,7 @@ impl<'a> ModerationRepo<'a> {
         if disposition == "rejected" {
             rejection_notice(&mut tx, self.db, &held, reason, now_ms).await?;
         }
-        insert_moderation_log(&mut tx, id, disposition, reason, moderator, now_ms).await?;
+        insert_moderation_log(&mut tx, id, disposition, reason, moderator, None, now_ms).await?;
         audit_held(
             &mut tx,
             id,
@@ -548,16 +601,28 @@ async fn set_disposition(
     decode_held(&row)
 }
 
+/// The canonical mailbox a moderator may forward to.
+fn forward_address(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 254 || !listmngr_mail::owner::safe_mailbox(value) {
+        return Err(Error::Validation("forward_to must be a mailbox".into()));
+    }
+    Ok(listmngr_core::Address::new(value, String::new())
+        .map_err(|_| Error::Validation("forward_to must be a mailbox".into()))?
+        .email)
+}
+
 async fn insert_moderation_log(
     tx: &mut Transaction<'_, Any>,
     held_id: HeldId,
     action: &str,
     reason: &str,
     moderator: Option<UserId>,
+    forward_to: Option<&str>,
     now_ms: i64,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO moderation_log(id,held_id,action,reason,moderator_id,at) VALUES($1,$2,$3,$4,$5,$6)",
+        "INSERT INTO moderation_log(id,held_id,action,reason,moderator_id,at,forward_to) VALUES($1,$2,$3,$4,$5,$6,$7)",
     )
     .bind(Uuid::now_v7().to_string())
     .bind(held_id.0.to_string())
@@ -565,6 +630,7 @@ async fn insert_moderation_log(
     .bind(reason)
     .bind(moderator.map(|value| value.to_string()))
     .bind(now_ms)
+    .bind(forward_to)
     .execute(&mut **tx)
     .await
     .map_err(db_error)?;

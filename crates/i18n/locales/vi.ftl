@@ -46,3 +46,7 @@ notify-more = ... và { $count } yêu cầu nữa
 # membership changes.
 notice-admin-subscribe-subject = Thông báo đăng ký { $display_name }
 notice-admin-unsubscribe-subject = Thông báo huỷ đăng ký { $display_name }
+
+# Mailman's `forward` on a moderator decision.
+notice-forward-subject = Chuyển tiếp thư đang chờ duyệt
+forward-moderated-body = Một người duyệt của { $display_name } đã chuyển tiếp cho bạn thư đang chờ duyệt đính kèm.
