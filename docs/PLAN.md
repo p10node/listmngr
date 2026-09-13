@@ -848,7 +848,7 @@ Checkbox tick theo row ledger nêu bên cạnh; deviation của từng row vẫn
 - [x] Queue (`queue_jobs`) + claim/backoff/shunt + runner supervisor + graceful shutdown — P2-QUEUE, P2-RUNTIME, P2-LEASE-HEARTBEAT, P2-DELIVERY-POLICY
 - [x] LMTP server (RFC 2033: LHLO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, PIPELINING, SIZE, 8BITMIME, per-recipient status), sub-address routing, early reject — P2-TRANSPORT, P2-LMTP-PARAMETERS
 - [x] `in` runner + chains + 15 rules (§4.3 trừ news/digests) + header-match chain + DMARC lookup + `munge_from` — P2-CHAIN-ENGINE, P2-CHAIN-RULES, P2-DMARC-MUNGE, P2-VALIDATE-AUTHENTICITY, P2-HEADER-MATCHES-REST
-- [x] Held messages: DB, notices (owner/user), REST held endpoints + actions — held REST, P2-TEMPLATES (hold notices), P3-MODERATOR-REJECTION-NOTICE; `forward` còn thiếu → P2-HELD-FORWARD
+- [x] Held messages: DB, notices (owner/user), REST held endpoints + actions — held REST, P2-TEMPLATES (hold notices), P3-MODERATOR-REJECTION-NOTICE, P2-HELD-FORWARD
 - [x] Pipeline runner + handlers §4.4 (trừ to-usenet, arc-sign): mime-delete đầy đủ, decorate + placeholders, personalize, VERP — P2-PIPELINE-HANDLERS, P2-MIME-DELETE, P2-HANDLERS-DECORATE, P2-COOK-HEADERS, P2-PERSONALIZE-VERP
 - [x] Templates engine (built-in `mailman:///` bodies port từ Mailman en) + loader DB/file/http — P2-TEMPLATES (`https://` chấp nhận nhưng không fetch trong transaction; xem deviation)
 - [x] `out` runner: `mail-send`, chunk, TLS, DKIM sign (dkim_keys + CLI `dkim gen/dns`), `retry`, `virgin`, `bad` — P2-RECIPIENT-LIMIT, P2-STARTTLS, P2-SMTP-AUTH, P3-DKIM, P3-DKIM-BODY, P2-DELIVERY-POLICY
@@ -857,7 +857,7 @@ Checkbox tick theo row ledger nêu bên cạnh; deviation của từng row vẫn
 - [x] CLI `queue inject/show/unshunt`, `status` — P2-CLI, P2-RUNTIME (+ `queue recipients/resolve`)
 - [x] Metrics: queue depth, deliveries, latency — P2-METRICS
 - [x] REST `/queues` — P2-QUEUES-REST
-- [ ] **P2-HELD-FORWARD** (S): `forward=True&forward_to=…` trên `POST /lists/{id}/held/{id}` như Mailman/Postorius — bọc bản gốc `message/rfc822`, gửi từ `-bounces`, kết hợp mọi action kể cả `defer`; audit `post.forward`.
+- [x] **P2-HELD-FORWARD** (S): `forward=True&forward_to=…` trên `POST /lists/{id}/held/{id}` như Mailman/Postorius — bọc bản gốc `message/rfc822`, gửi từ `-bounces`, kết hợp mọi action kể cả `defer`; `moderation_log.forward_to` + audit.
 - [ ] **P2-E2E-ACCEPTANCE** (M): hoàn tất ma trận acceptance dưới đây trong `crates/cli/tests/mailpath_e2e.rs` (binary thật + SMTP sink). Đã có: member delivery, nonmember hold, accept-once, restart giữ intake. Còn thiếu: headers (List-*, subject prefix, footer) + DKIM verify với key test; ban → reject DSN; max-size → hold; `personalize=full` → N msg VERP đúng; kill -9 **giữa pipeline/out** → job không mất, không double-deliver.
 - Acceptance: e2e test harness = pg + smtp sink (Rust mock hoặc `mailhog`) → gửi qua LMTP → assert N member nhận, headers đúng (List-*, subject prefix, footer, DKIM verify pass với key test), held → accept → delivered; nonmember → hold; ban → reject DSN; max-size → hold; `personalize=full` → N msg riêng với VERP đúng; crash giữa pipeline → job không mất (kill -9 test).
 

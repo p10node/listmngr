@@ -43,3 +43,7 @@ notify-more = ... and { $count } more
 # membership changes.
 notice-admin-subscribe-subject = { $display_name } subscription notification
 notice-admin-unsubscribe-subject = { $display_name } unsubscription notification
+
+# Mailman's `forward` on a moderator decision.
+notice-forward-subject = Forward of moderated message
+forward-moderated-body = A moderator of { $display_name } forwarded the attached held message to you.
