@@ -26,17 +26,16 @@ async fn sqlite_settings_authority_barrier() {
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable WEBUI_SETTINGS_BARRIER_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_settings_authority_barrier() {
-    let db = Database::connect(
-        &std::env::var("WEBUI_SETTINGS_BARRIER_POSTGRES_URL").unwrap(),
-        3,
-    )
-    .await
-    .unwrap();
+    let schema = crate::test_support::IsolatedSchema::create("web_settings_barrier")
+        .await
+        .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     db.migrate().await.unwrap();
     matrix(&db, false).await;
     db.pool().close().await;
+    schema.drop().await.unwrap();
 }
 
 async fn matrix(db: &Database, sqlite: bool) {

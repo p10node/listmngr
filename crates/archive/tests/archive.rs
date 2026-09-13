@@ -373,14 +373,16 @@ async fn verify_late_thread_parent(db: Database) {
 }
 
 #[tokio::test]
-#[ignore = "requires NEW empty disposable ARCHIVE_THREAD_POSTGRES_URL"]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_archive_thread_metadata_matrix() {
-    let db = Database::connect(&std::env::var("ARCHIVE_THREAD_POSTGRES_URL").unwrap(), 3)
+    let schema = listmngr_db::test_support::IsolatedSchema::create("archive_thread")
         .await
         .unwrap();
+    let db = Database::connect(&schema.url, 3).await.unwrap();
     let db = seeded_fixture(db).await;
     verify_malformed_thread_metadata(db.clone()).await;
     verify_late_thread_parent(db).await;
+    schema.drop().await.unwrap();
 }
 
 #[tokio::test]
