@@ -23,6 +23,7 @@ mod inbound;
 mod outbound;
 mod policy_facts;
 mod processor;
+pub mod tasks;
 mod visible_recipients;
 
 pub use bounces::run as run_bounce_processor;
@@ -47,6 +48,10 @@ pub struct MailRoleConfig {
     pub bounce_maintenance_enabled: bool,
     pub bounce_maintenance_interval: Duration,
     pub bounce_maintenance_batch_size: u32,
+    /// `[mailman] run_tasks_every_secs`: the task sweep's period.
+    pub task_interval: Duration,
+    /// `[mailman] finished_job_retention_secs`: how long finished jobs stay.
+    pub finished_job_retention: Duration,
     pub dkim: listmngr_mail::dkim::SigningKeys,
     pub local_hostname: String,
     pub lmtp_listen: SocketAddr,
@@ -107,6 +112,10 @@ impl MailRoleConfig {
                 config.mta.bounce_maintenance_interval_secs,
             )),
             bounce_maintenance_batch_size: config.mta.bounce_maintenance_batch_size,
+            task_interval: Duration::from_secs(u64::from(config.mailman.run_tasks_every_secs)),
+            finished_job_retention: Duration::from_secs(u64::from(
+                config.mailman.finished_job_retention_secs,
+            )),
             dkim: listmngr_mail::dkim::SigningKeys::load(&config.mta.dkim_signing)?,
             local_hostname: config.mta.local_hostname.clone(),
             lmtp_listen,
@@ -263,6 +272,16 @@ pub async fn serve_mail_role(
     );
     tasks.spawn(async move {
         Box::pin(bounces).await;
+        Ok(())
+    });
+    let sweep = tasks::run(
+        db.clone(),
+        role.task_interval,
+        role.finished_job_retention,
+        shutdown.clone(),
+    );
+    tasks.spawn(async move {
+        sweep.await;
         Ok(())
     });
     let digest = digests::run(db.clone(), shutdown.clone());

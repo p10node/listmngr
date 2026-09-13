@@ -1013,6 +1013,7 @@ impl Config {
             validate_rate_limit("api_pre_auth", spec)?;
         }
         config.mta.validate()?;
+        config.mailman.validate()?;
         Ok(config)
     }
 
@@ -1347,8 +1348,30 @@ config_struct!(MailmanConfig {
     bounce_probes: bool = true,
     // How long a probe's bounce is honoured (seconds; Mailman keeps them
     // with its other pended requests).
-    bounce_probe_lifetime_secs: u32 = 604_800
+    bounce_probe_lifetime_secs: u32 = 604_800,
+    // Mailman's `run_tasks_every`: how often the mail role runs the task
+    // sweep (expired confirmations and probes, finished queue jobs, stale
+    // bounce scores).
+    run_tasks_every_secs: u32 = 3600,
+    // How long a finished queue job and its message stay for inspection
+    // before the sweep collects them.
+    finished_job_retention_secs: u32 = 604_800
 });
+impl MailmanConfig {
+    fn validate(&self) -> Result<()> {
+        if !(60..=604_800).contains(&self.run_tasks_every_secs) {
+            return Err(Error::Validation(
+                "mailman.run_tasks_every_secs must be 60..604800".into(),
+            ));
+        }
+        if !(3600..=31_536_000).contains(&self.finished_job_retention_secs) {
+            return Err(Error::Validation(
+                "mailman.finished_job_retention_secs must be 3600..31536000".into(),
+            ));
+        }
+        Ok(())
+    }
+}
 config_struct!(HeaderCheck {
     header: String = String::new(),
     pattern: String = String::new()

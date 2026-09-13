@@ -153,6 +153,40 @@ and both-flavor router regressions. Existing browser/SMTP probes were rerun as
 regressions, not as a new prefix-specific end-to-end tracer. Details:
 [SUBJECT_PREFIX_VALIDATION.md](SUBJECT_PREFIX_VALIDATION.md).
 
+## P3-TASK-RUNNER — bounded acceptance verified
+
+`listmngr_db::tasks::TaskRepo::sweep(now, retention)` is Mailman's task
+runner as a repository call: eight steps, each a loop of bounded batches
+(100 rows, at most 100 batches per step per sweep) in their own transaction
+with a `task.sweep` audit row naming the step and count, so a large backlog
+never holds one lock for long and an interrupted sweep loses only the batch
+in flight. The expiry steps are single `DELETE … WHERE key IN (SELECT …
+ORDER BY … LIMIT n)` statements (workflows outside `pending_moderation`,
+probes, help cooldowns, autoresponse records against the list's grace
+period in bigint arithmetic). Job collection selects `done` jobs acknowledged
+before the cutoff that no unexpired `dsn_issuances` row references, deletes
+their issuances and the jobs (the recipient snapshots, notice provenance,
+digest and owner delivery rows cascade); held collection removes disposed
+rows and their `moderation_log` after the same retention; message
+collection takes messages older than the cutoff that no job, held row or
+issuance references, with their delivery bindings, and the blob when it was
+the last message on it (the same rule list deletion uses). The stale-bounce
+step walks members with a positive score by keyset, parses
+`last_bounce_received` in Rust, and resets fenced on that very value, so a
+bounce scored in between is a fresh score, audited `bounce.stale_reset`.
+
+`listmngr_runners::tasks::run` sleeps `MailRoleConfig::task_interval`
+(`[mailman] run_tasks_every_secs`) between sweeps, stops on shutdown like
+the other runners, and logs the summary only when something changed;
+`serve_mail_role` spawns it beside the digest and archive runners.
+`TaskRepo::notify_list` counts what moderators owe (`PendingSummary`: held,
+subscriptions, unsubscriptions in `pending_moderation`), renders
+`list:admin:notice:pending` per recipient language with `$count` and a
+`$data` block of sections (`notify-held-messages` and friends, fifty entries
+each, then `notify-more`) through the shared `enqueue_templated_notice`,
+and audits `list.notify` in the same transaction. The CLI exposes both as
+`tasks run` and `notify`.
+
 ## P3-DIGEST-SETTINGS — bounded acceptance verified
 
 `DigestRepo::flush` reads its policy from the list under the publication

@@ -19,6 +19,7 @@ pub mod one_click;
 pub mod owner_mail;
 pub mod queue_operations;
 mod smtp_bounces;
+pub mod tasks;
 pub mod templates;
 pub mod web_admin;
 pub mod web_sessions;

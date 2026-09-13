@@ -34,3 +34,10 @@ content-filter-forward-body =
 
 # Mailman's `acknowledge` handler.
 notice-post-ack-subject = Xác nhận đã nhận bài gửi tới { $display_name }
+
+# Lệnh `notify` của Mailman: nhắc hằng ngày những gì người điều hành còn nợ.
+notice-pending-subject = Hộp thư { $listname } có { $count } yêu cầu đang chờ điều hành.
+notify-held-messages = Thư đang giữ:
+notify-held-subscriptions = Yêu cầu đăng ký đang chờ:
+notify-held-unsubscriptions = Yêu cầu rời đi đang chờ:
+notify-more = ... và { $count } yêu cầu nữa
