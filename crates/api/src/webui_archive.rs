@@ -4,9 +4,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use listmngr_core::{Error, ListId};
-use listmngr_web::escape;
+use listmngr_web::{Nav, Shell};
 use serde::{Deserialize, Serialize};
-use std::fmt::Write as _;
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -39,11 +38,7 @@ fn link(id: &ListId, q: &str, thread: &str, page: u32) -> ApiResult<String> {
     let encoded =
         serde_urlencoded::to_string([("q", q), ("thread", thread), ("page", &page.to_string())])
             .map_err(|error| Error::Validation(error.to_string()))?;
-    Ok(format!(
-        "/web/lists/{}/archive?{}",
-        escape(id.as_str()),
-        escape(&encoded)
-    ))
+    Ok(format!("/web/lists/{}/archive?{encoded}", id.as_str()))
 }
 
 pub(super) async fn browse(
@@ -108,13 +103,14 @@ pub(super) async fn browse(
         )
             .into_response());
     }
-    render(&id, &query, &messages)
+    render(&id, &query, &messages, super::language(&s, &headers))
 }
 
 fn render(
     id: &ListId,
     query: &ArchiveQuery,
     messages: &[listmngr_db::archive::ArchiveMessage],
+    language: &str,
 ) -> ApiResult<Response> {
     if query.format == ArchiveFormat::Mbox {
         return Ok((
@@ -129,68 +125,62 @@ fn render(
         )
             .into_response());
     }
-    let mut body = format!(
-        "<form method=\"get\"><label>Search archive <input name=\"q\" value=\"{}\" maxlength=\"200\"></label><input type=\"hidden\" name=\"thread\" value=\"{}\"><button>Search</button></form><p><a href=\"{}\">All threads</a></p><p><a href=\"{}\">Download this selection (mbox)</a></p><p>Downloads contain at most 20 messages, not a complete archive backup.</p>",
-        escape(&query.q),
-        escape(&query.thread),
-        link(id, &query.q, "", 1)?,
-        download_link(id, query)?,
-    );
-    if messages.is_empty() {
-        body.push_str("<p>No messages found.</p>");
-    }
+    let mut rendered = Vec::new();
     for message in messages.iter().take(20) {
-        write!(
-            body,
-            "<article><h2>{}</h2><p><a href=\"{}\">View thread</a> · <a href=\"{}\">Permanent link</a></p><pre>{}</pre>{}</article>",
-            escape(&message.subject),
-            link(id, &query.q, &message.thread, 1)?,
-            message_link(id, &message.hash)?,
-            escape(&message.body),
-            attachment_links(id, message)?,
-        )
-        .unwrap();
+        let (attachments, unavailable) = attachments(id, message, language)?;
+        rendered.push(listmngr_web::ArchiveMessage {
+            subject: message.subject.clone(),
+            thread_href: link(id, &query.q, &message.thread, 1)?,
+            permalink: message_link(id, &message.hash)?,
+            body: message.body.clone(),
+            attachments,
+            attachments_unavailable: unavailable,
+        });
     }
-    if query.page > 1 {
-        write!(
-            body,
-            "<a href=\"{}\">Previous</a> ",
-            link(id, &query.q, &query.thread, query.page - 1)?
-        )
-        .unwrap();
-    }
-    if messages.len() > 20 && query.page < 5001 {
-        write!(
-            body,
-            "<a href=\"{}\">Next</a>",
-            link(id, &query.q, &query.thread, query.page + 1)?
-        )
-        .unwrap();
-    }
-    Ok(super::page(&format!("Archive: {id}"), &body))
+    Ok(super::html(&listmngr_web::Archive {
+        shell: Shell::titled(
+            language,
+            listmngr_i18n::message(language, "web-title-archive", &[("list", id.as_str())]),
+            Nav::Lists,
+        ),
+        query: query.q.clone(),
+        thread: query.thread.clone(),
+        all_href: link(id, &query.q, "", 1)?,
+        download_href: download_link(id, query)?,
+        messages: rendered,
+        previous: if query.page > 1 {
+            Some(link(id, &query.q, &query.thread, query.page - 1)?)
+        } else {
+            None
+        },
+        next: if messages.len() > 20 && query.page < 5001 {
+            Some(link(id, &query.q, &query.thread, query.page + 1)?)
+        } else {
+            None
+        },
+    }))
 }
 
-fn attachment_links(
+/// Attachment downloads of one message, and whether the list could not be
+/// produced at all because the MIME structure is invalid or over the limits.
+fn attachments(
     id: &ListId,
     message: &listmngr_db::archive::ArchiveMessage,
-) -> ApiResult<String> {
+    language: &str,
+) -> ApiResult<(Vec<listmngr_web::ArchiveAttachment>, bool)> {
     let Ok(names) = listmngr_mail::attachments::names(&message.raw) else {
-        return Ok(
-            "<p>Attachments unavailable: MIME invalid or exceeds attachment limits.</p>".into(),
-        );
+        return Ok((Vec::new(), true));
     };
-    let mut links = String::new();
-    for (index, name) in names.iter().enumerate() {
-        write!(
-            links,
-            "<p><a href=\"{}&amp;attachment={}\">Download attachment: {}</a></p>",
-            message_link(id, &message.hash)?,
-            index,
-            escape(name)
-        )
-        .expect("format HTML");
-    }
-    Ok(links)
+    let permalink = message_link(id, &message.hash)?;
+    let links = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| listmngr_web::ArchiveAttachment {
+            href: format!("{permalink}&attachment={index}"),
+            label: listmngr_i18n::message(language, "web-archive-attachment", &[("name", name)]),
+        })
+        .collect();
+    Ok((links, false))
 }
 
 async fn archive_session(
@@ -209,19 +199,11 @@ fn download_link(id: &ListId, query: &ArchiveQuery) -> ApiResult<String> {
     query.format = ArchiveFormat::Mbox;
     let encoded =
         serde_urlencoded::to_string(query).map_err(|error| Error::Validation(error.to_string()))?;
-    Ok(format!(
-        "/web/lists/{}/archive?{}",
-        escape(id.as_str()),
-        escape(&encoded)
-    ))
+    Ok(format!("/web/lists/{}/archive?{encoded}", id.as_str()))
 }
 
 fn message_link(id: &ListId, hash: &str) -> ApiResult<String> {
     let encoded = serde_urlencoded::to_string([("message", hash)])
         .map_err(|error| Error::Validation(error.to_string()))?;
-    Ok(format!(
-        "/web/lists/{}/archive?{}",
-        escape(id.as_str()),
-        escape(&encoded)
-    ))
+    Ok(format!("/web/lists/{}/archive?{encoded}", id.as_str()))
 }

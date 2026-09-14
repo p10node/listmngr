@@ -1,19 +1,25 @@
 //! Owner settings forms; no bearer credentials or stale list snapshots.
 use super::{
-    ApiResult, AppState, Form, HeaderMap, IntoResponse, Path, Redirect, Response, State, escape,
-    hidden, load, options, page, write_session,
+    ApiResult, AppState, Form, HeaderMap, IntoResponse, Path, Redirect, Response, Shell, State,
+    html, language, load, write_session,
 };
 use listmngr_core::{ListId, ModerationAction};
+use listmngr_web::{Nav, NumberField, SelectField, choices};
 use serde::Deserialize;
-use std::fmt::Write as _;
 
 const ACTIONS: &[(&str, &str)] = &[
-    ("default", "Use system fallback"),
-    ("defer", "Defer (accept after safety checks)"),
-    ("accept", "Accept"),
-    ("hold", "Hold for review"),
-    ("reject", "Reject"),
-    ("discard", "Discard"),
+    ("default", "web-action-default"),
+    ("defer", "web-action-defer"),
+    ("accept", "web-policy-accept"),
+    ("hold", "web-policy-hold"),
+    ("reject", "web-policy-reject"),
+    ("discard", "web-policy-discard"),
+];
+const YES_NO: &[(&str, &str)] = &[("true", "web-yes"), ("false", "web-no")];
+const ARCHIVE: &[(&str, &str)] = &[
+    ("public", "web-archive-public"),
+    ("private", "web-archive-private"),
+    ("never", "web-archive-never"),
 ];
 
 pub(super) async fn form(
@@ -22,86 +28,93 @@ pub(super) async fn form(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
+    let language = language(&s, &headers);
     let list = s.db.browser_list_settings(&session, &id).await?;
-    let mut body = format!(
-        "<p>Settings for {}. Posting defaults apply to future decisions; safety checks and member overrides still apply. System fallback uses the server's configured posting action. Archive policy controls access and future archiving, not deletion of stored mail.</p><form method=\"post\" action=\"/web/lists/{}/settings\">{}",
-        escape(id.as_str()),
-        escape(id.as_str()),
-        hidden(&session)
-    );
-    write!(&mut body, "<p><label for=\"display_name\">Display name</label><input id=\"display_name\" name=\"display_name\" value=\"{}\"></p><p><label for=\"description\">Description</label><textarea id=\"description\" name=\"description\">{}</textarea></p>", escape(&list.display_name), escape(&list.description)).expect("HTML");
-    write!(&mut body, "<p><label for=\"subject_prefix\">Subject prefix</label><input type=\"text\" id=\"subject_prefix\" name=\"subject_prefix\" value=\"{}\" aria-describedby=\"subject-prefix-help\"><small id=\"subject-prefix-help\">Leave empty for no prefix. Spaces and Unicode are preserved; line breaks are not allowed. Applies when future outgoing posts are composed, not to mail already sent.</small></p>", escape(&list.subject_prefix)).expect("HTML");
-    for (name, label, choices, selected) in [
+    let selects = [
         (
             "emergency",
-            "Emergency moderation",
-            &[("true", "Yes"), ("false", "No")][..],
+            "web-settings-emergency",
+            YES_NO,
             list.emergency.to_string(),
         ),
         (
             "advertised",
-            "Show in public directory",
-            &[("true", "Yes"), ("false", "No")][..],
+            "web-settings-advertised",
+            YES_NO,
             list.advertised.to_string(),
         ),
         (
             "send_welcome_message",
-            "Send welcome messages",
-            &[("true", "Yes"), ("false", "No")][..],
+            "web-settings-welcome",
+            YES_NO,
             list.send_welcome_message.to_string(),
         ),
         (
             "send_goodbye_message",
-            "Send goodbye messages",
-            &[("true", "Yes"), ("false", "No")][..],
+            "web-settings-goodbye",
+            YES_NO,
             list.send_goodbye_message.to_string(),
         ),
         (
             "default_member_action",
-            "Default member posting action",
+            "web-settings-member-action",
             ACTIONS,
             list.default_member_action
                 .map_or_else(|| "default".into(), |a| a.to_string()),
         ),
         (
             "default_nonmember_action",
-            "Default nonmember posting action",
+            "web-settings-nonmember-action",
             ACTIONS,
             list.default_nonmember_action
                 .map_or_else(|| "default".into(), |a| a.to_string()),
         ),
         (
             "archive_policy",
-            "Archive policy",
-            &[
-                ("public", "Public"),
-                ("private", "Private"),
-                ("never", "Never"),
-            ][..],
+            "web-settings-archive-policy",
+            ARCHIVE,
             list.archive_policy.to_string(),
         ),
-    ] {
-        write!(&mut body, "<p><label for=\"{name}\">{label}</label><select id=\"{name}\" name=\"{name}\">{}</select></p>", options(choices, Some(&selected))).expect("HTML");
-    }
-    body.push_str("<p>Emergency moderation holds otherwise eligible new posts for review, even when posting defaults accept them. It is not a delivery shutdown: already queued mail and explicit moderator approvals can still be delivered. Turning it off does not release held posts.</p>");
-    for (name, label, value, help) in [
+    ]
+    .into_iter()
+    .map(|(name, label, values, selected)| SelectField {
+        name: name.to_owned(),
+        label: listmngr_i18n::message(language, label, &[]),
+        choices: choices(language, values, Some(&selected)),
+    })
+    .collect();
+    let numbers = [
         (
             "max_message_size",
-            "Maximum message size (KiB)",
+            "web-settings-max-size",
             list.max_message_size,
-            "Hold original posts larger than this size, including headers and attachments. 1 KiB is 1024 bytes; 0 disables this per-list limit, not the server intake limit.",
         ),
         (
             "max_num_recipients",
-            "To/Cc recipient hold threshold",
+            "web-settings-max-recipients",
             list.max_num_recipients,
-            "Hold posts at or above this visible To/Cc mailbox count. Repeated addresses count; Bcc and list subscribers do not. Unparseable headers are held when enabled. 0 disables this check.",
         ),
-    ] {
-        write!(&mut body, "<p><label for=\"{name}\">{label}</label><input type=\"number\" id=\"{name}\" name=\"{name}\" value=\"{value}\" min=\"0\" max=\"2147483647\" step=\"1\" required aria-describedby=\"{name}-help\"><small id=\"{name}-help\">{help}</small></p>").expect("HTML");
-    }
-    body.push_str("<p>Welcome and goodbye messages apply to future completed subscriptions and removals. Changing these settings does not send notices to existing subscribers or recall queued notices.</p><button>Save list settings</button></form><p><a href=\"/web/admin\">List administration</a></p>");
-    Ok(page("List settings", &body))
+    ]
+    .into_iter()
+    .map(|(name, label, value)| NumberField {
+        name: name.to_owned(),
+        label: listmngr_i18n::message(language, label, &[]),
+        value,
+        help: listmngr_i18n::message(language, &format!("{label}-help"), &[]),
+    })
+    .collect();
+    Ok(html(&listmngr_web::Settings {
+        shell: Shell::new(language, "web-title-settings", Nav::Account),
+        intro: listmngr_i18n::message(language, "web-settings-intro", &[("list", id.as_str())]),
+        action: format!("/web/lists/{}/settings", id.as_str()),
+        csrf: session.csrf.clone(),
+        display_name: list.display_name,
+        description: list.description,
+        subject_prefix: list.subject_prefix,
+        selects,
+        numbers,
+        admin_href: "/web/admin".into(),
+    }))
 }
 
 #[derive(Deserialize)]

@@ -1,0 +1,6 @@
+# The browser surface has always written the named character references, and
+# the acceptance tests read them; keep that exact output under Askama's
+# compile-time auto-escaping.
+[[escaper]]
+path = "crate::HtmlEscaper"
+extensions = ["html"]

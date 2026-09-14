@@ -1,0 +1,9 @@
+{%- macro csrf(token) -%}
+<input type="hidden" name="csrf" value="{{ token }}">
+{%- endmacro -%}
+{%- macro options(choices) -%}
+{% for choice in choices %}<option value="{{ choice.value }}"{% if choice.selected %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}
+{%- endmacro -%}
+{%- macro pagination(shell, pagination) -%}
+<nav aria-label="{{ shell.t("web-pagination-label") }}">{% if let Some(href) = pagination.previous %}<a href="{{ href }}">{{ shell.t("web-pagination-previous") }}</a> {% endif %}{% if let Some(href) = pagination.next %}<a href="{{ href }}">{{ shell.t("web-pagination-next") }}</a>{% endif %}</nav>
+{%- endmacro -%}

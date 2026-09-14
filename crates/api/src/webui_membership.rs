@@ -1,8 +1,9 @@
 //! Confirmed own-membership departure, independent of list advertisement.
 use super::{
-    ApiResult, AppState, Csrf, Form, HeaderMap, IntoResponse, Path, Redirect, Response, State,
-    escape, hidden, load, page, write_session,
+    ApiResult, AppState, Csrf, Form, HeaderMap, IntoResponse, Path, Redirect, Response, Shell,
+    State, html, language, load, write_session,
 };
+use listmngr_web::Nav;
 
 pub(super) async fn preview(
     State(s): State<AppState>,
@@ -10,16 +11,18 @@ pub(super) async fn preview(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
+    let language = language(&s, &headers);
     let (list, email) = s.db.browser_leave_preview(&session, member).await?;
-    Ok(page(
-        "Leave list",
-        &format!(
-            "<p>Remove the membership for {} on {}? This removes only this subscription, not your account or any owner/moderator role. Already queued mail may still arrive.</p><form method=\"post\" action=\"/web/members/{member}/leave\">{}<button>Leave this list</button></form><p><a href=\"/web/account\">Cancel</a></p>",
-            escape(&email),
-            escape(list.as_str()),
-            hidden(&session)
+    Ok(html(&listmngr_web::Leave {
+        shell: Shell::new(language, "web-title-leave", Nav::Account),
+        csrf: session.csrf.clone(),
+        action: format!("/web/members/{member}/leave"),
+        prompt: listmngr_i18n::message(
+            language,
+            "web-leave-prompt",
+            &[("email", &email), ("list", list.as_str())],
         ),
-    ))
+    }))
 }
 
 pub(super) async fn leave(
