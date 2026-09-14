@@ -25,9 +25,14 @@ request's own preferences alone. Nothing infers a language from the list, the
 
 htmx 2.0.10 is vendored and served from `/web/htmx.min.js`; a test pins its
 SHA-384 and asserts no shipped asset refers to another origin. No page includes
-it yet, so pages keep `default-src 'none'` and contain no script element. The
-one deliberate exception on this repository's HTTP surface is `/api/docs`, which
-still loads Swagger UI from a CDN and is tracked separately.
+it yet, so pages keep `default-src 'none'` and contain no script element.
+
+`/api/docs` is part of the same guarantee since `P1-API-DOCS-ORIGIN`:
+`crates/api/src/api_docs.rs` renders the API reference from the same OpenAPI
+value `/openapi.json` returns, into a template, so the page cannot drift from
+the API and an operator who opens it is not made to fetch code from a CDN. It
+carries the browser security headers and the same strict CSP; the source-level
+markup ban now covers every module of the `listmngr-api` crate.
 
 ## Aggregate final-audit authority — bounded acceptance verified
 

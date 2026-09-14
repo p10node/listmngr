@@ -1712,6 +1712,18 @@ held-review intent resolves recipients inside that lock and atomically schedules
 Out, Digest and policy-enabled Archive children. See the canonical convergence
 entry in the parity ledger; prior donor gate results below are historical.
 
+## API reference without a CDN (`P1-API-DOCS-ORIGIN`)
+
+`/api/docs` is a server-rendered reference generated from the same OpenAPI value
+`/openapi.json` returns: every documented path, its methods, summary, required
+scopes, parameters and response codes. It loads nothing from another origin,
+contains no script, and carries the same strict CSP as the browser surface.
+
+It is deliberately not an interactive explorer: point your own client (Swagger
+UI, Redoc, Bruno, Postman, `openapi-generator`) at `/openapi.json` when you want
+to issue requests from a UI. Embedding one would have meant either executing
+third-party JavaScript in the operator's origin or vendoring megabytes of it.
+
 ## Browser shell (`P4-SHELL`, bounded local acceptance verified)
 
 Every browser page now renders from one Askama template set in `crates/web`
