@@ -64,6 +64,8 @@ cargo test --locked -p listmngr-db --test mail_queue_runtime \
   postgres_isolated_finish_delivery_is_fenced_and_quarantines_ambiguous -- --ignored --exact
 cargo test --locked -p listmngr-api --test held \
   postgres_isolated_held_review_contract -- --ignored --exact
+cargo test --locked -p listmngr-api --test webui \
+  sessions::postgres_session_inventory_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::dsn_issuance_tests::dsn_issuance_postgres -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \

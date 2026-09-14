@@ -23,7 +23,9 @@ pub mod tasks;
 pub mod templates;
 pub mod test_support;
 pub mod web_admin;
+mod web_session_inventory;
 pub mod web_sessions;
+pub use web_session_inventory::SessionSummary;
 pub mod workflows;
 
 use std::{

@@ -3,6 +3,8 @@
 //! Handlers build view models; `listmngr_web` owns every byte of markup and
 //! escapes every value at compile time (ADR-0004). No handler concatenates
 //! HTML, and no page loads a third-party asset.
+#[path = "webui_account_sessions.rs"]
+mod account_sessions;
 #[path = "webui_admin.rs"]
 mod admin;
 #[path = "webui_archive.rs"]
@@ -111,6 +113,15 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/web/account/password",
             get(password::form).post(password::change),
+        )
+        .route("/web/account/sessions", get(account_sessions::index))
+        .route(
+            "/web/account/sessions/revoke-others",
+            post(account_sessions::revoke_others),
+        )
+        .route(
+            "/web/account/sessions/{id}/revoke",
+            post(account_sessions::revoke),
         )
         .route("/web/members/{id}/preferences", post(preferences))
         .route(
@@ -298,6 +309,21 @@ fn set_cookie(s: &AppState, session: &WebSession, r: &mut Response) -> ApiResult
     );
     Ok(())
 }
+/// Expire the session cookie, so a browser whose session just ended stops
+/// presenting a credential the server has already deleted.
+fn clear_cookie(s: &AppState, response: &mut Response) -> ApiResult<()> {
+    let (_, secure) = origin(s)?;
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        format!(
+            "listmngr_session=; Path=/web; HttpOnly; SameSite=Strict; Max-Age=0{}",
+            if secure { "; Secure" } else { "" }
+        )
+        .parse()
+        .map_err(|_| denied())?,
+    );
+    Ok(())
+}
 async fn write_session(s: &AppState, h: &HeaderMap, csrf: &str) -> ApiResult<WebSession> {
     check_origin(s, h)?;
     let session = load(s, h).await?;
@@ -444,16 +470,7 @@ async fn logout(
     let session = write_session(&s, &h, &f.csrf).await?;
     s.db.delete_web_session(&session).await?;
     let mut r = Redirect::to("/web").into_response();
-    let (_, secure) = origin(&s)?;
-    r.headers_mut().insert(
-        header::SET_COOKIE,
-        format!(
-            "listmngr_session=; Path=/web; HttpOnly; SameSite=Strict; Max-Age=0{}",
-            if secure { "; Secure" } else { "" }
-        )
-        .parse()
-        .unwrap(),
-    );
+    clear_cookie(&s, &mut r)?;
     Ok(r)
 }
 
