@@ -1,16 +1,18 @@
 //! Authenticated password change; password reset/recovery is a separate workflow.
-use super::*;
+use super::{
+    ApiError, ApiResult, AppState, Error, Form, HeaderMap, Response, Shell, State, header, html,
+    language, load, write_session,
+};
+use listmngr_web::Nav;
+use serde::Deserialize;
 
 pub(super) async fn form(State(s): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
     session.user_id.ok_or(Error::Authentication)?;
-    Ok(page(
-        "Change password",
-        &format!(
-            "<form method=\"post\" action=\"/web/account/password\">{}<p><label>Current password <input type=\"password\" name=\"current_password\" autocomplete=\"current-password\" maxlength=\"1024\" required></label></p><p><label>New password <input type=\"password\" name=\"new_password\" autocomplete=\"new-password\" maxlength=\"1024\" required></label></p><p><label>Confirm new password <input type=\"password\" name=\"confirm_password\" autocomplete=\"new-password\" maxlength=\"1024\" required></label></p><p>Changing your password signs you out on all browsers.</p><button>Change password</button></form>",
-            hidden(&session)
-        ),
-    ))
+    Ok(html(&listmngr_web::Password {
+        shell: Shell::new(language(&s, &headers), "web-title-password", Nav::Account),
+        csrf: session.csrf,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -37,10 +39,13 @@ pub(super) async fn change(
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     s.db.browser_change_password(&session, &f.current_password, &f.new_password)
         .await?;
-    let mut response = page(
-        "Password changed",
-        "<p>All your browser sessions have been signed out.</p><p><a href=\"/web/login\">Log in with your new password</a></p>",
-    );
+    let mut response = html(&listmngr_web::PasswordChanged {
+        shell: Shell::new(
+            language(&s, &headers),
+            "web-title-password-changed",
+            Nav::Account,
+        ),
+    });
     response.headers_mut().insert(
         header::SET_COOKIE,
         "listmngr_session=; Path=/web; HttpOnly; SameSite=Strict; Max-Age=0"

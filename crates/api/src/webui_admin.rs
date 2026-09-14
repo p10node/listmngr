@@ -3,12 +3,21 @@
 mod member_query;
 use super::{
     ApiResult, AppState, BrowserPage, Form, HeaderMap, IntoResponse, Path, Query, Redirect,
-    Response, State, escape, hidden, load, options, page, write_session,
+    Response, Shell, State, html, language, load, write_session,
 };
 use listmngr_core::{ListId, MemberId};
+use listmngr_web::{Nav, choices};
 use member_query::MemberQuery;
 use serde::Deserialize;
-use std::fmt::Write as _;
+
+const POLICIES: &[(&str, &str)] = &[
+    ("default", "web-policy-default"),
+    ("defer", "web-policy-defer"),
+    ("accept", "web-policy-accept"),
+    ("hold", "web-policy-hold"),
+    ("reject", "web-policy-reject"),
+    ("discard", "web-policy-discard"),
+];
 
 pub(super) async fn index(
     State(s): State<AppState>,
@@ -18,21 +27,21 @@ pub(super) async fn index(
     let session = load(&s, &headers).await?;
     let rows = s.db.browser_admin_lists(&session, paging.offset()?).await?;
     let more = rows.len() > 20;
-    let mut body = String::from("<p>Only lists you own or administer are shown.</p><ul>");
-    for (id, name) in rows.into_iter().take(20) {
-        write!(
-            &mut body,
-            "<li><a href=\"/web/lists/{}/members\">{} — {}</a> — <a href=\"/web/lists/{}/settings\">List settings</a></li>",
-            escape(&id),
-            escape(&id),
-            escape(&name),
-            escape(&id)
-        )
-        .expect("HTML");
-    }
-    body.push_str("</ul>");
-    body.push_str(&paging.links("/web/admin", more));
-    Ok(page("List administration", &body))
+    let rows = rows
+        .into_iter()
+        .take(20)
+        .map(|(id, name)| listmngr_web::AdminRow {
+            members_href: format!("/web/lists/{id}/members"),
+            settings_href: format!("/web/lists/{id}/settings"),
+            id,
+            name,
+        })
+        .collect();
+    Ok(html(&listmngr_web::AdminIndex {
+        shell: Shell::new(language(&s, &headers), "web-title-admin", Nav::Account),
+        rows,
+        pagination: paging.pagination("/web/admin", more),
+    }))
 }
 
 pub(super) async fn members(
@@ -42,28 +51,39 @@ pub(super) async fn members(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
+    let language = language(&s, &headers);
     let rows =
         s.db.browser_search_members(&session, &list, paging.offset()?, &paging.q)
             .await?;
     let more = rows.len() > 20;
-    let mut body = format!(
-        "<p>Members of {}. Overrides affect future posting decisions, not already held or queued mail. Other safety checks still apply.</p>",
-        escape(list.as_str())
-    );
-    write!(&mut body, "<form method=\"get\" action=\"/web/lists/{}/members\"><label for=\"member-search\">Search member email</label><input id=\"member-search\" name=\"q\" value=\"{}\" maxlength=\"320\"><button>Search members</button></form><p><a href=\"/web/lists/{}/members\">Clear search</a></p>", escape(list.as_str()), escape(&paging.q), escape(list.as_str())).expect("HTML");
-    if rows.is_empty() {
-        body.push_str("<p>No matching members.</p>");
-    }
-    let form_hidden = hidden(&session) + &paging.hidden();
-    for member in rows.into_iter().take(20) {
-        let selected = member
-            .action
-            .map_or_else(|| "default".into(), |a| a.to_string());
-        write!(&mut body, "<article><h2>{}</h2><form method=\"post\" action=\"/web/lists/{}/members/{}/policy\">{}<p><label for=\"policy-{member_id}\">Posting policy</label> <select id=\"policy-{member_id}\" name=\"action\">{}</select></p><button>Save posting policy</button></form></article>", escape(&member.email), escape(list.as_str()), member.id, form_hidden, options(&[("default","Use list default"),("defer","Defer (currently accepts after safety checks)"),("accept","Accept"),("hold","Hold for review"),("reject","Reject"),("discard","Discard")], Some(&selected)), member_id=member.id).expect("HTML");
-    }
-    body.push_str(&paging.links(&list, more));
-    body.push_str("<p><a href=\"/web/admin\">List administration</a></p>");
-    Ok(page("List members", &body))
+    let rows = rows
+        .into_iter()
+        .take(20)
+        .map(|member| {
+            let selected = member
+                .action
+                .map_or_else(|| "default".into(), |a| a.to_string());
+            listmngr_web::MemberRow {
+                email: member.email,
+                action: format!("/web/lists/{}/members/{}/policy", list.as_str(), member.id),
+                control: format!("policy-{}", member.id),
+                choices: choices(language, POLICIES, Some(&selected)),
+            }
+        })
+        .collect();
+    Ok(html(&listmngr_web::Members {
+        shell: Shell::new(language, "web-title-members", Nav::Account),
+        intro: listmngr_i18n::message(language, "web-members-intro", &[("list", list.as_str())]),
+        search_action: format!("/web/lists/{}/members", list.as_str()),
+        query: paging.q.clone(),
+        clear_href: format!("/web/lists/{}/members", list.as_str()),
+        csrf: session.csrf.clone(),
+        carried_query: paging.q.clone(),
+        carried_page: paging.page,
+        rows,
+        pagination: paging.pagination(&list, more),
+        admin_href: "/web/admin".into(),
+    }))
 }
 
 #[derive(Deserialize)]

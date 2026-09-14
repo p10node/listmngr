@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block content %}<p>{{ shell.t("web-admin-scope") }}</p><ul>{% for row in rows %}<li><a href="{{ row.members_href }}">{{ row.id }} — {{ row.name }}</a> — <a href="{{ row.settings_href }}">{{ shell.t("web-title-settings") }}</a></li>{% endfor %}</ul>{% call ui::pagination(shell, pagination) %}{% endcall %}{% endblock %}

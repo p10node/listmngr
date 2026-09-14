@@ -59,6 +59,37 @@ fn unknown_languages_and_missing_messages_fall_back_without_panicking() {
     assert_eq!(message("en", "no-such-message", &[]), "no-such-message");
 }
 
+/// Every placeable any catalog uses, so a message resolves rather than falling
+/// back to its own id.
+const ARGUMENTS: &[(&str, &str)] = &[
+    ("display_name", "x"),
+    ("listname", "x"),
+    ("member", "x"),
+    ("action", "x"),
+    ("sender", "x"),
+    ("token", "x"),
+    ("count", "1"),
+    ("list", "x"),
+    ("name", "x"),
+    ("email", "x"),
+    ("address", "x"),
+    ("mode", "x"),
+    ("status", "x"),
+];
+
+#[test]
+fn every_english_message_resolves_with_the_known_placeables() {
+    for id in listmngr_i18n::message_ids() {
+        for language in listmngr_i18n::SUPPORTED {
+            assert_ne!(
+                message(language, id, ARGUMENTS),
+                id,
+                "{language}: {id} does not resolve"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_english_message_has_a_vietnamese_translation() {
     for id in listmngr_i18n::message_ids() {
@@ -67,32 +98,8 @@ fn every_english_message_has_a_vietnamese_translation() {
             continue;
         }
         assert_ne!(
-            message(
-                "vi",
-                id,
-                &[
-                    ("display_name", "x"),
-                    ("listname", "x"),
-                    ("member", "x"),
-                    ("action", "x"),
-                    ("sender", "x"),
-                    ("token", "x"),
-                    ("count", "1")
-                ]
-            ),
-            message(
-                "en",
-                id,
-                &[
-                    ("display_name", "x"),
-                    ("listname", "x"),
-                    ("member", "x"),
-                    ("action", "x"),
-                    ("sender", "x"),
-                    ("token", "x"),
-                    ("count", "1")
-                ]
-            ),
+            message("vi", id, ARGUMENTS),
+            message("en", id, ARGUMENTS),
             "{id} is not translated"
         );
     }

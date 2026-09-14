@@ -1712,6 +1712,32 @@ held-review intent resolves recipients inside that lock and atomically schedules
 Out, Digest and policy-enabled Archive children. See the canonical convergence
 entry in the parity ledger; prior donor gate results below are historical.
 
+## Browser shell (`P4-SHELL`, bounded local acceptance verified)
+
+Every browser page now renders from one Askama template set in `crates/web`
+(`templates/base.html` plus one template per page); no handler builds markup.
+Auto-escaping is compile-time and writes the same named character references as
+before, so the pages are byte-compatible with the previous output.
+
+- **Language.** The shell and every page string come from the shared Fluent
+  catalog (`crates/i18n/locales/{en,vi}.ftl`). Each request negotiates the
+  document language from the browser's ordered `Accept-Language` preferences,
+  then `site.default_language`, then English, and stamps it on `<html lang>`.
+  A signed-in user's stored `preferred_language` does not override the browser
+  yet. Only `en` and `vi` ship.
+- **Appearance.** `crates/web/assets/style.css` holds design tokens that both
+  colour schemes bind; dark mode follows `prefers-color-scheme` and needs no
+  per-page markup.
+- **Accessibility.** Landmarks, a skip link, visible focus and
+  `aria-current="page"` on the navigation item being read. The Chromium
+  acceptance runs axe-core over four representative pages and fails on any
+  `critical` or `serious` violation.
+- **Scripts.** htmx 2.0.10 is vendored (0BSD, `crates/web/assets/README.md`
+  records its provenance and SHA-384) and served from this origin at
+  `/web/htmx.min.js`. No page loads it yet, so every page keeps
+  `default-src 'none'` and contains no `<script>` element. Nothing on the
+  browser surface loads a third-party origin.
+
 Open `/web` on the same `serve` process after migrating the database. The browser
 router is separate from Bearer/compatibility API authentication; do not paste API
 tokens into browser forms. Configure `site.base_url` to the exact browser origin
@@ -1772,9 +1798,13 @@ cargo test --locked -p listmngr-api --test webui --test phase0_security
 python3 -m venv /tmp/listmngr-webui-browser-venv
 /tmp/listmngr-webui-browser-venv/bin/pip install playwright==1.55.0
 /tmp/listmngr-webui-browser-venv/bin/playwright install chromium
+# axe-core is development-only and is passed in, not vendored; without
+# WEBUI_AXE_SCRIPT the run prints AXE SKIPPED and scans nothing:
+curl -sSo /tmp/axe.min.js https://cdn.jsdelivr.net/npm/axe-core@4.13.0/axe.min.js
 WEBUI_BROWSER_PYTHON=/tmp/listmngr-webui-browser-venv/bin/python \
 WEBUI_BROWSER_SCRIPT="$PWD/scripts/test-webui-browser.py" \
 WEBUI_BROWSER_OUTPUT=/tmp/listmngr-webui-browser-evidence \
+WEBUI_AXE_SCRIPT=/tmp/axe.min.js \
   cargo test --locked -p listmngr-api --test webui chromium_browser_acceptance -- --ignored --nocapture
 ```
 

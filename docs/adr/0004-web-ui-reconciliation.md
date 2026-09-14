@@ -39,3 +39,12 @@ Three descriptions of the browser UI had drifted apart:
   template crate; its escaper is replaced by Askama's auto-escaping.
 - The ledger's `P4-WEB-*` rows keep their evidence; their pages are re-verified
   when migrated under `P4-SHELL`.
+
+## Status
+
+Point 3 is done: `P4-SHELL` migrated all twenty routes plus the one-click and
+compatibility-archive pages to Askama, and a source-level test now fails on any
+markup built inside a handler. Point 2 is done except for the CSP nonce: htmx is
+vendored and served from this origin but no page loads it, so pages keep
+`default-src 'none'` and carry no inline script. The first work package that
+needs progressive enhancement adds the nonce with the first script tag.

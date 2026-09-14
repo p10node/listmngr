@@ -1,8 +1,9 @@
 //! Verified-session confirmation only; no mailbox challenge or probe is sent.
 use super::{
-    ApiResult, AppState, Csrf, Form, HeaderMap, IntoResponse, Path, Redirect, Response, State,
-    escape, hidden, load, page, write_session,
+    ApiResult, AppState, Csrf, Form, HeaderMap, IntoResponse, Path, Redirect, Response, Shell,
+    State, html, language, load, write_session,
 };
+use listmngr_web::Nav;
 pub(super) async fn recover(
     State(s): State<AppState>,
     Path(member): Path<listmngr_core::MemberId>,
@@ -19,14 +20,16 @@ pub(super) async fn preview(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
+    let language = language(&s, &headers);
     let (list, email) = s.db.browser_recover_preview(&session, member).await?;
-    Ok(page(
-        "Restore delivery",
-        &format!(
-            "<p>Verify that your mailbox is working before restoring delivery for {} on {}. This resets this subscription's bounce score and warning cycle. No mailbox challenge or probe is sent.</p><form method=\"post\" action=\"/web/members/{member}/recover\">{}<button>Restore delivery</button></form><p><a href=\"/web/account\">Cancel</a></p>",
-            escape(&email),
-            escape(list.as_str()),
-            hidden(&session)
+    Ok(html(&listmngr_web::Recover {
+        shell: Shell::new(language, "web-title-recover", Nav::Account),
+        csrf: session.csrf.clone(),
+        action: format!("/web/members/{member}/recover"),
+        prompt: listmngr_i18n::message(
+            language,
+            "web-recover-prompt",
+            &[("email", &email), ("list", list.as_str())],
         ),
-    ))
+    }))
 }

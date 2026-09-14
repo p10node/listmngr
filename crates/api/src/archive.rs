@@ -4,7 +4,7 @@ use super::{
     Json, ListId, Path, Query, Response, Router, SocketAddr, State, authenticate_for_authorization,
     finish_authorization, get, header, peer,
 };
-use std::fmt::Write as _;
+use askama::Template;
 #[derive(Debug, Default, Deserialize)]
 pub struct ArchiveQuery {
     q: Option<String>,
@@ -124,30 +124,22 @@ async fn export(
             .into_response(),
     ))
 }
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
 fn render(list: &ListId, rows: &[listmngr_db::archive::ArchiveMessage]) -> Response {
-    let list = escape(list.as_str());
-    let mut html = format!(
-        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>{list} archive</title><body><h1>{list} archive</h1><form method=\"get\"><label>Search <input name=\"q\"></label><button>Search</button></form>"
-    );
-    for row in rows {
-        // Hashes are base32 identifiers from the parser; escaping is still unconditional.
-        let _ = write!(
-            html,
-            "<article><h2><a href=\"/archives/{list}/thread/{}\">{}</a></h2><pre>{}</pre></article>",
-            escape(&row.thread),
-            escape(&row.subject),
-            escape(&row.body)
-        );
-    }
-    html.push_str("</body></html>");
-    secured(Html(html).into_response())
+    let entries = rows
+        .iter()
+        .map(|row| listmngr_web::ArchiveCompatEntry {
+            // Hashes are base32 identifiers from the parser; the template
+            // escapes them unconditionally all the same.
+            href: format!("/archives/{}/thread/{}", list.as_str(), row.thread),
+            subject: row.subject.clone(),
+            body: row.body.clone(),
+        })
+        .collect();
+    let page = listmngr_web::ArchiveCompat {
+        list: list.to_string(),
+        entries,
+    };
+    secured(Html(page.render().expect("template renders")).into_response())
 }
 async fn page(
     State(state): State<AppState>,
