@@ -1770,12 +1770,22 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
 - `/web/account`: your verified-address member subscriptions, delivery-mode and
   enabled/self-paused preference forms, and POST logout. Moderator/bounce-disabled
   delivery cannot be re-enabled here.
+- `/web/account/sessions`: every browser currently signed in to the account,
+  with when it was issued and when it expires, the one making the request
+  marked. A reader can end one session or every other session; each revocation
+  is one audited transaction. Sessions are addressed by an opaque id — the token
+  digest never reaches the page. Changing the password still ends all of them.
 - `/web/moderation`: server owners or verified linked list owners/moderators can
   review held mail. Queues show 20 messages/page and at most 64 KiB of escaped
   source per message, bounded in SQL. Accept creates a real outgoing job and
   recipient snapshot; defer keeps held; reject publishes a guarded author notice
   and discard stays silent. Acceptance retains canonical archive scheduling and
   cooking policy; an archive browsing/search UX is not implemented.
+
+Upgrading past migration `0043` signs every browser out once: the migration
+deletes existing session rows rather than backfilling them with an id derived
+from a credential digest. Sessions are short-lived (eight hours authenticated),
+so this costs one login.
 
 Sessions use opaque random credentials, hashed storage, independent CSRF secrets,
 rotation at login, server-side logout revocation and password-version checks.

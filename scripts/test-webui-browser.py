@@ -193,6 +193,21 @@ with sync_playwright() as p:
     page.get_by_label('Password', exact=True).fill('new strong password phrase 2026!')
     page.get_by_role('button', name='Log in', exact=True).click()
     expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
+    # P4-ACCOUNT-SESSIONS: the reader sees this browser's own session and can end it.
+    page.get_by_role('link', name='Signed-in browsers', exact=True).click()
+    expect(page.get_by_role('heading', name='Signed-in browsers', exact=True)).to_be_visible()
+    expect(page.get_by_role('heading', name='This browser', exact=True)).to_be_visible()
+    page.screenshot(path=str(out / '12-sessions.png'), full_page=True)
+    page.get_by_role('button', name='Sign this browser out', exact=True).click()
+    expect(page.get_by_role('heading', name='Mailing lists')).to_be_visible()
+    assert not any(c['name'] == 'listmngr_session' for c in context.cookies()), 'ending this session cleared its cookie'
+    denied_account = context.request.get(base + '/web/account')
+    assert denied_account.status == 401
+    page.goto(base + '/web/login')
+    page.get_by_label('Email', exact=True).fill('browser@example.com')
+    page.get_by_label('Password', exact=True).fill('new strong password phrase 2026!')
+    page.get_by_role('button', name='Log in', exact=True).click()
+    expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
     page.get_by_role('button', name='Log out', exact=True).click()
     expect(page.get_by_role('heading', name='Mailing lists')).to_be_visible()
     assert not any(c['name'] == 'listmngr_session' for c in context.cookies())
@@ -256,7 +271,7 @@ with sync_playwright() as p:
     dark_page.goto(base + '/web')
     dark = dark_page.evaluate('getComputedStyle(document.documentElement).backgroundColor')
     assert dark != light, f'dark scheme is not distinct: {dark}'
-    dark_page.screenshot(path=str(out / '10-dark-directory.png'), full_page=True)
+    dark_page.screenshot(path=str(out / '14-dark-directory.png'), full_page=True)
     dark_context.close()
     vietnamese = browser.new_context(locale='vi-VN')
     vietnamese_page = vietnamese.new_page()
@@ -266,7 +281,7 @@ with sync_playwright() as p:
     expect(vietnamese_page.get_by_role('link', name='Đăng ký của tôi', exact=True)).to_be_visible()
     vietnamese_page.goto(base + '/web/lists/public.example.com')
     expect(vietnamese_page.get_by_role('button', name='Gửi hướng dẫn xác nhận', exact=True)).to_be_visible()
-    vietnamese_page.screenshot(path=str(out / '11-vietnamese-list.png'), full_page=True)
+    vietnamese_page.screenshot(path=str(out / '15-vietnamese-list.png'), full_page=True)
     vietnamese.close()
     headers = context.request.get(base + '/web').headers
     assert headers['content-security-policy'] == (
@@ -301,6 +316,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; own session listed and ended; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()
