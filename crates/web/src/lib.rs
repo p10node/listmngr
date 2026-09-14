@@ -47,7 +47,9 @@ pub use pages::{
     Login, MemberRow, Members, Moderation, ModerationRow, NumberField, Password, PasswordChanged,
     Preferences, Recover, SelectField, Settings, Subscription, Unsubscribe, Unsubscribed,
 };
-pub use pages::{ApiDocs, ArchiveCompat, ArchiveCompatEntry, DocOperation, DocPath};
+pub use pages::{
+    ApiDocs, ArchiveCompat, ArchiveCompatEntry, DocOperation, DocPath, SessionRow, Sessions,
+};
 
 /// The stylesheet, served from this origin with the design tokens the shell and
 /// every page share. Both colour schemes come from the same token names.

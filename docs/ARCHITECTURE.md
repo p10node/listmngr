@@ -1,5 +1,18 @@
 # Architecture
 
+## Session inventory — bounded local acceptance verified
+
+`web_sessions` rows carry an opaque `id` and a `created_at` since migration
+`0043`, so a reader can be shown their own sessions and name one for
+revocation without the page ever carrying the token digest that authenticates
+it. `crates/db/src/web_session_inventory.rs` reads them under a live-session
+check and revokes under `browser_write_tx` + `browser_user_tx`, the same
+authority every other browser write uses, with one `web.session.revoke` audit
+event committed in the same transaction. Revoking the session making the
+request also clears its cookie, so the browser stops presenting a credential
+the server has deleted. The migration deletes existing rows instead of
+backfilling an id from `token_hash`.
+
 ## Browser shell and one rendering path — bounded local acceptance verified
 
 `crates/web` is the presentation crate: Askama templates (`crates/web/templates`)
