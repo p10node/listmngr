@@ -607,7 +607,7 @@ Hai prefix: `/3.1/` (compat, JSON shape giống Mailman 3.3 để `mailmanclient
 | archive (mới)  | `/api/v1/archive/...` (search, threads, mbox export)                                                                                                                                                                                                                                                      | P5               |
 | webhooks (mới) | `/api/v1/webhooks`                                                                                                                                                                                                                                                                                        | P6               |
 | Auth           | `/3.1/`: Basic (khi `compat_basic_auth`, CIDR allowlist) hoặc Bearer; `/api/v1/`: Bearer scoped token                                                                                                                                                                                                     | P1               |
-| OpenAPI        | `/openapi.json` + Swagger UI tại `/api/docs`                                                                                                                                                                                                                                                              | P1               |
+| OpenAPI        | `/openapi.json` + trang tham chiếu SSR tại `/api/docs` (không nhúng Swagger UI: không tải asset bên thứ ba, không script — P1-API-DOCS-ORIGIN)                                                                                                                                                                                                                                                              | P1               |
 
 ### 4.11 Core — CLI (`mailman` → `listmngr`)
 
@@ -835,7 +835,7 @@ Mục tiêu: tạo domain/list/user/member qua REST + CLI; `mailmanclient` subse
 - [x] Styles: 3 built-in + apply khi create
 - [x] REST `/3.1/`: system, domains, lists (+config GET/PUT/PATCH toàn bộ attr), styles, users, addresses, members (roster, subscribe pre_* only, preferences), owners, find
 - [x] Auth: Bearer token + scopes; Basic compat (allowlist); rate-limit
-- [x] `/api/v1/` cùng handler, OpenAPI (utoipa), Swagger UI
+- [x] `/api/v1/` cùng handler, OpenAPI (utoipa), trang tham chiếu SSR `/api/docs` phục vụ từ chính origin
 - [x] CLI: `lists create/remove/ls`, `members add/del/ls/sync/find`, `user create/passwd`, `token create/revoke`, `domains add/rm/ls`
 - [x] Audit ghi cho mọi write
 - [x] Acceptance: integration tests on PostgreSQL + SQLite cover the Phase 1 CRUD contract; Python `mailmanclient==3.3.5` script passes create domain → list → subscribe → set config → roster; exhaustive differential test covers nullable preference layering. Exact evidence is recorded in `docs/FEATURE_PARITY.md`.

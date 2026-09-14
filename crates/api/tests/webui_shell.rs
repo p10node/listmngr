@@ -51,7 +51,9 @@ async fn body(response: Response) -> String {
 }
 
 /// Two rendering paths do not coexist after this work package (ADR-0004): no
-/// browser handler may contain markup, only templates may.
+/// handler in this crate may contain markup, only templates may. Since
+/// `P1-API-DOCS-ORIGIN` that covers every page this server serves, `/api/docs`
+/// included.
 #[test]
 fn browser_handlers_build_no_html_by_hand() {
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -59,9 +61,7 @@ fn browser_handlers_build_no_html_by_hand() {
     for entry in std::fs::read_dir(&source).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        // Every module that answers a browser with a page. `/api/docs` is a
-        // separate surface and is tracked on its own acceptance row.
-        if !(name.starts_with("webui") || name == "unsubscribe.rs" || name == "archive.rs") {
+        if path.extension().is_none_or(|extension| extension != "rs") {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap();
