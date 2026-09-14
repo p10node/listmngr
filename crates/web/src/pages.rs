@@ -453,3 +453,46 @@ pub struct ArchiveCompatEntry {
     /// Rendered body text.
     pub body: String,
 }
+
+/// This server's own API reference, rendered from its `OpenAPI` document so
+/// the page needs no script and no third-party asset.
+#[derive(Debug, Template)]
+#[template(path = "api_docs.html")]
+pub struct ApiDocs {
+    /// API title from the document.
+    pub title: String,
+    /// API version from the document.
+    pub version: String,
+    /// What this page is and what it is not.
+    pub intro: String,
+    /// How a caller authenticates, in one sentence.
+    pub authentication: String,
+    /// Documented paths, in document order.
+    pub paths: Vec<DocPath>,
+    /// Closing note.
+    pub footer: String,
+}
+
+/// One documented path and its operations.
+#[derive(Debug)]
+pub struct DocPath {
+    /// Path template, such as `/api/v1/lists/{id}`.
+    pub path: String,
+    /// Operations on this path.
+    pub operations: Vec<DocOperation>,
+}
+
+/// One documented operation.
+#[derive(Debug)]
+pub struct DocOperation {
+    /// Upper-case HTTP method.
+    pub method: String,
+    /// Summary, empty when the document carries none.
+    pub summary: String,
+    /// Required scopes, already joined for reading.
+    pub scopes: String,
+    /// Parameters, already joined for reading.
+    pub parameters: String,
+    /// Response status codes, already joined for reading.
+    pub responses: String,
+}

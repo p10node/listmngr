@@ -2,6 +2,7 @@
 
 //! Axum REST API shared by Mailman-compatible `/3.1` and typed `/api/v1` routes.
 
+mod api_docs;
 mod archive;
 mod bans;
 mod bounce_config;
@@ -907,7 +908,7 @@ pub fn router(db: Database, config: Config) -> Router {
         .route("/readyz", get(ready))
         .route("/metrics", get(metrics))
         .route("/openapi.json", get(openapi))
-        .route("/api/docs", get(swagger))
+        .route("/api/docs", get(api_documentation))
         .nest("/3.1", phase_one_routes().with_state(compat_state))
         .nest(
             "/api/v1",
@@ -1081,10 +1082,8 @@ async fn metrics(State(s): State<AppState>) -> impl IntoResponse {
 async fn openapi() -> Json<Value> {
     Json(serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI serializes"))
 }
-async fn swagger() -> Html<&'static str> {
-    Html(
-        r#"<!doctype html><html><head><title>listmngr API</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script><script>SwaggerUIBundle({url:'/openapi.json',dom_id:'#swagger-ui'});</script></body></html>"#,
-    )
+async fn api_documentation() -> Response {
+    api_docs::render(&serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI serializes"))
 }
 
 async fn authenticate_for_authorization(

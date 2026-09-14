@@ -22,6 +22,7 @@
 - CLI member find/delete validate normalized IDNA addresses; adapter validation and missing-resource errors retain their stable exit categories.
 
 ### Security
+- `/api/docs` no longer loads Swagger UI from a CDN (`P1-API-DOCS-ORIGIN`). The API reference is rendered from this server's own OpenAPI document, contains no script, and carries the strict browser CSP; `/openapi.json` still serves any external explorer.
 - htmx 2.0.10 is vendored (0BSD) and served from this origin with its SHA-384 pinned by a test; no browser page loads a third-party asset, and pages keep `default-src 'none'` with no script element.
 - `rustls` moved to 0.23.45 in the lockfile for RUSTSEC-2026-0285 (TLS 1.3 handshake messages accepted across encryption-level boundaries).
 - Static musl/scratch non-root container, filtered Docker context, runtime-only PostgreSQL credentials, hardened systemd unit, and explicit deny/audit policy.
