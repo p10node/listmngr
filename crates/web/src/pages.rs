@@ -496,3 +496,30 @@ pub struct DocOperation {
     /// Response status codes, already joined for reading.
     pub responses: String,
 }
+
+/// The reader's own browser sessions.
+#[derive(Debug, Template)]
+#[template(path = "sessions.html")]
+pub struct Sessions {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Live sessions, newest first.
+    pub sessions: Vec<SessionRow>,
+    /// Whether any session other than this browser is listed.
+    pub others: bool,
+}
+
+/// One listed browser session.
+#[derive(Debug)]
+pub struct SessionRow {
+    /// Revocation form target.
+    pub action: String,
+    /// When it was issued, already formatted.
+    pub created: String,
+    /// When it expires, already formatted.
+    pub expires: String,
+    /// Whether this is the browser making the request.
+    pub current: bool,
+}

@@ -18,7 +18,7 @@ pub struct WebSession {
     pub csrf: String,
     pub user_id: Option<UserId>,
 }
-fn digest(token: &str) -> String {
+pub(crate) fn digest(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
 }
 fn secret() -> String {
@@ -130,8 +130,9 @@ impl Database {
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
-        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at) VALUES($1,$2,$3,$4,$5)")
-            .bind(digest(&token)).bind(&csrf).bind(proof.user.to_string()).bind(&proof.version).bind(now_ms+28_800_000).execute(&mut *tx).await.map_err(db_error)?;
+        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)")
+            .bind(digest(&token)).bind(&csrf).bind(proof.user.to_string()).bind(&proof.version).bind(now_ms+28_800_000)
+            .bind(crate::web_session_inventory::session_id()).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
         Self::record_tx_with_context(
             &mut tx,
             &AuditContext::new(Some(proof.user), None, None),
@@ -186,7 +187,7 @@ impl Database {
                 .await
                 .map_err(db_error)?;
         }
-        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at) VALUES($1,$2,$3,$4,$5)").bind(digest(&token)).bind(&csrf).bind(user.map(|u|u.to_string())).bind(version).bind(now_ms+if user.is_some(){28_800_000}else{1_800_000}).execute(&mut *tx).await.map_err(db_error)?;
+        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)").bind(digest(&token)).bind(&csrf).bind(user.map(|u|u.to_string())).bind(version).bind(now_ms+if user.is_some(){28_800_000}else{1_800_000}).bind(crate::web_session_inventory::session_id()).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
         if let Some(user_id) = user {
             Self::record_tx_with_context(
                 &mut tx,

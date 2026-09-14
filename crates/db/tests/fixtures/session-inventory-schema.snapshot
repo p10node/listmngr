@@ -1,0 +1,3 @@
+C|web_sessions|created_at|integer|optional|-
+C|web_sessions|id|text|optional|-
+U|web_sessions|id

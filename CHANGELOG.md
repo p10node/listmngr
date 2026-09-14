@@ -8,6 +8,9 @@
 - Disposable real-client acceptance harness and CI wiring for live PostgreSQL schema semantics and production-crate checks.
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
+### Added
+- `/web/account/sessions` lists the reader's own signed-in browsers and ends one or every other session, each revocation audited in its own transaction (`P4-ACCOUNT-SESSIONS`).
+
 ### Changed
 - Browser pages render from one Askama template set with compile-time auto-escaping (`P4-SHELL`); handlers build view models and no longer concatenate markup. Output stays byte-compatible with the previous escaper.
 - The browser shell takes its strings from the shared Fluent catalog and negotiates the document language per request from `Accept-Language`, then `site.default_language`, then English; `en` and `vi` ship.
