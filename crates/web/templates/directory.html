@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block content %}<ul>{% for entry in entries %}<li><a href="{{ entry.href }}">{{ entry.name }}</a> — {{ entry.id }}<p>{{ entry.description }}</p></li>{% endfor %}</ul>{% call ui::pagination(shell, pagination) %}{% endcall %}{% endblock %}

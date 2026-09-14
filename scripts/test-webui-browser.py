@@ -245,7 +245,62 @@ with sync_playwright() as p:
         assert b'Archived text <script>unsafe</script>' in payload
     finally:
         exported.close()
+    # P4-SHELL: one template shell — document language, current-page marking,
+    # both colour schemes, and no third-party asset on any page.
+    page.goto(base + '/web')
+    assert page.evaluate('document.documentElement.lang') == 'en', 'shell language'
+    assert page.locator('nav a[aria-current="page"]').count() == 1, 'the current page is marked'
+    light = page.evaluate('getComputedStyle(document.documentElement).backgroundColor')
+    dark_context = browser.new_context(color_scheme='dark')
+    dark_page = dark_context.new_page()
+    dark_page.goto(base + '/web')
+    dark = dark_page.evaluate('getComputedStyle(document.documentElement).backgroundColor')
+    assert dark != light, f'dark scheme is not distinct: {dark}'
+    dark_page.screenshot(path=str(out / '10-dark-directory.png'), full_page=True)
+    dark_context.close()
+    vietnamese = browser.new_context(locale='vi-VN')
+    vietnamese_page = vietnamese.new_page()
+    vietnamese_page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' else None)
+    vietnamese_page.goto(base + '/web')
+    assert vietnamese_page.evaluate('document.documentElement.lang') == 'vi', 'negotiated language'
+    expect(vietnamese_page.get_by_role('link', name='Đăng ký của tôi', exact=True)).to_be_visible()
+    vietnamese_page.goto(base + '/web/lists/public.example.com')
+    expect(vietnamese_page.get_by_role('button', name='Gửi hướng dẫn xác nhận', exact=True)).to_be_visible()
+    vietnamese_page.screenshot(path=str(out / '11-vietnamese-list.png'), full_page=True)
+    vietnamese.close()
+    headers = context.request.get(base + '/web').headers
+    assert headers['content-security-policy'] == (
+        "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; "
+        "frame-ancestors 'none'"
+    ), headers['content-security-policy']
+    htmx = context.request.get(base + '/web/htmx.min.js')
+    assert htmx.status == 200 and len(htmx.body()) > 10000, 'htmx is served from this origin'
+
+    # Accessibility. axe-core is a development-only scanner, so it is passed in
+    # rather than vendored; `page.evaluate` is not subject to the page CSP.
+    axe_path = os.environ.get('WEBUI_AXE_SCRIPT')
+    if axe_path:
+        axe_source = Path(axe_path).read_text(encoding='utf-8')
+        scanned = [
+            '/web',
+            '/web/login',
+            '/web/lists/public.example.com',
+            '/web/lists/public.example.com/archive',
+        ]
+        for path in scanned:
+            page.goto(base + path)
+            page.evaluate(axe_source)
+            report = page.evaluate("async () => await axe.run(document, {resultTypes: ['violations']})")
+            blocking = [
+                f"{violation['id']} ({violation['impact']}) on {path}"
+                for violation in report['violations']
+                if violation['impact'] in ('critical', 'serious')
+            ]
+            assert not blocking, blocking
+        print(f'AXE PASS: no critical or serious violations on {len(scanned)} pages.', flush=True)
+    else:
+        print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()

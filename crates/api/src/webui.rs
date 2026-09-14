@@ -1,4 +1,8 @@
 //! Browser interface. This router is deliberately outside bearer API middleware.
+//!
+//! Handlers build view models; `listmngr_web` owns every byte of markup and
+//! escapes every value at compile time (ADR-0004). No handler concatenates
+//! HTML, and no page loads a third-party asset.
 #[path = "webui_admin.rs"]
 mod admin;
 #[path = "webui_archive.rs"]
@@ -12,6 +16,7 @@ mod recovery;
 #[path = "webui_settings.rs"]
 mod settings;
 use crate::{ApiError, ApiResult, AppState};
+use askama::Template;
 use axum::{
     Form,
     extract::{DefaultBodyLimit, Request},
@@ -29,12 +34,47 @@ use axum::{
 };
 use listmngr_core::Error;
 use listmngr_db::web_sessions::WebSession;
-use listmngr_web::escape;
+use listmngr_web::{Nav, Pagination, Shell, choices};
 use serde::Deserialize;
-use std::fmt::Write as _;
-fn page(title: &str, body: &str) -> Response {
-    Html(listmngr_web::document(title, body)).into_response()
+
+/// A rendered template. Rendering writes into a `String` and so only fails the
+/// way `write!` into a `String` fails.
+fn html<T: Template>(template: &T) -> Response {
+    Html(template.render().expect("template renders")).into_response()
 }
+
+/// The reader's language: their browser's ordered preferences, then the site
+/// default, then English. Nothing else — never the list, never a forwarded
+/// header — chooses the document language.
+pub fn language(s: &AppState, headers: &HeaderMap) -> &'static str {
+    let header = headers
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let mut ranked: Vec<(f32, &str)> = header
+        .split(',')
+        .take(16)
+        .filter_map(|part| {
+            let mut pieces = part.split(';');
+            let tag = pieces.next()?.trim();
+            if tag.is_empty() || tag.len() > 35 {
+                return None;
+            }
+            let quality = pieces
+                .find_map(|piece| piece.trim().strip_prefix("q=")?.parse::<f32>().ok())
+                .unwrap_or(1.0);
+            (0.0..=1.0).contains(&quality).then_some((quality, tag))
+        })
+        .collect();
+    ranked.sort_by(|left, right| right.0.total_cmp(&left.0));
+    listmngr_i18n::choose(
+        ranked
+            .into_iter()
+            .map(|(_, tag)| tag)
+            .chain([s.db.default_language()]),
+    )
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/web", get(directory))
@@ -44,6 +84,15 @@ pub fn routes() -> Router<AppState> {
                 (
                     [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
                     listmngr_web::STYLESHEET,
+                )
+            }),
+        )
+        .route(
+            "/web/htmx.min.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    listmngr_web::HTMX,
                 )
             }),
         )
@@ -83,9 +132,11 @@ pub fn routes() -> Router<AppState> {
         .layer(DefaultBodyLimit::max(8192))
         .layer(middleware::from_fn(security_headers))
 }
+
 async fn directory(
     State(s): State<AppState>,
     Query(paging): Query<BrowserPage>,
+    headers: HeaderMap,
 ) -> ApiResult<Response> {
     let ids: Vec<String> = sqlx::query_scalar(
         "SELECT list_id FROM mailing_lists WHERE advertised=1 ORDER BY list_id LIMIT 21 OFFSET $1",
@@ -95,36 +146,50 @@ async fn directory(
     .await
     .map_err(|error| database_error(&error))?;
     let more = ids.len() > 20;
-    let mut body = String::from("<ul>");
+    let mut entries = Vec::new();
     for id in ids.into_iter().take(20) {
-        let l = s.db.lists().get(&id.parse()?).await?;
-        if !l.advertised {
+        let list = s.db.lists().get(&id.parse()?).await?;
+        if !list.advertised {
             continue;
         }
-        write!(
-            &mut body,
-            "<li><a href=\"/web/lists/{}\">{}</a> — {}<p>{}</p></li>",
-            escape(l.id.as_str()),
-            escape(&l.display_name),
-            escape(l.id.as_str()),
-            escape(&l.description)
-        )
-        .expect("format HTML");
+        entries.push(listmngr_web::DirectoryEntry {
+            href: format!("/web/lists/{}", list.id.as_str()),
+            name: list.display_name,
+            id: list.id.to_string(),
+            description: list.description,
+        });
     }
-    body.push_str("</ul>");
-    body.push_str(&paging.links("/web", more));
-    Ok(page("Mailing lists", &body))
+    Ok(html(&listmngr_web::Directory {
+        shell: Shell::new(language(&s, &headers), "web-title-directory", Nav::Lists),
+        entries,
+        pagination: paging.pagination("/web", more),
+    }))
 }
 
 async fn security_headers(request: Request, next: Next) -> Response {
+    let language = request
+        .headers()
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
+        .unwrap_or_default();
     let mut r = next.run(request).await;
     if r.status().is_client_error() || r.status().is_server_error() {
         let status = r.status();
         let retry_after = r.headers().get(header::RETRY_AFTER).cloned();
-        r = page(
-            "Request not completed",
-            "<p>The request was invalid, expired or not authorized. No action was completed. <a href=\"/web/login\">Log in again</a> or return to the list and try again.</p>",
-        );
+        // The failure page cannot reach the database, so it negotiates on the
+        // request's own preferences and English.
+        r = html(&listmngr_web::ErrorPage {
+            shell: Shell::new(
+                listmngr_i18n::choose(
+                    language
+                        .split(',')
+                        .map(|tag| tag.split(';').next().unwrap_or_default().trim()),
+                ),
+                "web-title-error",
+                Nav::None,
+            ),
+        });
         *r.status_mut() = status;
         if let Some(value) = retry_after {
             r.headers_mut().insert(header::RETRY_AFTER, value);
@@ -233,12 +298,6 @@ fn set_cookie(s: &AppState, session: &WebSession, r: &mut Response) -> ApiResult
     );
     Ok(())
 }
-fn hidden(session: &WebSession) -> String {
-    format!(
-        "<input type=\"hidden\" name=\"csrf\" value=\"{}\">",
-        escape(&session.csrf)
-    )
-}
 async fn write_session(s: &AppState, h: &HeaderMap, csrf: &str) -> ApiResult<WebSession> {
     check_origin(s, h)?;
     let session = load(s, h).await?;
@@ -249,13 +308,10 @@ async fn write_session(s: &AppState, h: &HeaderMap, csrf: &str) -> ApiResult<Web
 }
 async fn login_form(State(s): State<AppState>, h: HeaderMap) -> ApiResult<Response> {
     let session = anonymous(&s, &h).await?;
-    let mut r = page(
-        "Log in",
-        &format!(
-            "<form method=\"post\" action=\"/web/login\">{}<p><label>Email <input type=\"email\" name=\"email\" autocomplete=\"username\" required></label></p><p><label>Password <input type=\"password\" name=\"password\" autocomplete=\"current-password\" required maxlength=\"1024\"></label></p><button>Log in</button></form><p>Account signup and password reset are not available in this interface. Contact the site administrator.</p>",
-            hidden(&session)
-        ),
-    );
+    let mut r = html(&listmngr_web::Login {
+        shell: Shell::new(language(&s, &h), "web-title-login", Nav::Login),
+        csrf: session.csrf.clone(),
+    });
     set_cookie(&s, &session, &mut r)?;
     Ok(r)
 }
@@ -297,18 +353,15 @@ async fn account(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
+    let language = language(&s, &headers);
     let u =
         s.db.users()
             .get(session.user_id.ok_or(Error::Authentication)?)
             .await?;
-    let mut body = format!(
-        "<p><a href=\"/web/admin\">List administration</a> · <a href=\"/web/moderation\">Moderator queues</a> · <a href=\"/web/account/password\">Change password</a></p><p>Signed in as {}.</p><form method=\"post\" action=\"/web/logout\">{}<button>Log out</button></form>",
-        escape(&u.display_name),
-        hidden(&session)
-    );
     let ids: Vec<String> = sqlx::query_scalar("SELECT m.id FROM members m JOIN addresses a ON a.id=m.address_id WHERE a.user_id=$1 AND a.verified_on IS NOT NULL AND (m.subscription_mode='as_address' OR m.user_id=$1) AND m.role='member' ORDER BY m.list_id,m.id LIMIT 21 OFFSET $2")
         .bind(u.id.to_string()).bind(paging.offset()?).fetch_all(s.db.pool()).await.map_err(|error| database_error(&error))?;
     let more = ids.len() > 20;
+    let mut subscriptions = Vec::new();
     for id in ids.into_iter().take(20) {
         let m =
             s.db.members()
@@ -319,48 +372,69 @@ async fn account(
                 .resolve_member(m.id, s.db.default_language())
                 .await?;
         let list = s.db.lists().get(&m.list_id).await?;
-        write!(
-            &mut body,
-            "<section><h2>{}</h2><p>Delivery: {}. Status: {}.</p>",
-            escape(m.list_id.as_str()),
-            escape(&p.delivery_mode.map(|v| v.to_string()).unwrap_or_default()),
-            escape(&p.delivery_status.map(|v| v.to_string()).unwrap_or_default())
-        )
-        .expect("format HTML");
-        if list.archive_policy != listmngr_core::ArchivePolicy::Never {
-            write!(
-                body,
-                "<p><a href=\"/web/lists/{}/archive\">Read archive</a></p>",
-                escape(m.list_id.as_str())
-            )
-            .expect("format HTML");
-        }
-        if matches!(
+        let delivery_mode = p.delivery_mode.map(|v| v.to_string()).unwrap_or_default();
+        let status = p.delivery_status.map(|v| v.to_string()).unwrap_or_default();
+        let disabled = matches!(
             p.delivery_status,
             Some(DeliveryStatus::ByModerator | DeliveryStatus::ByBounces | DeliveryStatus::Unknown)
-        ) {
-            if s.db.browser_recover_preview(&session, m.id).await.is_ok() {
-                write!(
-                    &mut body,
-                    "<p><a href=\"/web/members/{}/recover\">Restore delivery</a></p>",
-                    m.id
-                )
-                .expect("format HTML");
-            } else {
-                body.push_str("<p>Delivery is restricted. Contact a list administrator.</p>");
-            }
-        } else {
-            write!(&mut body,"<form method=\"post\" action=\"/web/members/{}/preferences\">{}<p><label>Delivery mode <select name=\"delivery_mode\">{}</select></label></p><p><label>Delivery status <select name=\"delivery_status\">{}</select></label></p><p><label>Receive your own posts <select name=\"receive_own_postings\">{}</select></label></p><p><label>Receive list copies when directly addressed <select name=\"receive_list_copy\">{}</select></label></p><button>Save preferences</button></form>",m.id,hidden(&session),options(&[("regular","Individual messages"),("plaintext_digests","Plain text digest"),("mime_digests","MIME digest")],p.delivery_mode.map(|v|v.to_string()).as_deref()),options(&[("enabled","Enabled"),("by_user","Paused by me")],p.delivery_status.map(|v|v.to_string()).as_deref()),options(&[("true","Yes"),("false","No")],p.receive_own_postings.map(|v|v.to_string()).as_deref()),options(&[("true","Yes"),("false","No")],p.receive_list_copy.map(|v|v.to_string()).as_deref())).expect("format HTML");
-        }
-        write!(
-            &mut body,
-            "<p><a href=\"/web/members/{}/leave\">Leave list</a></p></section>",
-            m.id
-        )
-        .expect("format HTML");
+        );
+        let recoverable = disabled && s.db.browser_recover_preview(&session, m.id).await.is_ok();
+        subscriptions.push(listmngr_web::Subscription {
+            list_id: m.list_id.to_string(),
+            delivery: listmngr_i18n::message(
+                language,
+                "web-account-delivery",
+                &[("mode", &delivery_mode), ("status", &status)],
+            ),
+            archive_href: (list.archive_policy != listmngr_core::ArchivePolicy::Never)
+                .then(|| format!("/web/lists/{}/archive", m.list_id.as_str())),
+            recover_href: recoverable.then(|| format!("/web/members/{}/recover", m.id)),
+            restricted: disabled && !recoverable,
+            preferences: (!disabled).then(|| listmngr_web::Preferences {
+                action: format!("/web/members/{}/preferences", m.id),
+                modes: choices(
+                    language,
+                    &[
+                        ("regular", "web-delivery-regular"),
+                        ("plaintext_digests", "web-delivery-plaintext"),
+                        ("mime_digests", "web-delivery-mime"),
+                    ],
+                    Some(delivery_mode.as_str()),
+                ),
+                statuses: choices(
+                    language,
+                    &[
+                        ("enabled", "web-status-enabled"),
+                        ("by_user", "web-status-paused"),
+                    ],
+                    Some(status.as_str()),
+                ),
+                own_postings: yes_no(language, p.receive_own_postings),
+                list_copy: yes_no(language, p.receive_list_copy),
+            }),
+            leave_href: format!("/web/members/{}/leave", m.id),
+        });
     }
-    body.push_str(&paging.links("/web/account", more));
-    Ok(page("My subscriptions", &body))
+    Ok(html(&listmngr_web::Account {
+        shell: Shell::new(language, "web-title-account", Nav::Account),
+        csrf: session.csrf.clone(),
+        signed_in: listmngr_i18n::message(
+            language,
+            "web-account-signed-in",
+            &[("name", &u.display_name)],
+        ),
+        subscriptions,
+        pagination: paging.pagination("/web/account", more),
+    }))
+}
+
+/// The yes/no options of an optional preference, with the resolved value selected.
+fn yes_no(language: &str, value: Option<bool>) -> Vec<listmngr_web::Choice> {
+    choices(
+        language,
+        &[("true", "web-yes"), ("false", "web-no")],
+        value.map(|v| if v { "true" } else { "false" }),
+    )
 }
 async fn logout(
     State(s): State<AppState>,
@@ -396,21 +470,17 @@ async fn list_page(
         return Err(Error::NotFound("list".into()).into());
     }
     let session = anonymous(&s, &h).await?;
-    let id = escape(id.as_str());
-    let archive_link = if list.archive_policy == listmngr_core::ArchivePolicy::Public {
-        format!("<p><a href=\"/web/lists/{id}/archive\">Browse public archive</a></p>")
-    } else {
-        String::new()
-    };
-    let mut r = page(
-        &list.display_name,
-        &format!(
-            "<p>{}</p><p>{}</p>{archive_link}<form method=\"post\" action=\"/web/lists/{id}/request\">{}<p><label>Email <input type=\"email\" name=\"email\" autocomplete=\"email\" required></label></p><p><label>Request <select name=\"action\"><option value=\"join\">Join</option><option value=\"leave\">Leave</option></select></label></p><button>Send confirmation instructions</button></form><p>Mailbox confirmation is required. Requests are limited to one per list and address per hour. Mail delivery must be enabled by the administrator.</p><p><a href=\"/web/lists/{id}/confirm\">Enter a confirmation token from your email</a></p>",
-            escape(&list.description),
-            escape(&list.info),
-            hidden(&session)
-        ),
-    );
+    let language = language(&s, &h);
+    let mut r = html(&listmngr_web::ListPage {
+        shell: Shell::titled(language, list.display_name.clone(), Nav::Lists),
+        description: list.description.clone(),
+        info: list.info.clone(),
+        archive_href: (list.archive_policy == listmngr_core::ArchivePolicy::Public)
+            .then(|| format!("/web/lists/{}/archive", id.as_str())),
+        action: format!("/web/lists/{}/request", id.as_str()),
+        csrf: session.csrf.clone(),
+        confirm_href: format!("/web/lists/{}/confirm", id.as_str()),
+    });
     set_cookie(&s, &session, &mut r)?;
     Ok(r)
 }
@@ -435,10 +505,9 @@ async fn subscription_request(
     s.db.workflows()
         .request(&id, &f.email, f.action, now())
         .await?;
-    let mut r = page(
-        "Check your email",
-        "<p>If eligible, confirmation instructions will be sent. Copy the Token from the message into the list’s confirmation form. No membership change has been made yet.</p>",
-    );
+    let mut r = html(&listmngr_web::CheckEmail {
+        shell: Shell::new(language(&s, &h), "web-title-check-email", Nav::Lists),
+    });
     *r.status_mut() = StatusCode::ACCEPTED;
     Ok(r)
 }
@@ -458,16 +527,14 @@ async fn confirm_form(
         return Err(Error::Validation("token".into()).into());
     }
     let session = anonymous(&s, &h).await?;
-    let mut r = page(
-        "Confirm your request",
-        &format!(
-            "<p>Confirm a join or leave request for {}. Opening this page does not change your subscription.</p><form method=\"post\" action=\"/web/lists/{}/confirm\">{}<p><label>Token from email <input name=\"token\" value=\"{}\" maxlength=\"128\" autocomplete=\"off\" required></label></p><button>Confirm request</button></form>",
-            escape(id.as_str()),
-            escape(id.as_str()),
-            hidden(&session),
-            escape(&q.token)
-        ),
-    );
+    let language = language(&s, &h);
+    let mut r = html(&listmngr_web::ConfirmForm {
+        shell: Shell::new(language, "web-title-confirm", Nav::Lists),
+        intro: listmngr_i18n::message(language, "web-confirm-intro", &[("list", id.as_str())]),
+        action: format!("/web/lists/{}/confirm", id.as_str()),
+        csrf: session.csrf.clone(),
+        token: q.token,
+    });
     set_cookie(&s, &session, &mut r)?;
     Ok(r)
 }
@@ -489,33 +556,14 @@ async fn confirm(
         .check("public-workflows")
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     s.db.workflows().confirm(&id, &f.token, now()).await?;
-    Ok(page(
-        "Request confirmed",
-        "<p>Your subscription request has been completed.</p>",
-    ))
+    Ok(html(&listmngr_web::Confirmed {
+        shell: Shell::new(language(&s, &h), "web-title-confirmed", Nav::Lists),
+    }))
 }
 
 use listmngr_core::{
     DeliveryMode, DeliveryStatus, Member, MemberId, MemberRole, SubscriptionMode, UserId,
 };
-fn options(values: &[(&str, &str)], selected: Option<&str>) -> String {
-    let mut result = String::new();
-    for (value, label) in values {
-        write!(
-            &mut result,
-            "<option value=\"{}\"{}>{}</option>",
-            escape(value),
-            if selected == Some(*value) {
-                " selected"
-            } else {
-                ""
-            },
-            escape(label)
-        )
-        .expect("format HTML");
-    }
-    result
-}
 async fn own_members(s: &AppState, user: UserId) -> ApiResult<Vec<Member>> {
     let mut members = Vec::new();
     for a in s.db.addresses().by_user(user).await? {
@@ -585,8 +633,8 @@ async fn moderation_index(
     h: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &h).await?;
+    let language = language(&s, &h);
     let user = session.user_id.ok_or(Error::Authentication)?;
-    let mut body = String::from("<ul>");
     let lists: Vec<(String, String)> = sqlx::query_as(
         "SELECT l.list_id,l.display_name FROM mailing_lists l WHERE
          EXISTS (SELECT 1 FROM users u JOIN addresses a ON a.user_id=u.id
@@ -603,18 +651,19 @@ async fn moderation_index(
     .await
     .map_err(|error| database_error(&error))?;
     let more = lists.len() > 20;
-    for (id, name) in lists.into_iter().take(20) {
-        write!(
-            &mut body,
-            "<li><a href=\"/web/lists/{}/held\">{} — held messages</a></li>",
-            escape(&id),
-            escape(&name)
-        )
-        .expect("format HTML");
-    }
-    body.push_str("</ul><p>Only lists you are authorized to moderate are shown.</p>");
-    body.push_str(&paging.links("/web/moderation", more));
-    Ok(page("Moderator queues", &body))
+    let rows = lists
+        .into_iter()
+        .take(20)
+        .map(|(id, name)| listmngr_web::ModerationRow {
+            href: format!("/web/lists/{id}/held"),
+            label: listmngr_i18n::message(language, "web-moderation-held", &[("name", &name)]),
+        })
+        .collect();
+    Ok(html(&listmngr_web::Moderation {
+        shell: Shell::new(language, "web-title-moderation", Nav::Moderation),
+        rows,
+        pagination: paging.pagination("/web/moderation", more),
+    }))
 }
 async fn held_page(
     State(s): State<AppState>,
@@ -623,17 +672,15 @@ async fn held_page(
     h: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &h).await?;
+    let language = language(&s, &h);
     let user = session.user_id.ok_or(Error::Authentication)?;
     if !can_moderate(&s, user, &id).await? {
         return Err(denied());
     }
-    let mut body = String::new();
     let held: Vec<String> = sqlx::query_scalar("SELECT id FROM held_messages WHERE list_id=$1 AND disposition IS NULL ORDER BY hold_date,id LIMIT 21 OFFSET $2")
         .bind(id.as_str()).bind(paging.offset()?).fetch_all(s.db.pool()).await.map_err(|error| database_error(&error))?;
     let more = held.len() > 20;
-    if held.is_empty() {
-        body.push_str("<p>No messages await review.</p>");
-    }
+    let mut items = Vec::new();
     for held_id in held.into_iter().take(20) {
         let item =
             s.db.moderation()
@@ -648,11 +695,30 @@ async fn held_page(
                 .fetch_one(s.db.pool())
                 .await
                 .map_err(|error| database_error(&error))?;
-        write!(&mut body,"<article><h2>{}</h2><dl><dt>Sender</dt><dd>{}</dd><dt>Reason</dt><dd>{}</dd></dl><details><summary>Message source (first 64 KiB)</summary><pre>{}</pre></details><form method=\"post\" action=\"/web/lists/{}/held/{}\">{}<p><label>Decision <select name=\"action\"><option value=\"defer\">Keep held</option><option value=\"accept\">Accept for delivery</option><option value=\"reject\">Reject</option><option value=\"discard\">Discard</option></select></label></p><p><label>Comment <textarea name=\"comment\" maxlength=\"2000\"></textarea></label></p><button>Apply decision</button></form></article>",escape(&item.subject),escape(&item.sender),escape(&item.reason),escape(&String::from_utf8_lossy(&raw)),escape(id.as_str()),item.id.0,hidden(&session)).expect("format HTML");
+        items.push(listmngr_web::HeldItem {
+            subject: item.subject,
+            sender: item.sender,
+            reason: item.reason,
+            source: String::from_utf8_lossy(&raw).into_owned(),
+            action: format!("/web/lists/{}/held/{}", id.as_str(), item.id.0),
+        });
     }
-    body.push_str("<p>Accept queues regular delivery using the current recipient preferences. Reject and discard record the decision without sending a rejection notice.</p>");
-    body.push_str(&paging.links(&format!("/web/lists/{id}/held"), more));
-    Ok(page("Held messages", &body))
+    Ok(html(&listmngr_web::Held {
+        shell: Shell::new(language, "web-title-held", Nav::Moderation),
+        csrf: session.csrf.clone(),
+        items,
+        decisions: choices(
+            language,
+            &[
+                ("defer", "web-held-defer"),
+                ("accept", "web-held-accept"),
+                ("reject", "web-held-reject"),
+                ("discard", "web-held-discard"),
+            ],
+            None,
+        ),
+        pagination: paging.pagination(&format!("/web/lists/{id}/held"), more),
+    }))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -707,33 +773,14 @@ struct BrowserPage {
     page: u32,
 }
 impl BrowserPage {
+    const LAST: u32 = 10_000;
     fn offset(&self) -> ApiResult<i64> {
-        if self.page > 10_000 {
+        if self.page > Self::LAST {
             return Err(Error::Validation("page out of range".into()).into());
         }
         Ok(i64::from(self.page) * 20)
     }
-    fn links(&self, path: &str, more: bool) -> String {
-        let mut html = String::from("<nav aria-label=\"Pagination\">");
-        if self.page > 0 {
-            write!(
-                &mut html,
-                "<a href=\"{}?page={}\">Previous page</a> ",
-                escape(path),
-                self.page - 1
-            )
-            .expect("format HTML");
-        }
-        if more && self.page < 10_000 {
-            write!(
-                &mut html,
-                "<a href=\"{}?page={}\">Next page</a>",
-                escape(path),
-                self.page + 1
-            )
-            .expect("format HTML");
-        }
-        html.push_str("</nav>");
-        html
+    fn pagination(&self, path: &str, more: bool) -> Pagination {
+        Pagination::numbered(path, self.page, more, Self::LAST)
     }
 }

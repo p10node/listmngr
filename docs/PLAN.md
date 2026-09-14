@@ -34,9 +34,12 @@ PostgreSQL PASS", R1/O1 OPEN) đã bị vượt qua; nội dung cũ giữ trong 
   i18n en/vi (P3-I18N); bans list + site (P3-LIST-POSTING-BANS,
   P3-SITE-BANS-REST).
 - Phase 4: các lát SSR rời (P4-WEB-*: login/session/CSRF, held review có scope,
-  members/policy, settings lát nhỏ, own postings, bounce recovery). HTML dựng
-  bằng `format!`, chưa template engine, chưa accounts/2FA/OIDC. Xem §7.0 và
-  Phase 4.
+  members/policy, settings lát nhỏ, own postings, bounce recovery) — tất cả đã
+  chuyển sang askama trong P4-SHELL: một đường render duy nhất, shell i18n
+  (`Accept-Language` → `site.default_language` → `en`), design tokens + dark
+  mode, a11y baseline (axe không critical/serious), htmx 2.0.10 vendored phục vụ
+  từ chính origin nhưng chưa trang nào nạp. Chưa có accounts/2FA/OIDC, chưa CSP
+  nonce (chưa cần vì chưa có script). Xem §7.0 và Phase 4.
 - Phase 5: threading + Message-ID-Hash tương thích HyperKitty + archive đọc cơ
   bản (P2-ARCHIVE-AUTHORITY). Chưa có search/UI đầy đủ.
 
@@ -51,10 +54,9 @@ trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
 936 passed, 0 failed, 56 ignored) và `TEST_POSTGRES_URL=… scripts/test-postgres.sh`
 (38 tests, PostgreSQL 14.24 dùng một lần rồi drop). Ledger đã cập nhật.
 
-Chưa có: ma trận e2e acceptance Phase 2 (P2-E2E-ACCEPTANCE), held `forward`
-(P2-HELD-FORWARD), bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE),
-suite SQLite/PostgreSQL song song trong CI (P3-DUAL-BACKEND-CI), toàn bộ Phase
-4–7 trừ các lát nêu trên. Chi tiết và thứ tự ở §7.
+Chưa có: bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE), toàn bộ
+Phase 4–7 trừ các lát nêu trên (P4-SHELL đã đóng; kế tiếp là P4-ACCOUNTS). Chi
+tiết và thứ tự ở §7.
 
 ## 0. Tóm tắt 1 phút
 
@@ -892,14 +894,15 @@ P4-SHELL merge.
 Trạng thái: đã có login/password session (CSRF, exact Origin), list index/list
 page, subscribe/confirm, held review có scope, members/policy, settings lát nhỏ,
 `/moderation` lát nhỏ, own postings, bounce recovery (rows `P4-WEB-*`,
-P4-LIST-COPY, P4-BOUNCE-WEB-RECOVERY). Chưa có accounts đầy đủ, 2FA/OIDC,
-template engine, i18n UI, admin đầy đủ.
+P4-LIST-COPY, P4-BOUNCE-WEB-RECOVERY) — và từ P4-SHELL, tất cả render qua askama
+với shell i18n en/vi, design tokens + dark mode, a11y baseline. Chưa có accounts
+đầy đủ, 2FA/OIDC, admin đầy đủ.
 
 Work packages, theo thứ tự; mỗi ID một nhánh:
 
 | ID                   | Effort | Phạm vi                                                                                                                                                                                                                                                                                           | Acceptance riêng                                                                                |
 |----------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
-| P4-SHELL             | M      | askama layout + design tokens + dark mode; CSP nonce, security headers, rate limit, `trusted_proxies`; htmx vendored (hash pinned, không CDN); i18n UI bằng Fluent (`en`, `vi`, cùng catalog `listmngr_i18n`); a11y baseline (landmarks, focus, skip link); chuyển 20 route hiện có sang template | axe không critical; CSP không violation; `scripts/test-webui-browser.py` PASS không đổi hành vi |
+| ~~P4-SHELL~~ (xong)  | M      | askama layout + design tokens + dark mode; security headers, rate limit, `trusted_proxies` (đã có từ trước); htmx vendored (hash pinned, không CDN, chưa trang nào nạp → chưa cần CSP nonce); i18n UI bằng Fluent (`en`, `vi`, cùng catalog `listmngr_i18n`); a11y baseline (landmarks, focus, skip link, `aria-current`); đã chuyển 20 route hiện có + one-click + archive compat sang template | ĐẠT: axe không critical/serious trên 4 trang; CSP không violation; `scripts/test-webui-browser.py` PASS không đổi hành vi |
 | P4-ACCOUNTS          | M      | signup + verify email, password reset qua token email, change password, sessions list/revoke, delete account (erase gốc cho P4-GDPR); addresses add/verify/primary/remove; profile (display name, locale, timezone); API tokens của user                                                          | e2e signup → verify → login → reset; mỗi write có audit                                         |
 | P4-TOTP              | S      | TOTP setup/verify + recovery codes; tuỳ chọn bắt buộc cho server owner                                                                                                                                                                                                                            | e2e enrol → login 2 bước → recovery code                                                        |
 | P4-WEBAUTHN          | M      | passkeys (webauthn-rs), đăng ký/xoá key, đăng nhập không mật khẩu                                                                                                                                                                                                                                 | Playwright virtual authenticator                                                                |

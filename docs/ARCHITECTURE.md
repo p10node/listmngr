@@ -1,5 +1,34 @@
 # Architecture
 
+## Browser shell and one rendering path — bounded local acceptance verified
+
+`crates/web` is the presentation crate: Askama templates (`crates/web/templates`)
+with compile-time auto-escaping, the view models handlers fill in
+(`crates/web/src/pages.rs`), the `Shell` that owns document language, title and
+navigation state, the design-token stylesheet and the vendored htmx asset.
+`crates/api/src/webui*.rs`, `unsubscribe.rs` and the compatibility archive page
+build view models only; a test reads their sources and fails on any string
+literal containing markup, so the two rendering paths ADR-0004 warned about
+cannot come back.
+
+Escaping is a project escaper (`listmngr_web::HtmlEscaper`, wired in
+`crates/web/askama.toml`) that writes `&amp;`, `&lt;`, `&gt;`, `&quot;` and
+`&#39;` — the exact bytes the hand-written escaper produced — so the migration
+is byte-compatible and the existing browser assertions are the parity evidence.
+
+Language is negotiated per request in `webui::language`: the reader's ordered
+`Accept-Language` preferences (q-values respected, bounded to 16 tags), then
+`site.default_language`, then English. The failure page rendered by the
+`security_headers` middleware cannot reach the database, so it negotiates on the
+request's own preferences alone. Nothing infers a language from the list, the
+`Host` or a forwarded header.
+
+htmx 2.0.10 is vendored and served from `/web/htmx.min.js`; a test pins its
+SHA-384 and asserts no shipped asset refers to another origin. No page includes
+it yet, so pages keep `default-src 'none'` and contain no script element. The
+one deliberate exception on this repository's HTTP surface is `/api/docs`, which
+still loads Swagger UI from a CDN and is tracked separately.
+
 ## Aggregate final-audit authority — bounded acceptance verified
 
 `DigestRepo::collect` preserves list-before-queue reservation order, captures the
