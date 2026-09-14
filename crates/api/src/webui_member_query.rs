@@ -1,7 +1,7 @@
 //! Serializes member-search navigation without accepting a return URL.
-use super::{ApiResult, BrowserPage, ListId, escape};
+use super::{ApiResult, BrowserPage, ListId};
+use listmngr_web::Pagination;
 use serde::Deserialize;
-use std::fmt::Write as _;
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -29,34 +29,10 @@ impl MemberQuery {
                 .expect("string query")
         )
     }
-    pub fn hidden(&self) -> String {
-        format!(
-            "<input type=\"hidden\" name=\"q\" value=\"{}\"><input type=\"hidden\" name=\"page\" value=\"{}\">",
-            escape(&self.q),
-            self.page
-        )
-    }
-    pub fn links(&self, list: &ListId, more: bool) -> String {
-        let mut html = String::from("<nav aria-label=\"Pagination\">");
-        let next = if more && self.page < 10_000 {
-            Some(self.page + 1)
-        } else {
-            None
-        };
-        for (number, label) in [
-            (self.page.checked_sub(1), "Previous page"),
-            (next, "Next page"),
-        ] {
-            if let Some(number) = number {
-                write!(
-                    &mut html,
-                    "<a href=\"{}\">{label}</a> ",
-                    escape(&self.url(list, number))
-                )
-                .expect("HTML");
-            }
+    pub fn pagination(&self, list: &ListId, more: bool) -> Pagination {
+        Pagination {
+            previous: self.page.checked_sub(1).map(|page| self.url(list, page)),
+            next: (more && self.page < BrowserPage::LAST).then(|| self.url(list, self.page + 1)),
         }
-        html.push_str("</nav>");
-        html
     }
 }

@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block content %}<p>{{ prompt }}</p><form method="post" action="{{ action }}">{% call ui::csrf(csrf) %}{% endcall %}<button>{{ shell.t("web-recover-submit") }}</button></form><p><a href="/web/account">{{ shell.t("web-cancel") }}</a></p>{% endblock %}

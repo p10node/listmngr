@@ -8,6 +8,11 @@
 - Disposable real-client acceptance harness and CI wiring for live PostgreSQL schema semantics and production-crate checks.
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
+### Changed
+- Browser pages render from one Askama template set with compile-time auto-escaping (`P4-SHELL`); handlers build view models and no longer concatenate markup. Output stays byte-compatible with the previous escaper.
+- The browser shell takes its strings from the shared Fluent catalog and negotiates the document language per request from `Accept-Language`, then `site.default_language`, then English; `en` and `vi` ship.
+- The stylesheet is design tokens both colour schemes bind, so the browser surface follows `prefers-color-scheme` without per-page markup.
+
 ### Fixed
 - Scoped-user API authorization uses portable PostgreSQL/SQLite bind parameters; live PostgreSQL regression checks allowed and forbidden users under both API prefixes.
 - Production-crate gate accepts Cargo's null package metadata without skipping empty current-phase crates; regression tests cover both outcomes.
@@ -17,6 +22,8 @@
 - CLI member find/delete validate normalized IDNA addresses; adapter validation and missing-resource errors retain their stable exit categories.
 
 ### Security
+- htmx 2.0.10 is vendored (0BSD) and served from this origin with its SHA-384 pinned by a test; no browser page loads a third-party asset, and pages keep `default-src 'none'` with no script element.
+- `rustls` moved to 0.23.45 in the lockfile for RUSTSEC-2026-0285 (TLS 1.3 handshake messages accepted across encryption-level boundaries).
 - Static musl/scratch non-root container, filtered Docker context, runtime-only PostgreSQL credentials, hardened systemd unit, and explicit deny/audit policy.
 - Full GNU Affero General Public License v3 text and RFC 9116-style `security.txt` disclosure metadata.
 - Removed argv password input, bounded password streams without truncation, and made secret-file read diagnostics generic. Automation callers now feed passwords via stdin.

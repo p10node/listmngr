@@ -5,6 +5,7 @@
 //! who followed the link. The token is the only credential: no session, no
 //! CSRF cookie, and the response never echoes the address.
 use crate::{ApiError, ApiResult, AppState};
+use askama::Template;
 use axum::{
     Router,
     extract::{DefaultBodyLimit, Path, Query, State},
@@ -14,7 +15,7 @@ use axum::{
 };
 use listmngr_core::{Error, ListId};
 use listmngr_db::AuditContext;
-use listmngr_web::escape;
+use listmngr_web::{Nav, Shell};
 use serde::Deserialize;
 
 pub fn routes() -> Router<AppState> {
@@ -32,8 +33,11 @@ fn now_secs() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-fn page(title: &str, body: &str) -> Response {
-    let mut response = Html(listmngr_web::document(title, body)).into_response();
+/// The one-click pages are reached from a mail client, so they render in the
+/// browser's language and carry the same headers as the rest of the browser
+/// surface.
+fn page<T: Template>(template: &T) -> Response {
+    let mut response = Html(template.render().expect("template renders")).into_response();
     for (name, value) in [
         ("cache-control", "no-store"),
         ("referrer-policy", "no-referrer"),
@@ -99,17 +103,25 @@ async fn confirm(
     State(state): State<AppState>,
     Path(list_id): Path<String>,
     Query(query): Query<TokenQuery>,
+    headers: HeaderMap,
 ) -> ApiResult<Response> {
     let token = token_of(&query)?;
     let (list, _) = lookup(&state, &list_id, token).await?;
-    let body = format!(
-        "<p>Confirm that you want to leave the <strong>{}</strong> mailing list ({}).</p><form method=\"post\" action=\"/unsubscribe/{}?token={}\"><input type=\"hidden\" name=\"List-Unsubscribe\" value=\"One-Click\"><button type=\"submit\">Unsubscribe</button></form>",
-        escape(&list.display_name),
-        escape(&list.id.posting_address()),
-        escape(list.id.as_str()),
-        escape(token)
-    );
-    Ok(page("Unsubscribe", &body))
+    let language = crate::webui::language(&state, &headers);
+    let encoded = serde_urlencoded::to_string([("token", token)])
+        .map_err(|error| ApiError(Error::Validation(error.to_string())))?;
+    Ok(page(&listmngr_web::Unsubscribe {
+        shell: Shell::new(language, "web-title-unsubscribe", Nav::None),
+        prompt: listmngr_i18n::message(
+            language,
+            "web-unsubscribe-prompt",
+            &[
+                ("list", &list.display_name),
+                ("address", &list.id.posting_address()),
+            ],
+        ),
+        action: format!("/unsubscribe/{}?{encoded}", list.id.as_str()),
+    }))
 }
 
 async fn unsubscribe(
@@ -148,12 +160,18 @@ async fn unsubscribe(
             &AuditContext::new(None, None, Some(connect.0.ip())),
         )
         .await?;
-    let body = format!(
-        "<p>You have been unsubscribed from the <strong>{}</strong> mailing list ({}). No further mail from this list will be sent to you.</p>",
-        escape(&list.display_name),
-        escape(&list.id.posting_address())
-    );
-    let mut response = page("Unsubscribed", &body);
+    let language = crate::webui::language(&state, &headers);
+    let mut response = page(&listmngr_web::Unsubscribed {
+        shell: Shell::new(language, "web-title-unsubscribed", Nav::None),
+        prompt: listmngr_i18n::message(
+            language,
+            "web-unsubscribed-prompt",
+            &[
+                ("list", &list.display_name),
+                ("address", &list.id.posting_address()),
+            ],
+        ),
+    });
     *response.status_mut() = StatusCode::OK;
     Ok(response)
 }

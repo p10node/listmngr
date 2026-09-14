@@ -1,0 +1,2 @@
+{% extends "base.html" %}
+{% block content %}<p>{{ prompt }}</p><form method="post" action="{{ action }}"><input type="hidden" name="List-Unsubscribe" value="One-Click"><button type="submit">{{ shell.t("web-unsubscribe-submit") }}</button></form>{% endblock %}

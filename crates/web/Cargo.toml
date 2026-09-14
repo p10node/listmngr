@@ -12,4 +12,10 @@ delivery-phase = 4
 workspace = true
 
 [dependencies]
+askama.workspace = true
 listmngr-core = { path = "../core", version = "0.1.0" }
+listmngr-i18n = { path = "../i18n", version = "0.1.0" }
+
+[dev-dependencies]
+base64.workspace = true
+sha2.workspace = true
