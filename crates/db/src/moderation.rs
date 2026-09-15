@@ -654,7 +654,7 @@ async fn audit_held(
     Ok(())
 }
 
-fn decode_held(row: &AnyRow) -> Result<HeldMessage> {
+pub(crate) fn decode_held(row: &AnyRow) -> Result<HeldMessage> {
     let disposition: Option<String> = row.try_get("disposition").map_err(db_error)?;
     let disposition = disposition
         .map(|value| match value.as_str() {

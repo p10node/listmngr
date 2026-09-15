@@ -1,5 +1,22 @@
 # Architecture
 
+## Moderator queues — bounded local acceptance verified
+
+`crates/db/src/web_moderation.rs` holds the moderator's reads and writes.
+`moderator_tx` is the one authority check (server owner, or owner/moderator
+of the list through a verified address), shared with the older
+`browser_review`. `browser_held_queue` reads a page of held rows joined with
+their bounded source, parses each with `mail_parser` for the decoded address
+headers and the first text body, and looks up the sender's row and ban.
+`browser_review_many` runs `ModerationRepo::review_tx` per selected post in
+one transaction, skipping posts already decided or not on the list;
+`browser_moderate_sender` sets the member's override or creates a nonmember
+row; `browser_ban_sender` uses `BanRepo::create_tx`; `browser_decide_request`
+uses the new `WorkflowRepo::decide_tx` after checking the request belongs to
+the list. The page's script is the second first-party script
+(`Shell::with_script`), served like the passkey one; the shell now records
+one script path rather than a flag.
+
 ## Member management — bounded local acceptance verified
 
 `crates/db/src/web_members.rs` holds the owner's member operations.

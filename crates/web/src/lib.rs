@@ -56,7 +56,7 @@ pub use pages::{
     ActionForm, Bans, DeleteList, DiffRow, Fact, GroupLink, HeaderRuleDraft, HeaderRuleRow,
     HeaderRules, SettingField, SettingsGroup, TemplateCatalogue, TemplateEditor, TemplateRow,
 };
-pub use pages::{Flag, MassSubscribe, MemberOptionsPage, Roster};
+pub use pages::{Flag, MassSubscribe, MemberOptionsPage, RequestItem, Requests, Roster};
 pub use pages::{
     LoginTotp, Oidc, PasskeyRow, Passkeys, ProviderLink, ProviderRow, TotpCodes, TotpPage,
 };
@@ -71,10 +71,13 @@ pub const STYLESHEET: &str = include_str!("../assets/style.css");
 /// loads it until a work package needs progressive enhancement.
 pub const HTMX: &str = include_str!("../assets/htmx.min.js");
 
-/// The passkey ceremonies, first-party and served from this origin. It is the
-/// only script any page loads; pages that include it carry a CSP that allows
-/// `'self'` scripts and fetches.
+/// The passkey ceremonies, first-party and served from this origin. Pages
+/// that include a script carry a CSP that allows `'self'` scripts and fetches.
 pub const PASSKEYS_SCRIPT: &str = include_str!("../assets/passkeys.js");
+
+/// The held queue's keyboard shortcuts, first-party and served from this
+/// origin; the queue works the same without it.
+pub const MODERATION_SCRIPT: &str = include_str!("../assets/moderation.js");
 
 /// SHA-384 of [`HTMX`], base64 as an `integrity` attribute spells it. A test
 /// pins this so a swapped asset fails the build gates rather than reaching a
@@ -159,7 +162,7 @@ pub struct Shell {
     language: &'static str,
     title: String,
     active: Nav,
-    scripts: bool,
+    script: Option<&'static str>,
     htmx: bool,
 }
 
@@ -172,7 +175,7 @@ impl Shell {
             language,
             title: listmngr_i18n::message(language, title, &[]),
             active,
-            scripts: false,
+            script: None,
             htmx: false,
         }
     }
@@ -181,14 +184,28 @@ impl Shell {
     /// allows it; every form on the page still works without it.
     #[must_use]
     pub const fn with_scripts(mut self) -> Self {
-        self.scripts = true;
+        self.script = Some("/web/passkeys.js");
         self
     }
 
-    /// Whether the page loads the first-party script.
+    /// The page loads one first-party script at `path`; every form on the
+    /// page still works without it.
+    #[must_use]
+    pub const fn with_script(mut self, path: &'static str) -> Self {
+        self.script = Some(path);
+        self
+    }
+
+    /// Whether the page loads a first-party script.
     #[must_use]
     pub const fn scripts(&self) -> bool {
-        self.scripts
+        self.script.is_some() || self.htmx
+    }
+
+    /// The first-party script the page loads, if any.
+    #[must_use]
+    pub const fn script(&self) -> Option<&'static str> {
+        self.script
     }
 
     /// The page loads the vendored htmx for partial updates; every form and
@@ -196,7 +213,6 @@ impl Shell {
     #[must_use]
     pub const fn with_htmx(mut self) -> Self {
         self.htmx = true;
-        self.scripts = true;
         self
     }
 
@@ -213,7 +229,7 @@ impl Shell {
             language: listmngr_i18n::negotiate(language),
             title,
             active,
-            scripts: false,
+            script: None,
             htmx: false,
         }
     }
