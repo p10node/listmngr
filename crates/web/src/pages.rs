@@ -523,3 +523,19 @@ pub struct SessionRow {
     /// Whether this is the browser making the request.
     pub current: bool,
 }
+
+/// The reader's own profile form.
+#[derive(Debug, Template)]
+#[template(path = "profile.html")]
+pub struct ProfilePage {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Current display name.
+    pub display_name: String,
+    /// Interface languages, the current one selected.
+    pub locales: Vec<Choice>,
+    /// IANA time zones, the current one selected.
+    pub timezones: Vec<Choice>,
+}

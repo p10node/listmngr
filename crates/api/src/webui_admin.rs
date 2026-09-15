@@ -3,7 +3,7 @@
 mod member_query;
 use super::{
     ApiResult, AppState, BrowserPage, Form, HeaderMap, IntoResponse, Path, Query, Redirect,
-    Response, Shell, State, html, language, load, write_session,
+    Response, Shell, State, html, load, reader_language, write_session,
 };
 use listmngr_core::{ListId, MemberId};
 use listmngr_web::{Nav, choices};
@@ -38,7 +38,11 @@ pub(super) async fn index(
         })
         .collect();
     Ok(html(&listmngr_web::AdminIndex {
-        shell: Shell::new(language(&s, &headers), "web-title-admin", Nav::Account),
+        shell: Shell::new(
+            reader_language(&s, &headers, &session).await?,
+            "web-title-admin",
+            Nav::Account,
+        ),
         rows,
         pagination: paging.pagination("/web/admin", more),
     }))
@@ -51,7 +55,7 @@ pub(super) async fn members(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
-    let language = language(&s, &headers);
+    let language = reader_language(&s, &headers, &session).await?;
     let rows =
         s.db.browser_search_members(&session, &list, paging.offset()?, &paging.q)
             .await?;

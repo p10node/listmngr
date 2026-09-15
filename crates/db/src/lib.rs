@@ -26,6 +26,8 @@ pub mod web_admin;
 mod web_session_inventory;
 pub mod web_sessions;
 pub use web_session_inventory::SessionSummary;
+pub mod web_profile;
+pub use web_profile::Profile;
 pub mod workflows;
 
 use std::{
@@ -772,6 +774,12 @@ impl UserRepo<'_> {
         let display_name = string("display_name", &current.display_name)?;
         let locale = string("locale", &current.locale)?;
         let timezone = string("timezone", &current.timezone)?;
+        crate::web_profile::Profile {
+            display_name: display_name.clone(),
+            locale: locale.clone(),
+            timezone: timezone.clone(),
+        }
+        .validate()?;
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
         sqlx::query("UPDATE users SET display_name=$1,locale=$2,timezone=$3 WHERE id=$4")
             .bind(display_name)

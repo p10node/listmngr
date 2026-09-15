@@ -1,7 +1,7 @@
 //! Confirmed own-membership departure, independent of list advertisement.
 use super::{
     ApiResult, AppState, Csrf, Form, HeaderMap, IntoResponse, Path, Redirect, Response, Shell,
-    State, html, language, load, write_session,
+    State, html, load, reader_language, write_session,
 };
 use listmngr_web::Nav;
 
@@ -11,7 +11,7 @@ pub(super) async fn preview(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
-    let language = language(&s, &headers);
+    let language = reader_language(&s, &headers, &session).await?;
     let (list, email) = s.db.browser_leave_preview(&session, member).await?;
     Ok(html(&listmngr_web::Leave {
         shell: Shell::new(language, "web-title-leave", Nav::Account),
