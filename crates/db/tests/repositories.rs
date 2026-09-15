@@ -150,6 +150,7 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/admin-notify-mchanges-schema.snapshot").lines())
             .chain(include_str!("fixtures/moderation-forward-schema.snapshot").lines())
             .chain(include_str!("fixtures/session-inventory-schema.snapshot").lines())
+            .chain(include_str!("fixtures/account-tokens-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )

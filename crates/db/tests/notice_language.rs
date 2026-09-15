@@ -45,9 +45,11 @@ async fn notices(db: &Database) -> Vec<(String, String, String)> {
     // Welcomes are stamped with the wall clock; holds use the fixture clock.
     let now_ms = chrono::Utc::now().timestamp_millis() + 1_000;
     let mut out = Vec::new();
+    // A lease long enough that a slow full-suite run cannot let an earlier
+    // claim expire and be counted a second time.
     while let Some(lease) = db
         .mail_queue()
-        .claim(Queue::Out, "out", now_ms, 100)
+        .claim(Queue::Out, "out", now_ms, 60_000)
         .await
         .unwrap()
     {

@@ -49,7 +49,7 @@ pub use pages::{
 };
 pub use pages::{
     ApiDocs, ArchiveCompat, ArchiveCompatEntry, DocOperation, DocPath, ProfilePage, SessionRow,
-    Sessions,
+    Sessions, SignupPage, Verified, VerifyForm,
 };
 
 /// The stylesheet, served from this origin with the design tokens the shell and

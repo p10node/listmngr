@@ -1,5 +1,22 @@
 # Architecture
 
+## Signup and mailbox proof — bounded local acceptance verified
+
+`crates/db/src/web_signup.rs` owns self-service account creation. Argon2 runs
+before the writer reservation; inside `browser_write_tx` the anonymous session
+that anchors the CSRF token is re-checked on the writer's own connection, the
+address row decides what the signup is (`claim_account`: create; link an
+address nobody owns; re-arm an account that was never proven; or, for an
+address a verified account owns, do nothing), a 32-byte token is issued into
+`account_tokens` (migration `0044`, digest only, 24-hour expiry, one per
+address per hour) and mailed through `site_notices().enqueue_tx`, and one
+`user.signup` audit event commits with all of it. `browser_verify_address`
+consumes the token with a single `UPDATE … RETURNING` guarded on purpose,
+expiry and `consumed_at`, verifies the address, retires sibling tokens and
+audits `address.verify`. Enumeration resistance is structural: the silent
+branches commit an empty transaction and the handler renders the same 202
+page.
+
 ## Site notices — bounded local acceptance verified
 
 `crates/db/src/site_notices.rs` produces mail the site sends to a person
