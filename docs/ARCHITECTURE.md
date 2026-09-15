@@ -1,5 +1,33 @@
 # Architecture
 
+## List settings — bounded local acceptance verified
+
+`crates/api/src/webui_list_settings.rs` describes the nine settings groups as
+data: each group is a list of fields with a kind (`text`, `textarea`, one entry
+per line, a select over wire values, a moderation action with `default` for
+none, a whole number, a decimal). One template (`settings_group.html`) renders
+any group from that description; one handler turns a submitted form into a
+JSON patch keyed exactly as the REST configuration is, so `ListRepo`'s patch
+engine is the only validator (`validate_patch` runs it on a copy for the
+preview; `browser_update_list_settings` runs it on the locked row for the
+save). A refused value is mapped back to its field by name and the form is
+rendered again as a 400 carrying an internal marker header, which the browser
+error-page middleware honours by leaving the body alone (it strips the header;
+every other client error still shows the generic page). The diff a preview
+shows compares the patch with the list's serialized wire values.
+
+`crates/db/src/web_list_settings.rs` holds the owner's other writes. Each one
+takes the browser writer reservation, checks the owner's live authority, and
+calls a transaction-scoped variant of the repository operation the REST API
+uses — `HeaderMatchRepo::edit_tx`, `BanRepo::{create,delete,site_create,
+site_delete}_tx`, `TemplateRepo::{set_body,delete}_tx`,
+`ListRepo::{set_archiver,delete}_tx`, `DigestRepo::bump_tx` — so the rows and
+the audit event commit together and the REST and browser paths share one
+implementation. Reads check authority in a short transaction and then query the
+pool, because the SQLite test pool has one connection. Header-rule tests
+evaluate the stored patterns with the pipeline's own compiler
+(`compile_header_pattern`), so what the page says matches what the chain does.
+
 ## OpenID Connect sign-in — bounded local acceptance verified
 
 `crates/api/src/oidc.rs` is the relying-party client: discovery cached per
