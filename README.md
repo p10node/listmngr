@@ -1828,6 +1828,14 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   that mailbox. The primary address and the last verified address cannot be
   removed. Every write is one audited transaction (`address.add`,
   `address.primary`, `address.remove`).
+- `/web/account/tokens`: the account's API tokens — name, scopes, binding,
+  expiry, last use, revoke — and a form to mint one. Scope follows authority,
+  because the API authorizes on the token alone: a list owner may only choose
+  list-level scopes (`lists:*`, `members:*`, `moderation`) and must bind the
+  token to a list they own; a server owner may choose any scope and leave it
+  unbound. The secret is shown once, on the page that follows creation, and
+  never stored. Revocation takes effect at once. Changing or resetting the
+  password does not revoke tokens.
 - `/web/account/sessions`: every browser currently signed in to the account,
   with when it was issued and when it expires, the one making the request
   marked. A reader can end one session or every other session; each revocation

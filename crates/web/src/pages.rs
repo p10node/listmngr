@@ -626,3 +626,52 @@ pub struct AddressRow {
     /// Whether it is the account's primary address.
     pub primary: bool,
 }
+
+/// The reader's own API tokens and the form to mint one.
+#[derive(Debug, Template)]
+#[template(path = "tokens.html")]
+pub struct Tokens {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Tokens, newest first; never a secret.
+    pub tokens: Vec<TokenRow>,
+    /// Scopes the reader may choose.
+    pub scopes: Vec<String>,
+    /// Lists the reader may bind to, as `(id, name)`.
+    pub lists: Vec<(String, String)>,
+    /// Whether an unbound token may be minted.
+    pub server_owner: bool,
+}
+
+/// One listed token.
+#[derive(Debug)]
+pub struct TokenRow {
+    /// Token id for the revoke form.
+    pub id: String,
+    /// Name.
+    pub name: String,
+    /// Scopes, space separated.
+    pub scopes: String,
+    /// What it is bound to, already worded.
+    pub bound: String,
+    /// Creation time, already formatted.
+    pub created: String,
+    /// Expiry, already worded.
+    pub expires: String,
+    /// Last use, already worded.
+    pub last_used: String,
+    /// Whether it has been revoked.
+    pub revoked: bool,
+}
+
+/// The one page that shows a freshly minted secret.
+#[derive(Debug, Template)]
+#[template(path = "token_issued.html")]
+pub struct TokenIssued {
+    /// Document shell.
+    pub shell: Shell,
+    /// The secret, shown once.
+    pub token: String,
+}

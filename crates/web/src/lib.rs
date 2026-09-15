@@ -49,8 +49,8 @@ pub use pages::{
 };
 pub use pages::{
     AddressRow, Addresses, ApiDocs, ArchiveCompat, ArchiveCompatEntry, DocOperation, DocPath,
-    ProfilePage, ResetConfirm, ResetDone, ResetRequest, SessionRow, Sessions, SignupPage, Verified,
-    VerifyForm,
+    ProfilePage, ResetConfirm, ResetDone, ResetRequest, SessionRow, Sessions, SignupPage,
+    TokenIssued, TokenRow, Tokens, Verified, VerifyForm,
 };
 
 /// The stylesheet, served from this origin with the design tokens the shell and

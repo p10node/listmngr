@@ -28,6 +28,8 @@ mod signup;
 mod subject_prefix;
 #[path = "webui/subject_prefix_controls.rs"]
 mod subject_prefix_controls;
+#[path = "webui/tokens.rs"]
+mod tokens;
 
 use axum::{
     body::{Body, to_bytes},
@@ -2060,6 +2062,11 @@ async fn browser_left_the_database_consistent(db: &Database) {
             "SELECT COUNT(*) FROM addresses WHERE email='browser-second@example.com' AND verified_on IS NULL AND user_id IS NOT NULL",
             1,
             "the added address is linked and unverified",
+        ),
+        (
+            "SELECT COUNT(*) FROM api_tokens WHERE name='browser token' AND list_id='public.example.com' AND revoked_at IS NOT NULL",
+            1,
+            "the browser-minted token is bound to the owned list and revoked",
         ),
     ] {
         let count: i64 = sqlx::query_scalar(sql).fetch_one(db.pool()).await.unwrap();
