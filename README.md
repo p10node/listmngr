@@ -1730,7 +1730,7 @@ name = "Example Lists"                  # $site_name in site notices
 site_owner = "postmaster@lists.example.com"  # From: of site notices; DKIM domain
 ```
 
-No producer ships yet; `P4-ACCOUNT-SIGNUP` and `P4-ACCOUNT-RESET` are the first.
+Signup verification (`P4-ACCOUNT-SIGNUP`) is the first producer; password reset follows.
 
 ## API reference without a CDN (`P1-API-DOCS-ORIGIN`)
 
@@ -1783,10 +1783,22 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   form. Opening the form never consumes a token; submitting it does. Delivery
   requires the existing configured mail worker/relay; a queued notice is not a
   receipt. Unknown/ineligible requests receive the same generic response.
+- `/web/signup` (on by default; `web.signup = false` removes the route and the
+  link): a visitor creates an account with a password. The account cannot sign
+  in until the address is proven: a single-use token, stored only as a SHA-256
+  digest and valid for 24 hours, is mailed as a site notice from
+  `site.site_owner`, and `/web/verify` (form or `?token=` prefill) consumes it.
+  The response is the same whether or not the address already had an account:
+  a verified account is neither recreated, changed nor mailed; an account that
+  was never proven belongs to whoever proves the address, so a repeat signup
+  re-arms it with the new name and password; at most one verification mail
+  per address per hour. Password strength, name and mailbox validation are the
+  same as everywhere else, and the whole write — account, credential, token,
+  mail — is one audited transaction (`user.signup`, then `address.verify`).
 - `/web/login`: password login for an existing account with a verified, linked
-  address. Account creation/password administration remain CLI/API operations;
-  trusted administrators may use `POST /api/v1/addresses/{email}/verify` **only
-  after establishing mailbox ownership**. Browser signup/reset are not provided.
+  address. Trusted administrators may still use
+  `POST /api/v1/addresses/{email}/verify` **only after establishing mailbox
+  ownership**. Browser password reset is not provided yet.
 - `/web/account`: your verified-address member subscriptions, delivery-mode and
   enabled/self-paused preference forms, and POST logout. Moderator/bounce-disabled
   delivery cannot be re-enabled here.

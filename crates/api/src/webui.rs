@@ -19,6 +19,8 @@ mod password;
 mod recovery;
 #[path = "webui_settings.rs"]
 mod settings;
+#[path = "webui_signup.rs"]
+mod signup;
 use crate::{ApiError, ApiResult, AppState};
 use askama::Template;
 use axum::{
@@ -117,6 +119,8 @@ pub fn routes() -> Router<AppState> {
             }),
         )
         .route("/web/login", get(login_form).post(login))
+        .route("/web/signup", get(signup::form).post(signup::create))
+        .route("/web/verify", get(signup::verify_form).post(signup::verify))
         .route("/web/account", get(account))
         .route("/web/admin", get(admin::index))
         .route(
@@ -363,6 +367,7 @@ async fn login_form(State(s): State<AppState>, h: HeaderMap) -> ApiResult<Respon
             Nav::Login,
         ),
         csrf: session.csrf.clone(),
+        signup: s.config.web.signup,
     });
     set_cookie(&s, &session, &mut r)?;
     Ok(r)
