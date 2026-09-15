@@ -319,6 +319,18 @@ with sync_playwright() as p:
     page.goto(base + '/web/verify?token=not-a-real-token')
     expect(page.get_by_role('heading', name='Verify your email address', exact=True)).to_be_visible()
     expect(page.get_by_label('Token from email', exact=True)).to_have_value('not-a-real-token')
+    # P4-ACCOUNT-RESET: the reset request looks the same for any address; the
+    # confirmation page prefills the token from the link.
+    page.goto(base + '/web/login')
+    page.get_by_role('link', name='Forgot your password?', exact=True).click()
+    expect(page.get_by_role('heading', name='Reset your password', exact=True)).to_be_visible()
+    page.get_by_label('Email', exact=True).fill('browser@example.com')
+    page.get_by_role('button', name='Send reset instructions', exact=True).click()
+    expect(page.get_by_role('heading', name='Check your email', exact=True)).to_be_visible()
+    page.screenshot(path=str(out / '17-reset-requested.png'), full_page=True)
+    page.goto(base + '/web/reset/confirm?token=not-a-real-token')
+    expect(page.get_by_role('heading', name='Choose a new password', exact=True)).to_be_visible()
+    expect(page.get_by_label('Token from email', exact=True)).to_have_value('not-a-real-token')
     headers = context.request.get(base + '/web').headers
     assert headers['content-security-policy'] == (
         "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; "
@@ -352,6 +364,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; own session listed and ended; anonymous signup accepted and the verification page prefilled; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()
