@@ -46,5 +46,7 @@ Point 3 is done: `P4-SHELL` migrated all twenty routes plus the one-click and
 compatibility-archive pages to Askama, and a source-level test now fails on any
 markup built inside a handler. Point 2 is done except for the CSP nonce: htmx is
 vendored and served from this origin but no page loads it, so pages keep
-`default-src 'none'` and carry no inline script. The first work package that
-needs progressive enhancement adds the nonce with the first script tag.
+`default-src 'none'` and carry no inline script. `P4-WEBAUTHN` added the first
+script, `passkeys.js`, as a first-party file on the two pages that offer
+passkeys, under `script-src 'self'` — no inline script and therefore no nonce
+yet; a nonce arrives with the first inline script, if one is ever needed.

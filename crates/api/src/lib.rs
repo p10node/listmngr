@@ -872,6 +872,12 @@ impl From<Error> for ApiError {
 type ApiResult<T> = Result<T, ApiError>;
 
 pub fn router(db: Database, config: Config) -> Router {
+    // `[site]` is one source of truth for the browser surface and the mail
+    // the site sends: the public origin (passkeys, archive links, mailed
+    // URLs) and the site's name and owner address.
+    let db = db
+        .with_base_url(&config.site.base_url)
+        .with_site(&config.site.name, &config.site.site_owner);
     let pre_auth_rate = RateLimiter::from_config(
         config
             .security

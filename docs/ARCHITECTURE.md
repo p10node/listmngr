@@ -1,5 +1,28 @@
 # Architecture
 
+## Passkeys — bounded local acceptance verified
+
+`crates/db/src/web_passkeys.rs` drives `webauthn_rp` 0.3 (pure Rust, no
+OpenSSL, so the static musl build is unchanged). The relying party is derived
+from `site.base_url`, which `listmngr_api::router` now carries into the
+`Database` handle along with the site name and owner. Migration `0046` adds
+`user_passkeys` (credential id, `StaticState` and `DynamicState` in the
+library's binary encoding, name, timestamps), `users.webauthn_handle` (the
+64-byte handle a discoverable login returns) and `web_sessions.webauthn_state`,
+where a started ceremony waits — prefixed by purpose, cleared as it is read,
+so a response answers one challenge once and the library's five-minute expiry
+applies. Registration requests `residentKey: required`,
+`userVerification: required` and credential protection without enforcement;
+verification pins the origin to `site.base_url`. A login rotates the anonymous
+session into a signed-in one in the same transaction as the counter update and
+the `web.login` audit event, and `browser_second_factor_missing` counts a
+passkey as a second factor. The browser side is `crates/web/assets/passkeys.js`
+using `PublicKeyCredential.parseCreationOptionsFromJSON` and `toJSON()`; the
+handlers read the CSRF token from an `X-CSRF-Token` header and apply the same
+Origin check as forms. Tests drive the ceremonies with a software ES256
+authenticator (`crates/api/tests/webui/soft_authenticator.rs`) and Chromium
+through CDP's virtual authenticator.
+
 ## Two-step sign-in — bounded local acceptance verified
 
 `crates/db/src/totp.rs` implements RFC 6238 over HMAC-SHA1 with the RFC 4648

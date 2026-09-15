@@ -1,0 +1,14 @@
+C|user_passkeys|created_at|integer|required|-
+C|user_passkeys|credential_id|text|required|-
+C|user_passkeys|dynamic_state|text|required|-
+C|user_passkeys|id|text|required|-
+C|user_passkeys|last_used_at|integer|optional|-
+C|user_passkeys|name|text|required|-
+C|user_passkeys|static_state|text|required|-
+C|user_passkeys|user_id|text|required|-
+C|users|webauthn_handle|text|optional|-
+C|web_sessions|webauthn_state|text|optional|-
+F|user_passkeys|user_id|users|id|cascade
+U|user_passkeys|credential_id
+U|user_passkeys|id
+U|users|webauthn_handle
