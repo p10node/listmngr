@@ -128,14 +128,21 @@ pub struct AdminRow {
     pub settings_href: String,
 }
 
-/// Bounded member roster with per-member posting policy.
+/// The owner's roster of one role: search, the rows, bulk removal and the
+/// links to the other rosters and tools.
 #[derive(Debug, Template)]
 #[template(path = "members.html")]
 pub struct Members {
-    /// Document shell.
+    /// Document shell, loading htmx.
     pub shell: Shell,
     /// Scope and effect sentence.
     pub intro: String,
+    /// The roster fragment.
+    pub roster: Roster,
+    /// The role tabs.
+    pub roles: Vec<GroupLink>,
+    /// The role being shown, as its wire name.
+    pub role: String,
     /// Search form target.
     pub search_action: String,
     /// Current search term.
@@ -144,29 +151,59 @@ pub struct Members {
     pub clear_href: String,
     /// Session CSRF token.
     pub csrf: String,
+    /// Where mass subscription starts.
+    pub subscribe_href: String,
+    /// Where the CSV export is.
+    pub export_href: String,
+    /// Where bulk removal posts.
+    pub remove_action: String,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+    /// Link back to the administration index.
+    pub admin_href: String,
+}
+
+/// The rows of a roster page and their paging: the part htmx swaps.
+#[derive(Debug, Template)]
+#[template(path = "members_roster.html")]
+pub struct Roster {
+    /// Document shell, for the strings.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
     /// Search term carried through a policy write.
     pub carried_query: String,
     /// Page number carried through a policy write.
     pub carried_page: u32,
+    /// Role carried through a policy write.
+    pub carried_role: String,
     /// Members on this page.
     pub rows: Vec<MemberRow>,
     /// Roster paging.
     pub pagination: Pagination,
-    /// Link back to the administration index.
-    pub admin_href: String,
 }
 
 /// One member of a roster.
 #[derive(Debug)]
 pub struct MemberRow {
+    /// Member id, for the bulk selection.
+    pub id: String,
     /// Member's address.
     pub email: String,
+    /// Display name, possibly empty.
+    pub display_name: String,
+    /// The options page.
+    pub href: String,
     /// Policy form target.
     pub action: String,
     /// Control id, unique per row.
     pub control: String,
     /// Posting policy options.
     pub choices: Vec<Choice>,
+    /// Member-level delivery summary, empty when inherited.
+    pub delivery: String,
+    /// Bounce score, shown when above zero.
+    pub bounce: Option<String>,
 }
 
 /// Owner-facing list settings.
@@ -1063,4 +1100,75 @@ pub struct DeleteList {
     pub csrf: String,
     /// A refusal.
     pub error: Option<String>,
+}
+
+/// One member's options page.
+#[derive(Debug, Template)]
+#[template(path = "member_options.html")]
+pub struct MemberOptionsPage {
+    /// Document shell.
+    pub shell: Shell,
+    /// The member's address.
+    pub email: String,
+    /// Where the roster is.
+    pub roster_href: String,
+    /// Form action.
+    pub action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Read-only facts (role, mode, since).
+    pub facts: Vec<Fact>,
+    /// The controls.
+    pub fields: Vec<SettingField>,
+    /// The effective preferences, resolved, as label/value pairs.
+    pub effective: Vec<Fact>,
+    /// Bounce score, last bounce, and whether delivery is off by bounces.
+    pub bounce_score: String,
+    pub last_bounce: String,
+    pub bounced: bool,
+    /// Where the bounce reset posts.
+    pub bounce_action: String,
+    /// Where removal posts.
+    pub remove_action: String,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+    /// A refusal that names no single field.
+    pub error: Option<String>,
+}
+
+/// The mass subscription form and, after a submission, its outcomes.
+#[derive(Debug, Template)]
+#[template(path = "mass_subscribe.html")]
+pub struct MassSubscribe {
+    /// Document shell.
+    pub shell: Shell,
+    /// Where the roster is.
+    pub roster_href: String,
+    /// Form action.
+    pub action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Role choices.
+    pub roles: Vec<Choice>,
+    /// The flags: `(name, label, help, checked)`.
+    pub flags: Vec<Flag>,
+    /// The textarea, kept after a submission.
+    pub addresses: String,
+    /// Outcomes of the last submission.
+    pub outcomes: Vec<Fact>,
+    /// A refusal.
+    pub error: Option<String>,
+}
+
+/// One checkbox of a form.
+#[derive(Debug)]
+pub struct Flag {
+    /// Field name.
+    pub name: String,
+    /// Translated label.
+    pub label: String,
+    /// Translated help.
+    pub help: String,
+    /// Whether it is checked.
+    pub checked: bool,
 }

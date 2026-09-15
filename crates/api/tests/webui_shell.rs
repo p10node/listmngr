@@ -164,7 +164,7 @@ async fn the_stylesheet_carries_design_tokens_and_a_dark_scheme() {
 }
 
 #[tokio::test]
-async fn htmx_is_served_from_this_origin_and_no_page_loads_it_yet() {
+async fn htmx_is_served_from_this_origin_and_public_pages_stay_script_free() {
     let app = fixture().await;
     let response = get(&app, "/web/htmx.min.js", "en").await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -174,8 +174,8 @@ async fn htmx_is_served_from_this_origin_and_no_page_loads_it_yet() {
     );
     let script = body(response).await;
     assert!(script.len() > 10_000, "the vendored library, not a stub");
-    // Until a package needs progressive enhancement, pages stay script-free and
-    // keep `default-src 'none'`.
+    // Only the owner's roster loads it (P4-MEMBERS); public pages stay
+    // script-free and keep `default-src 'none'`.
     let page = get(&app, "/web", "en").await;
     assert_eq!(
         page.headers()["content-security-policy"],

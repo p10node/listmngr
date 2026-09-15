@@ -19,6 +19,8 @@ mod admin;
 mod archive;
 #[path = "webui_list_settings.rs"]
 mod list_settings;
+#[path = "webui_members.rs"]
+mod members;
 #[path = "webui_membership.rs"]
 mod membership;
 #[path = "webui_oidc.rs"]
@@ -180,10 +182,30 @@ pub fn routes() -> Router<AppState> {
             get(settings::form).post(settings::save),
         )
         .merge(list_settings::routes())
-        .route("/web/lists/{id}/members", get(admin::members))
+        .route("/web/lists/{id}/members", get(members::roster))
+        .route(
+            "/web/lists/{id}/members/subscribe",
+            get(members::mass_form)
+                .post(members::mass_subscribe)
+                .layer(DefaultBodyLimit::max(1_048_576)),
+        )
+        .route("/web/lists/{id}/members/remove", post(members::mass_remove))
+        .route("/web/lists/{id}/members/export.csv", get(members::export))
+        .route(
+            "/web/lists/{id}/members/{member}",
+            get(members::member).post(members::member_save),
+        )
         .route(
             "/web/lists/{id}/members/{member}/policy",
-            post(admin::policy),
+            post(members::policy),
+        )
+        .route(
+            "/web/lists/{id}/members/{member}/bounce/reset",
+            post(members::bounce_reset),
+        )
+        .route(
+            "/web/lists/{id}/members/{member}/remove",
+            post(members::member_remove),
         )
         .route("/web/members/{id}/preferences", post(preferences))
         .route(
