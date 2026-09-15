@@ -29,6 +29,27 @@ def second_step(page, code):
 base = os.environ['WEBUI_URL']
 out = Path(os.environ['WEBUI_OUTPUT'])
 errors = []
+# axe-core is a development-only scanner, so it is passed in rather than
+# vendored; `page.evaluate` is not subject to the page CSP.
+axe_path = os.environ.get('WEBUI_AXE_SCRIPT')
+axe_source = Path(axe_path).read_text(encoding='utf-8') if axe_path else None
+scanned = []
+
+
+def axe_scan(page, label):
+    """Fail on any critical or serious violation of the page as it stands."""
+    if axe_source is None:
+        return
+    page.evaluate(axe_source)
+    report = page.evaluate("async () => await axe.run(document, {resultTypes: ['violations']})")
+    blocking = [
+        f"{violation['id']} ({violation['impact']}) on {label}"
+        for violation in report['violations']
+        if violation['impact'] in ('critical', 'serious')
+    ]
+    assert not blocking, blocking
+    scanned.append(label)
+
 with sync_playwright() as p:
     executable = os.environ.get('WEBUI_CHROMIUM_EXECUTABLE')
     browser = p.chromium.launch(executable_path=executable, headless=True)
@@ -36,7 +57,22 @@ with sync_playwright() as p:
     page = context.new_page()
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.on('response', lambda response: print('HTTP', response.status, response.url.split('?')[0], flush=True))
-    page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' else None)
+    # A form re-rendered with its refusals inline answers 400, which Chromium
+    # logs as a resource error; each deliberate one is announced first.
+    expected_refusals = {'count': 0}
+
+    def on_console(msg):
+        if msg.type != 'error':
+            return
+        if expected_refusals['count'] > 0 and 'status of 400' in msg.text:
+            expected_refusals['count'] -= 1
+            return
+        errors.append(msg.text)
+
+    def expect_refusal():
+        expected_refusals['count'] += 1
+
+    page.on('console', on_console)
     page.goto(base + '/web')
     expect(page.get_by_role('heading', name='Mailing lists')).to_be_visible()
     expect(page.locator('main')).not_to_contain_text('private.example.com')
@@ -136,7 +172,72 @@ with sync_playwright() as p:
     page.get_by_label('Send goodbye messages', exact=True).select_option('false')
     page.get_by_label('Emergency moderation', exact=True).select_option('false')
     page.get_by_role('button', name='Save list settings', exact=True).click()
-    page.get_by_role('link', name='List administration', exact=True).click()
+    # Settings groups: a preview that writes nothing, an inline refusal, a save.
+    page.get_by_role('link', name='Message acceptance', exact=True).click()
+    expect(page.get_by_role('heading', name='Message acceptance', exact=True)).to_be_visible()
+    axe_scan(page, '/web/lists/public.example.com/settings/acceptance')
+    page.get_by_label('Hold posts that look like commands', exact=True).select_option('false')
+    page.get_by_role('button', name='Preview changes', exact=True).click()
+    expect(page.get_by_role('heading', name='What would change', exact=True)).to_be_visible()
+    expect(page.locator('table')).to_contain_text('administrivia')
+    page.screenshot(path=str(out / '30-settings-preview.png'), full_page=True)
+    page.get_by_label('Maximum message size (KiB)', exact=True).fill('-1')
+    expect_refusal()
+    page.get_by_role('button', name='Preview changes', exact=True).click()
+    expect(page.locator('#max_message_size-error')).to_be_visible()
+    page.get_by_label('Maximum message size (KiB)', exact=True).fill('0')
+    page.get_by_role('button', name='Save list settings', exact=True).click()
+    expect(page.get_by_role('status')).to_contain_text('Saved')
+    expect(page.get_by_label('Hold posts that look like commands', exact=True)).to_have_value('false')
+    page.get_by_label('Hold posts that look like commands', exact=True).select_option('true')
+    page.get_by_role('button', name='Save list settings', exact=True).click()
+    expect(page.get_by_role('status')).to_contain_text('Saved')
+    # Header rules: add, test a value, remove.
+    page.get_by_role('link', name='Header rules', exact=True).click()
+    expect(page.get_by_role('heading', name='Header rules', exact=True)).to_be_visible()
+    page.locator('#header').fill('X-Spam-Flag')
+    page.locator('#pattern').fill('^YES')
+    page.locator('#action').select_option('discard')
+    page.locator('#tag').fill('spam')
+    page.get_by_role('button', name='Add rule', exact=True).click()
+    expect(page.locator('section.rule')).to_have_count(1)
+    expect(page.locator('section.rule h3')).to_contain_text('X-Spam-Flag')
+    axe_scan(page, '/web/lists/public.example.com/settings/header-matches')
+    page.locator('#test-header').fill('x-spam-flag')
+    page.locator('#test-value').fill('YES')
+    page.get_by_role('button', name='Test', exact=True).click()
+    expect(page.get_by_role('heading', name='Test result', exact=True)).to_be_visible()
+    expect(page.locator('main')).to_contain_text('Rule 1 matches')
+    page.screenshot(path=str(out / '31-header-rules.png'), full_page=True)
+    page.get_by_role('button', name='Remove rule', exact=True).click()
+    expect(page.locator('section.rule')).to_have_count(0)
+    # Bans: add and lift.
+    page.get_by_role('link', name='Bans', exact=True).click()
+    page.get_by_label('Address or pattern', exact=True).fill('Banned-Browser@Example.org')
+    page.get_by_role('button', name='Ban', exact=True).click()
+    expect(page.locator('main')).to_contain_text('banned-browser@example.org')
+    page.get_by_role('button', name='Lift ban', exact=True).click()
+    expect(page.locator('main')).to_contain_text('Nobody is banned')
+    # Templates: preview with placeholders, save, remove.
+    page.get_by_role('link', name='Templates', exact=True).click()
+    page.get_by_role('link', name='list:user:notice:welcome', exact=True).click()
+    page.get_by_label('Text', exact=True).fill('Hello $display_name from Chromium <$listname>')
+    page.get_by_role('button', name='Preview', exact=True).click()
+    expect(page.locator('main')).to_contain_text('from Chromium <public@example.com>')
+    page.screenshot(path=str(out / '32-template-editor.png'), full_page=True)
+    page.get_by_role('button', name='Save text', exact=True).click()
+    expect(page.locator('main')).to_contain_text('This list stores its own text')
+    page.get_by_role('button', name="Remove this list's text (every language)", exact=True).click()
+    expect(page.locator('main')).to_contain_text('inherited')
+    # Deleting needs the id typed back; a wrong one is refused inline.
+    page.get_by_role('link', name='Delete list', exact=True).click()
+    page.get_by_label('Type the list id to confirm:').fill('nope.example.com')
+    expect_refusal()
+    page.get_by_role('button', name='Delete the list', exact=True).click()
+    expect(page.get_by_role('alert')).to_contain_text('does not match')
+    assert expected_refusals['count'] == 0, 'every announced refusal was logged'
+    print('Settings groups/rules/bans/templates/delete confirmation: PASS', flush=True)
+    page.goto(base + '/web/admin')
     page.locator('a[href="/web/lists/public.example.com/members"]').click()
     page.get_by_label('Search member email', exact=True).fill('BROWSER@EXAMPLE.COM')
     page.get_by_role('button', name='Search members', exact=True).click()
@@ -454,31 +555,21 @@ with sync_playwright() as p:
     htmx = context.request.get(base + '/web/htmx.min.js')
     assert htmx.status == 200 and len(htmx.body()) > 10000, 'htmx is served from this origin'
 
-    # Accessibility. axe-core is a development-only scanner, so it is passed in
-    # rather than vendored; `page.evaluate` is not subject to the page CSP.
-    axe_path = os.environ.get('WEBUI_AXE_SCRIPT')
-    if axe_path:
-        axe_source = Path(axe_path).read_text(encoding='utf-8')
-        scanned = [
+    # Accessibility of the public pages; the signed-in settings pages were
+    # scanned in place above.
+    if axe_source is not None:
+        for path in [
             '/web',
             '/web/login',
             '/web/lists/public.example.com',
             '/web/lists/public.example.com/archive',
-        ]
-        for path in scanned:
+        ]:
             page.goto(base + path)
-            page.evaluate(axe_source)
-            report = page.evaluate("async () => await axe.run(document, {resultTypes: ['violations']})")
-            blocking = [
-                f"{violation['id']} ({violation['impact']}) on {path}"
-                for violation in report['violations']
-                if violation['impact'] in ('critical', 'serious')
-            ]
-            assert not blocking, blocking
+            axe_scan(page, path)
         print(f'AXE PASS: no critical or serious violations on {len(scanned)} pages.', flush=True)
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials. Settings groups previewed/refused inline/saved, a header rule added, tested and removed, a ban added and lifted, a template previewed, saved and removed, and the delete confirmation refused a wrong id.')
     context.close()
     browser.close()

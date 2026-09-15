@@ -115,6 +115,7 @@ pub(super) async fn form(
         selects,
         numbers,
         admin_href: "/web/admin".into(),
+        groups: super::list_settings::groups(language, &id, ""),
     }))
 }
 

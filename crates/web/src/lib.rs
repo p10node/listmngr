@@ -53,6 +53,10 @@ pub use pages::{
     SessionRow, Sessions, SignupPage, TokenIssued, TokenRow, Tokens, Verified, VerifyForm,
 };
 pub use pages::{
+    ActionForm, Bans, DeleteList, DiffRow, Fact, GroupLink, HeaderRuleDraft, HeaderRuleRow,
+    HeaderRules, SettingField, SettingsGroup, TemplateCatalogue, TemplateEditor, TemplateRow,
+};
+pub use pages::{
     LoginTotp, Oidc, PasskeyRow, Passkeys, ProviderLink, ProviderRow, TotpCodes, TotpPage,
 };
 

@@ -224,26 +224,39 @@ impl TemplateRepo<'_> {
         body: &str,
         context: &AuditContext,
     ) -> Result<()> {
+        self.ensure_scope(scope).await?;
+        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        Self::set_body_tx(&mut tx, scope, name, language, body, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// [`Self::set_body`] inside the caller's transaction; the caller has
+    /// checked that the scope exists.
+    pub(crate) async fn set_body_tx(
+        tx: &mut Transaction<'_, Any>,
+        scope: &Scope,
+        name: &str,
+        language: &str,
+        body: &str,
+        context: &AuditContext,
+    ) -> Result<()> {
         validate_name(name)?;
         validate_language(language)?;
         let body = normalize_body(body)?;
-        self.ensure_scope(scope).await?;
         let (kind, id) = scope.column_values();
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
         sqlx::query("INSERT INTO templates(id,name,scope,scope_id,language,uri,body,username,password) VALUES($1,$2,$3,$4,$5,NULL,$6,NULL,NULL) ON CONFLICT(name,scope,scope_id,language) DO UPDATE SET uri=NULL, body=excluded.body, username=NULL, password=NULL")
             .bind(Uuid::now_v7().to_string()).bind(name).bind(kind).bind(&id).bind(language).bind(&body)
-            .execute(&mut *tx).await.map_err(db_error)?;
+            .execute(&mut **tx).await.map_err(db_error)?;
         let (target_type, target_id) = scope.audit_target();
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "template.set",
             target_type,
             &target_id,
             serde_json::json!({"name": name, "language": language, "bytes": body.len()}),
         )
-        .await?;
-        tx.commit().await.map_err(db_error)
+        .await
     }
 
     /// Delete one template (every language) or, with `None`, every template
@@ -265,22 +278,34 @@ impl TemplateRepo<'_> {
         context: &AuditContext,
     ) -> Result<()> {
         self.ensure_scope(scope).await?;
-        let (kind, id) = scope.column_values();
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        Self::delete_tx(&mut tx, scope, name, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// [`Self::delete`] inside the caller's transaction; the caller has
+    /// checked that the scope exists. Returns how many rows went.
+    pub(crate) async fn delete_tx(
+        tx: &mut Transaction<'_, Any>,
+        scope: &Scope,
+        name: Option<&str>,
+        context: &AuditContext,
+    ) -> Result<u64> {
+        let (kind, id) = scope.column_values();
         let deleted = match name {
             Some(name) => {
                 sqlx::query("DELETE FROM templates WHERE scope=$1 AND scope_id=$2 AND name=$3")
                     .bind(kind)
                     .bind(&id)
                     .bind(name)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
             }
             None => {
                 sqlx::query("DELETE FROM templates WHERE scope=$1 AND scope_id=$2")
                     .bind(kind)
                     .bind(&id)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
             }
         }
@@ -288,7 +313,7 @@ impl TemplateRepo<'_> {
         .rows_affected();
         let (target_type, target_id) = scope.audit_target();
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "template.delete",
             target_type,
@@ -296,7 +321,7 @@ impl TemplateRepo<'_> {
             serde_json::json!({"name": name, "deleted": deleted}),
         )
         .await?;
-        tx.commit().await.map_err(db_error)
+        Ok(deleted)
     }
 
     /// Resolve the body to use for `name` on `list` in `language`.

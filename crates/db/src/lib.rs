@@ -32,11 +32,13 @@ pub use web_profile::Profile;
 pub mod site_notices;
 pub mod web_addresses;
 pub mod web_delete;
+pub mod web_list_settings;
 pub mod web_oidc;
 pub mod web_passkeys;
 pub mod web_tokens;
 pub mod web_totp;
 pub use web_addresses::OwnAddress;
+pub use web_list_settings::{HeaderMatchChange, TemplateView, header_match_outcomes};
 pub use web_oidc::{LoginMethods, OwnLink, VerifiedIdentity};
 pub use web_passkeys::OwnPasskey;
 pub use web_tokens::{OwnToken, TokenAuthority, TokenRequest};
@@ -1805,6 +1807,22 @@ impl ListRepo<'_> {
         Ok(())
     }
 
+    /// The list `patch` would produce, validated exactly as a save is, with
+    /// nothing written: what a preview shows.
+    /// # Errors
+    /// The same validation errors a save returns.
+    pub fn validate_patch(current: &MailingList, patch: &serde_json::Value) -> Result<MailingList> {
+        let mut list = current.clone();
+        let object = patch
+            .as_object()
+            .ok_or_else(|| Error::Validation("config patch must be an object".into()))?;
+        for (key, value) in object {
+            Self::apply_patch_key(&mut list, key, value, &PasswordChange::Unchanged)?;
+        }
+        Self::patch_dmarc(&mut list.dmarc, object)?;
+        Ok(list)
+    }
+
     pub(crate) async fn update_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
         id: &ListId,
@@ -1878,9 +1896,20 @@ impl ListRepo<'_> {
     /// Returns an error if the list is missing or any database/audit transaction step fails.
     pub async fn delete_with_context(&self, id: &ListId, context: &AuditContext) -> Result<()> {
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        Self::delete_tx(&mut tx, self.db, id, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// [`Self::delete_with_context`] inside the caller's transaction.
+    pub(crate) async fn delete_tx(
+        tx: &mut Transaction<'_, Any>,
+        db: &Database,
+        id: &ListId,
+        context: &AuditContext,
+    ) -> Result<()> {
         let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mailing_lists WHERE list_id=$1")
             .bind(id.as_str())
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(db_error)?;
         if exists == 0 {
@@ -1893,7 +1922,7 @@ impl ListRepo<'_> {
         // their users and addresses are shared identity records.
         let preference_rows = sqlx::query("SELECT preferences_id FROM members WHERE list_id=$1")
             .bind(id.as_str())
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await
             .map_err(db_error)?;
         let preference_ids = preference_rows
@@ -1902,49 +1931,48 @@ impl ListRepo<'_> {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(db_error)?;
 
-        digests::delete_list(&mut tx, id).await?;
+        digests::delete_list(tx, id).await?;
         for table in ["list_archivers", "header_matches", "bans"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE list_id=$1"))
                 .bind(id.as_str())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(db_error)?;
         }
         sqlx::query("DELETE FROM templates WHERE scope='list' AND scope_id=$1")
             .bind(id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?;
         let member_ids: Vec<String> = sqlx::query_scalar("SELECT id FROM members WHERE list_id=$1")
             .bind(id.as_str())
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await
             .map_err(db_error)?;
         for member_id in member_ids {
-            workflows::delete_member_with_goodbye(&mut tx, self.db, &member_id).await?;
+            workflows::delete_member_with_goodbye(tx, db, &member_id).await?;
         }
         for preference_id in preference_ids {
             sqlx::query("DELETE FROM preferences WHERE id=$1")
                 .bind(preference_id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(db_error)?;
         }
         sqlx::query("DELETE FROM mailing_lists WHERE list_id=$1")
             .bind(id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?;
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "list.delete",
             "list",
             id.as_str(),
             serde_json::json!({}),
         )
-        .await?;
-        tx.commit().await.map_err(db_error)
+        .await
     }
 
     /// # Errors
@@ -1969,18 +1997,29 @@ impl ListRepo<'_> {
     ) -> Result<()> {
         self.get(id).await?;
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        Self::set_archiver_tx(&mut tx, id, name, enabled, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// [`Self::set_archiver_with_context`] inside the caller's transaction.
+    pub(crate) async fn set_archiver_tx(
+        tx: &mut Transaction<'_, Any>,
+        id: &ListId,
+        name: &str,
+        enabled: bool,
+        context: &AuditContext,
+    ) -> Result<()> {
         sqlx::query("INSERT INTO list_archivers(list_id,name,enabled) VALUES($1,$2,$3) ON CONFLICT(list_id,name) DO UPDATE SET enabled=excluded.enabled")
-            .bind(id.as_str()).bind(name).bind(i64::from(enabled)).execute(&mut *tx).await.map_err(db_error)?;
+            .bind(id.as_str()).bind(name).bind(i64::from(enabled)).execute(&mut **tx).await.map_err(db_error)?;
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "list.archiver.set",
             "list",
             id.as_str(),
             serde_json::json!({"name":name,"enabled":enabled}),
         )
-        .await?;
-        tx.commit().await.map_err(db_error)
+        .await
     }
 
     /// # Errors
