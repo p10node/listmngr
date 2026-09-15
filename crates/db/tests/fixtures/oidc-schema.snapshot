@@ -1,0 +1,12 @@
+C|user_credentials|usable|integer|required|1
+C|user_oidc|created_at|integer|required|-
+C|user_oidc|email|text|required|-
+C|user_oidc|id|text|required|-
+C|user_oidc|last_used_at|integer|optional|-
+C|user_oidc|provider|text|required|-
+C|user_oidc|subject|text|required|-
+C|user_oidc|user_id|text|required|-
+C|web_sessions|oidc_state|text|optional|-
+F|user_oidc|user_id|users|id|cascade
+U|user_oidc|id
+U|user_oidc|provider,subject

@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- OpenID Connect sign-in (`P4-OIDC`): `[[web.oidc]]` providers on the login page, Authorization Code with PKCE and a verified ID token, just-in-time accounts for verified emails, auto-link by verified address, link/unlink under the account with the last-way-in rule; a provider sign-in still meets the two-step policy.
 - Passkeys (`P4-WEBAUTHN`): register WebAuthn credentials under the account, sign in with one alone, remove with the password; a passkey counts as the second factor. First-party `passkeys.js` on the two pages that offer them, under `script-src 'self'`.
 - Two-step sign-in with TOTP and recovery codes (`P4-TOTP`): enrolment with an inline QR code, a second login step, replay and brute-force limits, and the `security.require_2fa_for` policy that keeps server owners out of privileged pages until they enrol. `security.rate_limit.login` is now honoured instead of a fixed five per minute.
 - `/web/account/delete`: self-service account deletion confirmed with the password — memberships, addresses, tokens, credential and sessions go in one audited transaction; the last server owner is refused (`P4-ACCOUNT-DELETE`).

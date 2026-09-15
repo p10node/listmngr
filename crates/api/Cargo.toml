@@ -23,6 +23,11 @@ listmngr-core = { path = "../core", version = "0.1.0" }
 listmngr-db = { path = "../db", version = "0.1.0" }
 listmngr-mail = { path = "../mail", version = "0.1.0" }
 listmngr-pipeline = { path = "../pipeline", version = "0.1.0" }
+p256.workspace = true
+rand.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+rsa.workspace = true
+subtle.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
@@ -36,8 +41,8 @@ uuid.workspace = true
 
 [dev-dependencies]
 ciborium.workspace = true
+reqwest.workspace = true
 oas3 = "0.22.0"
-p256.workspace = true
 prometheus-parse = "0.2.5"
 tempfile = "=3.27.0"
 tower.workspace = true

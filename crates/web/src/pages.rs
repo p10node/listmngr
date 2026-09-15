@@ -38,6 +38,17 @@ pub struct Login {
     pub csrf: String,
     /// Whether self-service signup is offered.
     pub signup: bool,
+    /// Identity providers, in configuration order.
+    pub providers: Vec<ProviderLink>,
+}
+
+/// One identity provider the login page offers.
+#[derive(Debug)]
+pub struct ProviderLink {
+    /// Where the sign-in starts.
+    pub href: String,
+    /// The provider's name as configured.
+    pub display_name: String,
 }
 
 /// The signed-in member's own subscriptions.
@@ -759,4 +770,33 @@ pub struct PasskeyRow {
     pub created: String,
     /// Last use, already worded.
     pub last_used: String,
+}
+
+/// The reader's identity-provider links.
+#[derive(Debug, Template)]
+#[template(path = "oidc.html")]
+pub struct Oidc {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Every configured provider, linked or not.
+    pub providers: Vec<ProviderRow>,
+    /// Whether unlinking asks for the password (the account has a usable one).
+    pub needs_password: bool,
+    /// Whether the one link is the only way into the account.
+    pub last_way_in: bool,
+}
+
+/// One configured provider on the account page.
+#[derive(Debug)]
+pub struct ProviderRow {
+    /// Configured name, part of the form paths.
+    pub name: String,
+    /// Display name.
+    pub display_name: String,
+    /// The email the provider asserted when linked.
+    pub linked_email: Option<String>,
+    /// Last sign-in through it, already formatted.
+    pub last_used: Option<String>,
 }

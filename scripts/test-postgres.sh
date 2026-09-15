@@ -84,6 +84,8 @@ cargo test --locked -p listmngr-api --test webui \
   totp::postgres_totp_contract -- --ignored --exact
 cargo test --locked -p listmngr-api --test webui \
   passkeys::postgres_passkeys_contract -- --ignored --exact
+cargo test --locked -p listmngr-api --test webui \
+  oidc::postgres_oidc_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::dsn_issuance_tests::dsn_issuance_postgres -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
