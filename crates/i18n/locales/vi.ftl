@@ -220,3 +220,7 @@ web-profile-note = Ngôn ngữ giao diện áp dụng cho các trang bạn mở 
 web-profile-save = Lưu hồ sơ
 web-language-en = English
 web-language-vi = Tiếng Việt
+
+# Thư mức site, không thuộc hộp thư chung nào (P4-SITE-NOTICES).
+notice-site-verify-subject = Xác nhận địa chỉ email của bạn cho { $site_name }
+notice-site-reset-subject = Đặt lại mật khẩu của bạn cho { $site_name }

@@ -254,6 +254,41 @@ pub fn builtin(name: &str) -> Option<&'static str> {
              với từ 'help' ở tiêu đề hoặc nội dung (không kèm dấu nháy), bạn sẽ nhận\n\
              lại thư hướng dẫn.\n"
         }
+        "site:user:action:verify" => {
+            "Xác minh địa chỉ email\n\
+             \n\
+             Xin chào, đây là máy chủ hộp thư chung tại $domain.\n\
+             \n\
+             Ai đó, nhiều khả năng là bạn, đã yêu cầu $site_name xác minh rằng\n\
+             \n    $user_email\n\
+             \n\
+             là địa chỉ email của bạn. Để xác nhận, hãy mở\n\
+             \n    $verify_url\n\
+             \n\
+             và nhập mã này:\n\
+             \n    $token\n\
+             \n\
+             Mã chỉ dùng được một lần và sẽ hết hạn. Nếu bạn không yêu cầu, hãy bỏ\n\
+             qua thư này; sẽ không có gì thay đổi cho đến khi mã được dùng.\n"
+        }
+        "site:user:action:reset" => {
+            "Đặt lại mật khẩu\n\
+             \n\
+             Xin chào, đây là máy chủ hộp thư chung tại $domain.\n\
+             \n\
+             Ai đó, nhiều khả năng là bạn, đã yêu cầu $site_name đặt lại mật khẩu\n\
+             của tài khoản dành cho\n\
+             \n    $user_email\n\
+             \n\
+             Để chọn mật khẩu mới, hãy mở\n\
+             \n    $reset_url\n\
+             \n\
+             và nhập mã này:\n\
+             \n    $token\n\
+             \n\
+             Mã chỉ dùng được một lần và sẽ hết hạn. Nếu bạn không yêu cầu, hãy bỏ\n\
+             qua thư này; mật khẩu của bạn vẫn giữ nguyên.\n"
+        }
         _ => return None,
     })
 }

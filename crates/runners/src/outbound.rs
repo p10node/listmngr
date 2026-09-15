@@ -27,6 +27,9 @@ mod probe_tests;
 #[path = "signing_failure_tests.rs"]
 mod signing_failure_tests;
 #[cfg(test)]
+#[path = "site_notice_tests.rs"]
+mod site_notice_tests;
+#[cfg(test)]
 #[path = "smtp_bounce_tests.rs"]
 mod smtp_bounce_tests;
 #[cfg(test)]
@@ -787,11 +790,28 @@ async fn sign_delivery(
         .map_err(|error| lookup_error(&error))?;
     let context: serde_json::Value =
         serde_json::from_str(&message.context).map_err(|_| PrepareError::Invalid)?;
-    let id: ListId = context["list_id"]
-        .as_str()
-        .ok_or(PrepareError::Invalid)?
-        .parse()
-        .map_err(|_| PrepareError::Invalid)?;
+    let Some(list_id) = context["list_id"].as_str() else {
+        // Mail the site sends outside any list is signed for the site
+        // owner's domain — and only when the notice row, not the context,
+        // says the job is such a notice.
+        let site = context["site_mail_host"]
+            .as_str()
+            .filter(|_| context["site"] == true)
+            .ok_or(PrepareError::Invalid)?;
+        if !db
+            .workflows()
+            .is_notice(lease.job.id)
+            .await
+            .map_err(|error| lookup_error(&error))?
+        {
+            return Err(PrepareError::Invalid);
+        }
+        return role
+            .dkim
+            .sign(site, cooked)
+            .map_err(|_| PrepareError::Invalid);
+    };
+    let id: ListId = list_id.parse().map_err(|_| PrepareError::Invalid)?;
     let list = db
         .lists()
         .get(&id)
