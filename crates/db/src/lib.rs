@@ -30,7 +30,9 @@ pub mod web_profile;
 pub use web_profile::Profile;
 pub mod site_notices;
 pub mod web_addresses;
+pub mod web_tokens;
 pub use web_addresses::OwnAddress;
+pub use web_tokens::{OwnToken, TokenAuthority, TokenRequest};
 pub mod web_reset;
 pub mod web_signup;
 pub use web_signup::Signup;
@@ -3281,6 +3283,27 @@ impl PreferencesRepo<'_> {
 pub struct TokenRepo<'a> {
     db: &'a Database,
 }
+/// The random secret, its digest, the row and the `token.create` audit event,
+/// in the caller's transaction. Validation is the caller's.
+pub(crate) async fn insert_token_tx(
+    tx: &mut Transaction<'_, Any>,
+    input: &NewToken<'_>,
+    context: &AuditContext,
+) -> Result<IssuedToken> {
+    let id = TokenId::new();
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    let token = format!("lm_{id}_{secret}");
+    let hash = format!("{:x}", Sha256::digest(secret.as_bytes()));
+    sqlx::query("INSERT INTO api_tokens(id,user_id,name,token_hash,scopes,list_id,domain_id,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
+        .bind(id.to_string()).bind(input.user.to_string()).bind(input.name).bind(hash).bind(input.scopes.join(" "))
+        .bind(input.list_id.map(ToString::to_string)).bind(input.domain_id.map(|value| value.to_string()))
+        .bind(input.expires.map(|value| value.to_rfc3339())).bind(now()).execute(&mut **tx).await.map_err(db_error)?;
+    Database::record_tx_with_context(tx, context, "token.create", "token", &id.to_string(), serde_json::json!({"scopes":input.scopes,"list_id":input.list_id,"domain_id":input.domain_id})).await?;
+    Ok(IssuedToken { id, token })
+}
+
 impl TokenRepo<'_> {
     /// # Errors
     ///
@@ -3380,20 +3403,10 @@ impl TokenRepo<'_> {
                 return Err(Error::Validation("list is outside token domain".into()));
             }
         }
-        let id = TokenId::new();
-        let mut bytes = [0u8; 32];
-        rand::rng().fill_bytes(&mut bytes);
-        let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-        let token = format!("lm_{id}_{secret}");
-        let hash = format!("{:x}", Sha256::digest(secret.as_bytes()));
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        sqlx::query("INSERT INTO api_tokens(id,user_id,name,token_hash,scopes,list_id,domain_id,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
-            .bind(id.to_string()).bind(input.user.to_string()).bind(input.name).bind(hash).bind(input.scopes.join(" "))
-            .bind(input.list_id.map(ToString::to_string)).bind(input.domain_id.map(|value| value.to_string()))
-            .bind(input.expires.map(|value| value.to_rfc3339())).bind(now()).execute(&mut *tx).await.map_err(db_error)?;
-        Database::record_tx_with_context(&mut tx, context, "token.create", "token", &id.to_string(), serde_json::json!({"scopes":input.scopes,"list_id":input.list_id,"domain_id":input.domain_id})).await?;
+        let issued = insert_token_tx(&mut tx, &input, context).await?;
         tx.commit().await.map_err(db_error)?;
-        Ok(IssuedToken { id, token })
+        Ok(issued)
     }
     /// # Errors
     /// Returns an authentication or database error.

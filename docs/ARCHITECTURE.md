@@ -1,5 +1,19 @@
 # Architecture
 
+## Own API tokens — bounded local acceptance verified
+
+The API authorizes on a token's scopes and bounds alone, never on the roles
+of the user behind it, so self-service minting had to be bounded by authority
+or it would have been an escalation. `crates/db/src/web_tokens.rs` computes
+`TokenAuthority` inside the writer transaction — a verified server owner, and
+the lists the reader owns by the same `OWNED_LISTS` predicate the admin pages
+use — and lets a non-owner mint only `LIST_SCOPES` bound to one of those lists,
+while a server owner may mint `ALL_SCOPES` unbound (`admin` still unbound
+only). `insert_token_tx` is the one place a token row and its `token.create`
+audit event are written, shared with the CLI path; the secret exists in the
+result and nowhere else. Revocation is an ownership-guarded `UPDATE` with its
+`token.revoke` audit event.
+
 ## Own addresses — bounded local acceptance verified
 
 `crates/db/src/web_addresses.rs` manages the reader's addresses under

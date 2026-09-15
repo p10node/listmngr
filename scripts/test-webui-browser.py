@@ -222,6 +222,26 @@ with sync_playwright() as p:
     page.screenshot(path=str(out / '18-addresses.png'), full_page=True)
     page.goto(base + '/web/account')
     expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
+    # P4-ACCOUNT-TOKENS: the (server-owner) reader mints a token bound to one
+    # list, sees the secret once, and revokes it.
+    page.get_by_role('link', name='API tokens', exact=True).click()
+    expect(page.get_by_role('heading', name='API tokens', exact=True)).to_be_visible()
+    assert page.locator('input[name="scopes"][value="admin"]').count() == 1, 'a server owner may mint administrative scopes'
+    page.get_by_label('Name', exact=True).fill('browser token')
+    page.get_by_label('members:read', exact=True).check()
+    page.get_by_label('List', exact=True).select_option('public.example.com')
+    page.get_by_role('button', name='Create token', exact=True).click()
+    expect(page.get_by_text('Copy this token now')).to_be_visible()
+    issued = page.locator('code').inner_text()
+    assert issued.startswith('lm_'), 'the secret is shown once'
+    page.get_by_role('link', name='API tokens', exact=True).click()
+    expect(page.get_by_role('heading', name='browser token', exact=True)).to_be_visible()
+    assert issued not in page.content(), 'the secret is not shown again'
+    page.screenshot(path=str(out / '19-tokens.png'), full_page=True)
+    page.get_by_role('button', name='Revoke token', exact=True).click()
+    expect(page.locator('main')).to_contain_text('Revoked')
+    page.goto(base + '/web/account')
+    expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
     # P4-ACCOUNT-SESSIONS: the reader sees this browser's own session and can end it.
     page.get_by_role('link', name='Signed-in browsers', exact=True).click()
     expect(page.get_by_role('heading', name='Signed-in browsers', exact=True)).to_be_visible()
@@ -375,6 +395,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()
