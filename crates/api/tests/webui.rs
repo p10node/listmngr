@@ -16,6 +16,8 @@ mod notices;
 mod posting_limits;
 #[path = "webui/profile.rs"]
 mod profile;
+#[path = "webui/reset.rs"]
+mod reset;
 #[path = "webui/sessions.rs"]
 mod sessions;
 #[path = "webui/signup.rs"]
@@ -2024,7 +2026,7 @@ async fn chromium_browser_acceptance() {
     assert_eq!(recipients, vec!["browser-joined@example.com"]);
     browser_left_the_database_consistent(&db).await;
     println!(
-        "BROWSER DB PASS: paused preference persisted; confirmed member created; held accepted; exact enabled recipient queued; logout revoked persistent session; signup left an unverified account with one live token."
+        "BROWSER DB PASS: paused preference persisted; confirmed member created; held accepted; exact enabled recipient queued; logout revoked persistent session; signup left an unverified account with one live token; the reset request left one live reset token."
     );
 }
 
@@ -2046,6 +2048,11 @@ async fn browser_left_the_database_consistent(db: &Database) {
             "SELECT COUNT(*) FROM account_tokens WHERE purpose='verify_address' AND consumed_at IS NULL",
             1,
             "one live verification token",
+        ),
+        (
+            "SELECT COUNT(*) FROM account_tokens WHERE purpose='password_reset' AND consumed_at IS NULL",
+            1,
+            "one live reset token for the verified browser account",
         ),
     ] {
         let count: i64 = sqlx::query_scalar(sql).fetch_one(db.pool()).await.unwrap();

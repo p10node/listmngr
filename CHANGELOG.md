@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- `/web/reset` and `/web/reset/confirm`: password reset by mailbox proof with a mailed single-use token, enumeration-safe responses, every session of the account ended, and one audited transaction per step (`P4-ACCOUNT-RESET`). The login page links reset and signup; its stale "not available" note is gone.
 - `/web/signup` and `/web/verify`: self-service account creation with a mailed single-use verification token, enumeration-safe responses, and one audited transaction per step; `web.signup = false` switches it off (`P4-ACCOUNT-SIGNUP`).
 - Site notices: mail the site sends outside any list, from `site.site_owner`, with site-scoped templates `site:user:action:verify` and `site:user:action:reset` in `en` and `vi`, delivered by the out runner with a null reverse path and signed for the owner's domain when a DKIM key exists (`P4-SITE-NOTICES`). No producer ships yet.
 - `/web/account/profile` edits the reader's display name, interface language and time zone, audited in one transaction; the chosen language then wins over `Accept-Language` while signed in (`P4-ACCOUNT-PROFILE`). The same validator now guards the REST user patch.

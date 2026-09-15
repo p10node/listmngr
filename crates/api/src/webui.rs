@@ -17,6 +17,8 @@ mod membership;
 mod password;
 #[path = "webui_recovery.rs"]
 mod recovery;
+#[path = "webui_reset.rs"]
+mod reset;
 #[path = "webui_settings.rs"]
 mod settings;
 #[path = "webui_signup.rs"]
@@ -121,6 +123,11 @@ pub fn routes() -> Router<AppState> {
         .route("/web/login", get(login_form).post(login))
         .route("/web/signup", get(signup::form).post(signup::create))
         .route("/web/verify", get(signup::verify_form).post(signup::verify))
+        .route("/web/reset", get(reset::form).post(reset::request))
+        .route(
+            "/web/reset/confirm",
+            get(reset::confirm_form).post(reset::confirm),
+        )
         .route("/web/account", get(account))
         .route("/web/admin", get(admin::index))
         .route(
