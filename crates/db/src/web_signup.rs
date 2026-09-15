@@ -259,7 +259,7 @@ async fn claim_account(
 
 /// The session that anchors the CSRF token must still be live, checked on
 /// the writer's own connection. It may be anonymous or signed in.
-async fn live_anonymous_session(
+pub(crate) async fn live_anonymous_session(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     session: &WebSession,
     now_ms: i64,

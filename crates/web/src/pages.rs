@@ -571,3 +571,33 @@ pub struct Verified {
     /// Document shell.
     pub shell: Shell,
 }
+
+/// Password reset request.
+#[derive(Debug, Template)]
+#[template(path = "reset.html")]
+pub struct ResetRequest {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+}
+
+/// Token entry and new password.
+#[derive(Debug, Template)]
+#[template(path = "reset_confirm.html")]
+pub struct ResetConfirm {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Token prefilled from the link, if any.
+    pub token: String,
+}
+
+/// A completed reset.
+#[derive(Debug, Template)]
+#[template(path = "reset_done.html")]
+pub struct ResetDone {
+    /// Document shell.
+    pub shell: Shell,
+}
