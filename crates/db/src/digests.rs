@@ -189,7 +189,17 @@ impl<'a> DigestRepo<'a> {
     /// Returns missing-list, overflow, database or audit errors.
     pub async fn bump_with_context(&self, list: &ListId, context: &AuditContext) -> Result<()> {
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
-        let current = crate::lock_list_for_patch(&mut tx, list).await?;
+        Self::bump_tx(&mut tx, list, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// [`Self::bump_with_context`] inside the caller's transaction.
+    pub(crate) async fn bump_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        list: &ListId,
+        context: &AuditContext,
+    ) -> Result<()> {
+        let current = crate::lock_list_for_patch(tx, list).await?;
         let volume = current
             .volume
             .checked_add(1)
@@ -197,19 +207,18 @@ impl<'a> DigestRepo<'a> {
         sqlx::query("UPDATE mailing_lists SET volume=$1,next_digest_number=1 WHERE list_id=$2")
             .bind(i64::from(volume))
             .bind(list.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?;
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "digest.bump",
             "list",
             list.as_str(),
             serde_json::json!({"volume": volume}),
         )
-        .await?;
-        tx.commit().await.map_err(db_error)
+        .await
     }
 
     /// Fences collection with the source digest lease; retries cannot append twice.

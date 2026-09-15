@@ -280,12 +280,27 @@ impl HeaderMatchRepo<'_> {
         edit: impl FnOnce(&mut Vec<HeaderMatchRow>) -> Result<()>,
     ) -> Result<Vec<HeaderMatchRow>> {
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
-        lock_list_for_patch(&mut tx, list).await?;
+        let rows = Self::edit_tx(&mut tx, list, context, change, position, edit).await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(rows)
+    }
+
+    /// Rewrite the set inside the caller's transaction: the current rows,
+    /// the edit, validation, the renumbered rows and one audit event.
+    pub(crate) async fn edit_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        list: &ListId,
+        context: &AuditContext,
+        change: &str,
+        position: Option<usize>,
+        edit: impl FnOnce(&mut Vec<HeaderMatchRow>) -> Result<()>,
+    ) -> Result<Vec<HeaderMatchRow>> {
+        lock_list_for_patch(tx, list).await?;
         let current = sqlx::query(
             "SELECT header, pattern, chain, tag FROM header_matches WHERE list_id=$1 ORDER BY position",
         )
         .bind(list.as_str())
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(db_error)?;
         let mut rows = current.iter().map(row_from).collect::<Result<Vec<_>>>()?;
@@ -293,7 +308,7 @@ impl HeaderMatchRepo<'_> {
         validate_set(&rows)?;
         sqlx::query("DELETE FROM header_matches WHERE list_id=$1")
             .bind(list.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?;
         for (position, row) in rows.iter().enumerate() {
@@ -307,12 +322,12 @@ impl HeaderMatchRepo<'_> {
             .bind(&row.pattern)
             .bind(&row.tag)
             .bind(&row.chain)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?;
         }
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "list.header_matches",
             "list",
@@ -320,7 +335,6 @@ impl HeaderMatchRepo<'_> {
             serde_json::json!({ "change": change, "position": position, "count": rows.len() }),
         )
         .await?;
-        tx.commit().await.map_err(db_error)?;
         Ok(rows)
     }
 }

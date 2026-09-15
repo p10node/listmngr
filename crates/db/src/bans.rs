@@ -123,14 +123,25 @@ impl BanRepo<'_> {
     /// # Errors
     /// Returns validation, missing-list/ban, database or audit errors.
     pub async fn delete(&self, id: &ListId, value: &str, context: &AuditContext) -> Result<()> {
-        let value = normalize(value)?;
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        crate::workflows::lock(&mut tx).await?;
-        lock_list_for_patch(&mut tx, id).await?;
+        Self::delete_tx(&mut tx, id, value, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// [`Self::delete`] inside the caller's transaction.
+    pub(crate) async fn delete_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        id: &ListId,
+        value: &str,
+        context: &AuditContext,
+    ) -> Result<()> {
+        let value = normalize(value)?;
+        crate::workflows::lock(tx).await?;
+        lock_list_for_patch(tx, id).await?;
         let changed = sqlx::query("DELETE FROM bans WHERE list_id=$1 AND email_or_regex=$2")
             .bind(id.as_str())
             .bind(&value)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?
             .rows_affected();
@@ -138,15 +149,14 @@ impl BanRepo<'_> {
             return Err(listmngr_core::Error::NotFound(value));
         }
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "ban.delete",
             "list",
             id.as_str(),
             serde_json::json!({"email_or_regex": value}),
         )
-        .await?;
-        tx.commit().await.map_err(db_error)
+        .await
     }
 
     /// One stored site-wide ban by its canonical value.
@@ -197,14 +207,25 @@ impl BanRepo<'_> {
     /// # Errors
     /// Returns validation, conflict, database or audit errors.
     pub async fn site_create(&self, value: &str, context: &AuditContext) -> Result<String> {
-        let value = normalize(value)?;
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        crate::workflows::lock(&mut tx).await?;
+        let value = Self::site_create_tx(&mut tx, value, context).await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(value)
+    }
+
+    /// [`Self::site_create`] inside the caller's transaction.
+    pub(crate) async fn site_create_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        value: &str,
+        context: &AuditContext,
+    ) -> Result<String> {
+        let value = normalize(value)?;
+        crate::workflows::lock(tx).await?;
         let existing: Option<String> = sqlx::query_scalar(
             "SELECT email_or_regex FROM bans WHERE list_id IS NULL AND email_or_regex=$1",
         )
         .bind(&value)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(db_error)?;
         if existing.is_some() {
@@ -213,11 +234,11 @@ impl BanRepo<'_> {
         sqlx::query("INSERT INTO bans(id,list_id,email_or_regex) VALUES($1,NULL,$2)")
             .bind(Uuid::now_v7().to_string())
             .bind(&value)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?;
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "ban.create",
             "site",
@@ -225,7 +246,6 @@ impl BanRepo<'_> {
             serde_json::json!({"email_or_regex": value}),
         )
         .await?;
-        tx.commit().await.map_err(db_error)?;
         Ok(value)
     }
 
@@ -234,12 +254,22 @@ impl BanRepo<'_> {
     /// # Errors
     /// Returns validation, missing-ban, database or audit errors.
     pub async fn site_delete(&self, value: &str, context: &AuditContext) -> Result<()> {
-        let value = normalize(value)?;
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        crate::workflows::lock(&mut tx).await?;
+        Self::site_delete_tx(&mut tx, value, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// [`Self::site_delete`] inside the caller's transaction.
+    pub(crate) async fn site_delete_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        value: &str,
+        context: &AuditContext,
+    ) -> Result<()> {
+        let value = normalize(value)?;
+        crate::workflows::lock(tx).await?;
         let changed = sqlx::query("DELETE FROM bans WHERE list_id IS NULL AND email_or_regex=$1")
             .bind(&value)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?
             .rows_affected();
@@ -247,15 +277,14 @@ impl BanRepo<'_> {
             return Err(listmngr_core::Error::NotFound(value));
         }
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "ban.delete",
             "site",
             "bans",
             serde_json::json!({"email_or_regex": value}),
         )
-        .await?;
-        tx.commit().await.map_err(db_error)
+        .await
     }
 
     /// Creates a canonical mailbox ban attributed to the immutable edge context.
@@ -263,19 +292,31 @@ impl BanRepo<'_> {
     /// # Errors
     /// Returns validation, missing-list, conflict, database or audit errors.
     pub async fn create(&self, id: &ListId, value: &str, context: &AuditContext) -> Result<String> {
-        let value = normalize(value)?;
         let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        crate::workflows::lock(&mut tx).await?;
-        lock_list_for_patch(&mut tx, id).await?;
+        let value = Self::create_tx(&mut tx, id, value, context).await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(value)
+    }
+
+    /// [`Self::create`] inside the caller's transaction.
+    pub(crate) async fn create_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        id: &ListId,
+        value: &str,
+        context: &AuditContext,
+    ) -> Result<String> {
+        let value = normalize(value)?;
+        crate::workflows::lock(tx).await?;
+        lock_list_for_patch(tx, id).await?;
         sqlx::query("INSERT INTO bans(id,list_id,email_or_regex) VALUES($1,$2,$3)")
             .bind(Uuid::now_v7().to_string())
             .bind(id.as_str())
             .bind(&value)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(db_error)?;
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "ban.create",
             "list",
@@ -283,7 +324,6 @@ impl BanRepo<'_> {
             serde_json::json!({"email_or_regex": value}),
         )
         .await?;
-        tx.commit().await.map_err(db_error)?;
         Ok(value)
     }
 }

@@ -83,7 +83,7 @@ impl Database {
         Ok(rows)
     }
 
-    async fn browser_owner_tx(
+    pub(crate) async fn browser_owner_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
         session: &WebSession,
         list: &ListId,

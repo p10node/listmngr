@@ -17,6 +17,8 @@ mod account_tokens;
 mod admin;
 #[path = "webui_archive.rs"]
 mod archive;
+#[path = "webui_list_settings.rs"]
+mod list_settings;
 #[path = "webui_membership.rs"]
 mod membership;
 #[path = "webui_oidc.rs"]
@@ -177,6 +179,7 @@ pub fn routes() -> Router<AppState> {
             "/web/lists/{id}/settings",
             get(settings::form).post(settings::save),
         )
+        .merge(list_settings::routes())
         .route("/web/lists/{id}/members", get(admin::members))
         .route(
             "/web/lists/{id}/members/{member}/policy",
@@ -300,6 +303,19 @@ async fn directory(
     }))
 }
 
+/// Marks a 400 response whose body is the form itself, refusals inline, so
+/// `security_headers` leaves it alone. Never reaches the browser.
+const INLINE_REFUSAL: &str = "x-listmngr-inline-refusal";
+
+/// The form again, with its refusals inline, as a 400.
+fn inline_refusal(mut response: Response) -> Response {
+    *response.status_mut() = StatusCode::BAD_REQUEST;
+    response
+        .headers_mut()
+        .insert(INLINE_REFUSAL, header::HeaderValue::from_static("1"));
+    response
+}
+
 async fn security_headers(request: Request, next: Next) -> Response {
     let language = request
         .headers()
@@ -308,7 +324,10 @@ async fn security_headers(request: Request, next: Next) -> Response {
         .map(ToOwned::to_owned)
         .unwrap_or_default();
     let mut r = next.run(request).await;
-    if r.status().is_client_error() || r.status().is_server_error() {
+    // A form rendered again with its refusals inline keeps its body; every
+    // other failure shows the one page that says nothing about the cause.
+    let inline = r.headers_mut().remove(INLINE_REFUSAL).is_some();
+    if (r.status().is_client_error() && !inline) || r.status().is_server_error() {
         let status = r.status();
         let retry_after = r.headers().get(header::RETRY_AFTER).cloned();
         // The failure page cannot reach the database, so it negotiates on the
