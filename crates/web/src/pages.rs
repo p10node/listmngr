@@ -601,3 +601,28 @@ pub struct ResetDone {
     /// Document shell.
     pub shell: Shell,
 }
+
+/// The reader's own addresses.
+#[derive(Debug, Template)]
+#[template(path = "addresses.html")]
+pub struct Addresses {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Addresses, primary first.
+    pub addresses: Vec<AddressRow>,
+}
+
+/// One listed address.
+#[derive(Debug)]
+pub struct AddressRow {
+    /// Address id for the action forms.
+    pub id: String,
+    /// Normalized address.
+    pub email: String,
+    /// Whether it has been proven from its mailbox.
+    pub verified: bool,
+    /// Whether it is the account's primary address.
+    pub primary: bool,
+}

@@ -1,3 +1,5 @@
+#[path = "webui/addresses.rs"]
+mod addresses;
 #[path = "webui/admin_pagination.rs"]
 mod admin_pagination;
 #[path = "webui/emergency.rs"]
@@ -2046,13 +2048,18 @@ async fn browser_left_the_database_consistent(db: &Database) {
         ),
         (
             "SELECT COUNT(*) FROM account_tokens WHERE purpose='verify_address' AND consumed_at IS NULL",
-            1,
-            "one live verification token",
+            2,
+            "one live verification token each for the signup and the added address",
         ),
         (
             "SELECT COUNT(*) FROM account_tokens WHERE purpose='password_reset' AND consumed_at IS NULL",
             1,
             "one live reset token for the verified browser account",
+        ),
+        (
+            "SELECT COUNT(*) FROM addresses WHERE email='browser-second@example.com' AND verified_on IS NULL AND user_id IS NOT NULL",
+            1,
+            "the added address is linked and unverified",
         ),
     ] {
         let count: i64 = sqlx::query_scalar(sql).fetch_one(db.pool()).await.unwrap();

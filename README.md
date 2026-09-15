@@ -1818,6 +1818,16 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   validator serves this form and the REST user patch: names are non-empty,
   at most 256 characters and free of control characters; the language must be
   a shipped catalog (`en`, `vi`); the zone must be an IANA name.
+- `/web/account/addresses`: the account's addresses, primary first. Adding one
+  links it unverified and mails a token (the same `/web/verify` flow as
+  signup); an address another account owns links nothing and mails nothing,
+  and the page looks the same either way. Any verified address can become
+  primary and can be used to log in. Removing an address unlinks it and
+  forgets its verification — whoever claims it next must prove it again — but
+  keeps the address row and its list subscriptions, which still deliver to
+  that mailbox. The primary address and the last verified address cannot be
+  removed. Every write is one audited transaction (`address.add`,
+  `address.primary`, `address.remove`).
 - `/web/account/sessions`: every browser currently signed in to the account,
   with when it was issued and when it expires, the one making the request
   marked. A reader can end one session or every other session; each revocation
