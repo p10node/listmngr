@@ -18,6 +18,8 @@ mod posting_limits;
 mod profile;
 #[path = "webui/sessions.rs"]
 mod sessions;
+#[path = "webui/signup.rs"]
+mod signup;
 #[path = "webui/subject_prefix.rs"]
 mod subject_prefix;
 #[path = "webui/subject_prefix_controls.rs"]
@@ -2020,15 +2022,35 @@ async fn chromium_browser_acceptance() {
     let recipients: Vec<String> = sqlx::query_scalar("SELECT email FROM delivery_recipients WHERE job_id IN (SELECT id FROM queue_jobs WHERE message_id=$1)")
         .bind(db.moderation().get(held_id).await.unwrap().message_id.0.to_string()).fetch_all(db.pool()).await.unwrap();
     assert_eq!(recipients, vec!["browser-joined@example.com"]);
-    let sessions: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM web_sessions WHERE user_id IS NOT NULL")
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
-    assert_eq!(sessions, 0);
+    browser_left_the_database_consistent(&db).await;
     println!(
-        "BROWSER DB PASS: paused preference persisted; confirmed member created; held accepted; exact enabled recipient queued; logout revoked persistent session."
+        "BROWSER DB PASS: paused preference persisted; confirmed member created; held accepted; exact enabled recipient queued; logout revoked persistent session; signup left an unverified account with one live token."
     );
+}
+
+/// After the browser run: every signed-in session was revoked, and the
+/// anonymous signup left one unverified account with one live token.
+async fn browser_left_the_database_consistent(db: &Database) {
+    for (sql, expected, why) in [
+        (
+            "SELECT COUNT(*) FROM web_sessions WHERE user_id IS NOT NULL",
+            0,
+            "logout revoked every signed-in session",
+        ),
+        (
+            "SELECT COUNT(*) FROM addresses WHERE email='newcomer@example.com' AND verified_on IS NULL AND user_id IS NOT NULL",
+            1,
+            "the browser signup created an unverified account",
+        ),
+        (
+            "SELECT COUNT(*) FROM account_tokens WHERE purpose='verify_address' AND consumed_at IS NULL",
+            1,
+            "one live verification token",
+        ),
+    ] {
+        let count: i64 = sqlx::query_scalar(sql).fetch_one(db.pool()).await.unwrap();
+        assert_eq!(count, expected, "{why}");
+    }
 }
 
 async fn wire_confirmation(db: &Database, address: std::net::SocketAddr, c: &str, x: &str) {
