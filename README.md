@@ -1730,7 +1730,7 @@ name = "Example Lists"                  # $site_name in site notices
 site_owner = "postmaster@lists.example.com"  # From: of site notices; DKIM domain
 ```
 
-Signup verification (`P4-ACCOUNT-SIGNUP`) is the first producer; password reset follows.
+Signup verification (`P4-ACCOUNT-SIGNUP`) and password reset (`P4-ACCOUNT-RESET`) are the producers.
 
 ## API reference without a CDN (`P1-API-DOCS-ORIGIN`)
 
@@ -1795,10 +1795,19 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   per address per hour. Password strength, name and mailbox validation are the
   same as everywhere else, and the whole write — account, credential, token,
   mail — is one audited transaction (`user.signup`, then `address.verify`).
+- `/web/reset` and `/web/reset/confirm`: password reset by mailbox proof. The
+  request page accepts any address and answers the same way; only a verified
+  address of an account with a password gets a single-use, 24-hour token
+  mailed as a site notice (at most one per address per hour, in the account's
+  own language). Confirming with the token and a new password — checked for
+  strength before the token is touched, so a refused attempt does not burn it
+  — replaces the credential, ends every session of the account and audits
+  `user.password` with the cause. Both forms use the shared pre-auth rate
+  bucket, Origin and CSRF.
 - `/web/login`: password login for an existing account with a verified, linked
   address. Trusted administrators may still use
   `POST /api/v1/addresses/{email}/verify` **only after establishing mailbox
-  ownership**. Browser password reset is not provided yet.
+  ownership**.
 - `/web/account`: your verified-address member subscriptions, delivery-mode and
   enabled/self-paused preference forms, and POST logout. Moderator/bounce-disabled
   delivery cannot be re-enabled here.

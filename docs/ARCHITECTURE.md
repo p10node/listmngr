@@ -1,5 +1,21 @@
 # Architecture
 
+## Password reset — bounded local acceptance verified
+
+`crates/db/src/web_reset.rs` mirrors signup. `browser_reset_request` looks the
+address up joined to its user and credential under `browser_write_tx`, commits
+nothing when there is no verified account, and otherwise issues a
+`password_reset` row in `account_tokens` (one per address per hour) and mails
+`site:user:action:reset` in the account's own language through
+`site_notices().enqueue_tx`, auditing `user.reset.request`.
+`browser_reset_confirm` validates and hashes the new password before the
+writer reservation, then consumes the token with one guarded `UPDATE …
+RETURNING`, requires the address to still be verified and owned, replaces the
+credential (bumping `password_updated_at`, which every session's
+`credential_version` is checked against), deletes the account's sessions,
+retires sibling tokens and audits `user.password` with the cause; the audit
+layer redacts the `password` value as it does for every credential event.
+
 ## Signup and mailbox proof — bounded local acceptance verified
 
 `crates/db/src/web_signup.rs` owns self-service account creation. Argon2 runs

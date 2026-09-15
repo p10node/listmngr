@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block content %}<p>{{ shell.t("web-reset-confirm-intro") }}</p><form method="post" action="/web/reset/confirm">{% call ui::csrf(csrf) %}{% endcall %}<p><label>{{ shell.t("web-reset-token") }} <input name="token" value="{{ token }}" maxlength="128" autocomplete="off" required></label></p><p><label>{{ shell.t("web-reset-password") }} <input type="password" name="password" autocomplete="new-password" required maxlength="1024"></label></p><p><label>{{ shell.t("web-reset-confirm-password") }} <input type="password" name="confirm_password" autocomplete="new-password" required maxlength="1024"></label></p><button>{{ shell.t("web-reset-confirm-submit") }}</button></form>{% endblock %}
