@@ -1,5 +1,50 @@
 # listmngr
 
+## Member management (`P4-MEMBERS`) — bounded local acceptance verified
+
+`/web/lists/<id>/members` is now the owner's roster of every role: tabs for
+members, owners, moderators and nonmembers (`?role=`), the email-substring
+search and paging as before, and per row the display name, the member-level
+delivery mode and status when one is set, the bounce score when it is above
+zero, the inline posting-policy form (members and nonmembers) and a link to
+the member's options. The roster is the first page to load the vendored
+htmx: the search form carries `hx-get`, so a search swaps only the roster and
+pushes the URL, and the same request without the `HX-Request` header — or
+with scripts off — returns the whole page; the page's CSP allows
+`script-src 'self'` only and htmx's own indicator stylesheet is switched off
+so nothing inline is ever needed.
+
+- **Options** (`…/members/<member>`): posting policy, display name, role
+  (moving the subscription to another roster), and the member-level
+  preferences — delivery mode and status, acknowledgements, hidden address,
+  list copy, own posts, language — each with **Inherit** for "not set here",
+  saved in one audited `member.update` transaction; the effective values,
+  every layer resolved, are shown beside the form. The bounce section shows
+  the score and last bounce, and **Reset bounce score and enable delivery**
+  clears them and turns delivery back on when bounces had disabled it
+  (`bounce.recover`). **Remove from the list** ends the subscription.
+- **Add members** (`…/members/subscribe`): addresses one per line, as
+  `address` or `Name <address>`, from the textarea or an uploaded plain-text
+  file (256 KiB, added to the lines), a role, and Mailman's flags —
+  `pre_verified`, `pre_confirmed`, `pre_approved`, `invitation`. Members go
+  through the registrar's own workflow, so the list's subscription policy
+  decides what is still missing exactly as on `POST /api/v1/members`; owners,
+  moderators and nonmembers are added directly. The page reports each
+  address: subscribed, held (a request waits for the person or a moderator),
+  already on the roster, not an address, listed twice, or refused with the
+  reason (a ban, for instance). At most 1000 addresses per submission.
+- **Removal**: tick rows on the roster or paste addresses, then
+  **Remove selected**; every removal is its own `member.delete` event in one
+  transaction, a goodbye goes out when the list sends one, and ids that are
+  not on this list are ignored.
+- **Export** (`…/members/export.csv?role=`): a CSV attachment with email,
+  display name, role, subscription mode, delivery mode and status, posting
+  policy, bounce score, last bounce and subscription time, at most 10,000
+  rows, RFC 4180 quoting.
+
+Every page needs a live session of a list owner or server owner and, under
+`security.require_2fa_for`, an enrolled second factor.
+
 ## List settings (`P4-LIST-SETTINGS`) — bounded local acceptance verified
 
 Every list setting Mailman's REST configuration accepts is now editable from

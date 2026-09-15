@@ -1,5 +1,35 @@
 # Architecture
 
+## Member management — bounded local acceptance verified
+
+`crates/db/src/web_members.rs` holds the owner's member operations.
+`browser_roster` reads one role's page with the member-level preferences
+joined in; `browser_member_options` updates the member row and its
+preference row (`PreferencesRepo::set_tx`) with one `member.update` event;
+`browser_member_bounce_reset` clears the score and re-enables delivery that
+bounces disabled; `browser_mass_remove` resolves ids and addresses to this
+list's rows and deletes each through `workflows::delete_member_with_goodbye`
+with its own `member.delete` event, all in one transaction;
+`browser_export_members` is a bounded read. `browser_mass_subscribe` is the
+one operation that is not a single transaction: after the authority check it
+calls the registrar (`WorkflowRepo::subscribe` with `AdminSubscription`) per
+member address, so the list's policy and the `pre_*`/invitation flags mean
+what they mean on the REST API, and `MemberRepo::subscribe_with_context`
+for the other roles; each address commits on its own and reports its
+outcome, so a refused address never rolls back the accepted ones.
+
+The roster page is the first progressive enhancement: `Shell::with_htmx`
+loads the vendored `htmx.min.js` (and, through `scripted`, widens the CSP
+to `script-src 'self'`), the search form carries `hx-get`/`hx-target`/
+`hx-push-url`, and the handler renders only the `Roster` sub-template when
+the request carries `HX-Request: true`. A `<meta name="htmx-config">`
+switches off htmx's injected indicator stylesheet, which the `style-src
+'self'` policy would otherwise refuse. The bulk-removal checkboxes belong to
+a form outside the rows through the `form` attribute, so the per-row policy
+forms stay valid HTML. The mass form accepts both encodings: the handler
+reads `multipart/form-data` through axum's `Multipart` (the `multipart`
+feature is new) and falls back to the urlencoded `Form`.
+
 ## List settings — bounded local acceptance verified
 
 `crates/api/src/webui_list_settings.rs` describes the nine settings groups as

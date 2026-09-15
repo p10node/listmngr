@@ -11,7 +11,7 @@ workspace = true
 [dependencies]
 askama.workspace = true
 listmngr-archive = { path = "../archive", version = "0.1.0" }
-axum.workspace = true
+axum = { workspace = true, features = ["multipart"] }
 base64.workspace = true
 chrono.workspace = true
 dashmap.workspace = true

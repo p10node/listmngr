@@ -12,7 +12,7 @@ pub struct AdminMember {
     pub action: Option<ModerationAction>,
 }
 
-fn valid_offset(offset: i64) -> Result<()> {
+pub(crate) fn valid_offset(offset: i64) -> Result<()> {
     if !(0..=200_000).contains(&offset) {
         return Err(Error::Validation("page out of range".into()));
     }
@@ -156,7 +156,8 @@ impl Database {
         Ok(members)
     }
 
-    /// Change one member's posting override and audit in one transaction.
+    /// Change one member's or nonmember's posting override and audit in one
+    /// transaction.
     /// # Errors
     /// Rejects stale owner authority, foreign/non-member IDs and audit failures.
     pub async fn browser_member_policy(
@@ -169,7 +170,7 @@ impl Database {
         let mut tx = self.browser_write_tx().await?;
         let user = Self::browser_owner_tx(&mut tx, session, list).await?;
         let affected = sqlx::query(
-            "UPDATE members SET moderation_action=$1 WHERE id=$2 AND list_id=$3 AND role='member'",
+            "UPDATE members SET moderation_action=$1 WHERE id=$2 AND list_id=$3 AND role IN ('member','nonmember')",
         )
         .bind(action.map(|a| a.to_string()))
         .bind(member.to_string())

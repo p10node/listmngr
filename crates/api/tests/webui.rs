@@ -16,6 +16,8 @@ mod list_settings_groups;
 mod member_admin;
 #[path = "webui/member_search.rs"]
 mod member_search;
+#[path = "webui/members_admin.rs"]
+mod members_admin;
 #[path = "webui/notices.rs"]
 mod notices;
 #[path = "webui/oidc.rs"]

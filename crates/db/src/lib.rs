@@ -33,12 +33,14 @@ pub mod site_notices;
 pub mod web_addresses;
 pub mod web_delete;
 pub mod web_list_settings;
+pub mod web_members;
 pub mod web_oidc;
 pub mod web_passkeys;
 pub mod web_tokens;
 pub mod web_totp;
 pub use web_addresses::OwnAddress;
 pub use web_list_settings::{HeaderMatchChange, TemplateView, header_match_outcomes};
+pub use web_members::{ExportRow, MassFlags, MassOutcome, MemberDetail, MemberOptions, RosterRow};
 pub use web_oidc::{LoginMethods, OwnLink, VerifiedIdentity};
 pub use web_passkeys::OwnPasskey;
 pub use web_tokens::{OwnToken, TokenAuthority, TokenRequest};
@@ -3080,7 +3082,7 @@ pub struct PreferencesRepo<'a> {
     db: &'a Database,
 }
 impl PreferencesRepo<'_> {
-    async fn set_tx(
+    pub(crate) async fn set_tx(
         tx: &mut Transaction<'_, Any>,
         id: PreferencesId,
         p: &Preferences,
