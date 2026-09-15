@@ -105,23 +105,53 @@ impl Database {
         .execute(&mut *tx)
         .await
         .map_err(db_error)?;
-        let recent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM account_tokens WHERE address_id=$1 AND purpose='verify_address' AND created_at>$2")
-            .bind(&address_id).bind(now_ms.saturating_sub(COOLDOWN_MS))
-            .fetch_one(&mut *tx).await.map_err(db_error)?;
-        if recent > 0 {
+        if !self
+            .issue_verification(&mut tx, &address_id, &address, &locale, now_ms)
+            .await?
+        {
             return tx.commit().await.map_err(db_error);
+        }
+        Self::record_tx_with_context(
+            &mut tx,
+            &AuditContext::system(),
+            "user.signup",
+            "user",
+            &user.to_string(),
+            serde_json::json!({"email": address.email, "repeat": repeat}),
+        )
+        .await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// Mail a fresh verification token for `address`, unless one was mailed
+    /// within the hour. Returns whether a mail was queued.
+    /// # Errors
+    /// Template, mailbox or database failure.
+    pub(crate) async fn issue_verification(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        address_id: &str,
+        address: &Address,
+        language: &str,
+        now_ms: i64,
+    ) -> Result<bool> {
+        let recent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM account_tokens WHERE address_id=$1 AND purpose='verify_address' AND created_at>$2")
+            .bind(address_id).bind(now_ms.saturating_sub(COOLDOWN_MS))
+            .fetch_one(&mut **tx).await.map_err(db_error)?;
+        if recent > 0 {
+            return Ok(false);
         }
         let (token, digest) = fresh_token()?;
         sqlx::query("INSERT INTO account_tokens(id,purpose,address_id,token_hash,created_at,expires_at) VALUES($1,'verify_address',$2,$3,$4,$5)")
-            .bind(Uuid::now_v7().to_string()).bind(&address_id).bind(digest).bind(now_ms).bind(now_ms.saturating_add(TOKEN_LIFE_MS))
-            .execute(&mut *tx).await.map_err(db_error)?;
+            .bind(Uuid::now_v7().to_string()).bind(address_id).bind(digest).bind(now_ms).bind(now_ms.saturating_add(TOKEN_LIFE_MS))
+            .execute(&mut **tx).await.map_err(db_error)?;
         let verify_url = format!("{}/web/verify", self.base_url().unwrap_or_default());
         self.site_notices()
             .enqueue_tx(
-                &mut tx,
+                tx,
                 &crate::site_notices::SiteNotice {
                     to: &address.original_email,
-                    language: &locale,
+                    language,
                     subject: "notice-site-verify-subject",
                     subject_args: &[("site_name", self.site_name())],
                     template: "site:user:action:verify",
@@ -133,16 +163,7 @@ impl Database {
                 now_ms,
             )
             .await?;
-        Self::record_tx_with_context(
-            &mut tx,
-            &AuditContext::system(),
-            "user.signup",
-            "user",
-            &user.to_string(),
-            serde_json::json!({"email": address.email, "repeat": repeat}),
-        )
-        .await?;
-        tx.commit().await.map_err(db_error)
+        Ok(true)
     }
 
     /// Consume a mailed verification token: the address becomes verified and
@@ -210,12 +231,11 @@ async fn claim_account(
     let id: String = row.try_get("id").map_err(db_error)?;
     let owner: Option<String> = row.try_get("user_id").map_err(db_error)?;
     let verified: Option<String> = row.try_get("verified_on").map_err(db_error)?;
-    if verified.is_some() {
-        return Ok(None);
-    }
     let Some(owner) = owner else {
+        // Nobody's address: whoever proves it from its mailbox gets the
+        // account, so an earlier administrative verification no longer counts.
         let user = insert_account(tx, address, locale, hash).await?;
-        sqlx::query("UPDATE addresses SET user_id=$1,display_name=$2 WHERE id=$3")
+        sqlx::query("UPDATE addresses SET user_id=$1,display_name=$2,verified_on=NULL WHERE id=$3")
             .bind(user.to_string())
             .bind(&address.display_name)
             .bind(&id)
@@ -224,6 +244,9 @@ async fn claim_account(
             .map_err(db_error)?;
         return Ok(Some((id, user, false)));
     };
+    if verified.is_some() {
+        return Ok(None);
+    }
     // An account that was never proven belongs to whoever proves the
     // address; a verified account that is adding this address is not ours to
     // change.

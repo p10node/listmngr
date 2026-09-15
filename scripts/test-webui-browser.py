@@ -211,6 +211,17 @@ with sync_playwright() as p:
     assert page.evaluate('document.documentElement.lang') == 'en'
     page.goto(base + '/web/account')
     expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
+    # P4-ACCOUNT-ADDRESSES: the account's addresses, with a new one added unverified.
+    page.get_by_role('link', name='Your email addresses', exact=True).click()
+    expect(page.get_by_role('heading', name='Your email addresses', exact=True)).to_be_visible()
+    expect(page.get_by_role('heading', name='browser@example.com', exact=True)).to_be_visible()
+    page.get_by_label('New address', exact=True).fill('browser-second@example.com')
+    page.get_by_role('button', name='Add address', exact=True).click()
+    expect(page.get_by_role('heading', name='browser-second@example.com', exact=True)).to_be_visible()
+    expect(page.locator('main')).to_contain_text('Unverified')
+    page.screenshot(path=str(out / '18-addresses.png'), full_page=True)
+    page.goto(base + '/web/account')
+    expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
     # P4-ACCOUNT-SESSIONS: the reader sees this browser's own session and can end it.
     page.get_by_role('link', name='Signed-in browsers', exact=True).click()
     expect(page.get_by_role('heading', name='Signed-in browsers', exact=True)).to_be_visible()
@@ -364,6 +375,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()
