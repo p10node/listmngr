@@ -963,26 +963,7 @@ impl Config {
             .extract()
             .map_err(|_| Error::Validation("invalid configuration (values redacted)".into()))?;
         if let Some(secret_file) = &config.database.url_file {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mode = std::fs::metadata(secret_file)
-                    .map_err(|_| Error::Validation("cannot inspect database.url_file".into()))?
-                    .permissions()
-                    .mode();
-                if mode & 0o077 != 0 {
-                    return Err(Error::Validation(
-                        "database.url_file must not be accessible by group or other users".into(),
-                    ));
-                }
-            }
-            let value = std::fs::read_to_string(secret_file)
-                .map_err(|_| Error::Validation("cannot read database.url_file".into()))?;
-            let value = value.trim();
-            if value.is_empty() {
-                return Err(Error::Validation("database.url_file is empty".into()));
-            }
-            value.clone_into(&mut config.database.url);
+            config.database.url = read_secret_file(secret_file, "database.url_file")?;
         }
         for (index, check) in config.antispam.header_checks.iter().enumerate() {
             let header = check.header.trim();
@@ -1018,6 +999,7 @@ impl Config {
                 )));
             }
         }
+        validate_oidc(&mut config.web.oidc)?;
         validate_rate_limit("login", &config.security.rate_limit.login)?;
         validate_rate_limit("subscribe", &config.security.rate_limit.subscribe)?;
         validate_rate_limit("api", &config.security.rate_limit.api)?;
@@ -1060,6 +1042,31 @@ impl Config {
     }
 }
 
+/// A secret read from a file only the service user can read; the path and
+/// the value never appear in an error.
+fn read_secret_file(secret_file: &Path, setting: &str) -> Result<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(secret_file)
+            .map_err(|_| Error::Validation(format!("cannot inspect {setting}")))?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            return Err(Error::Validation(format!(
+                "{setting} must not be accessible by group or other users"
+            )));
+        }
+    }
+    let value = std::fs::read_to_string(secret_file)
+        .map_err(|_| Error::Validation(format!("cannot read {setting}")))?;
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(Error::Validation(format!("{setting} is empty")));
+    }
+    Ok(value.to_owned())
+}
+
 macro_rules! config_struct {
     ($name:ident { $($field:ident : $ty:ty = $value:expr),+ $(,)? }) => {
         #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1097,7 +1104,8 @@ pub struct DkimSigningConfig {
     pub private_key_file: PathBuf,
 }
 
-/// SMTP credential input; never exposes its value through Debug or serialization.
+/// A credential read from configuration (SMTP or an OIDC client secret);
+/// never exposes its value through Debug or serialization.
 #[derive(Clone, Deserialize)]
 #[serde(transparent)]
 pub struct SmtpAuthSecret(String);
@@ -1331,7 +1339,103 @@ impl MtaConfig {
     }
 }
 
-config_struct!(WebConfig { listen: String = "127.0.0.1:8000".into(), trusted_proxies: Vec<IpNet> = vec!["127.0.0.1/32".parse().expect("valid network")], session_idle: String = "12h".into(), session_absolute: String = "7d".into(), signup: bool = true });
+config_struct!(WebConfig { listen: String = "127.0.0.1:8000".into(), trusted_proxies: Vec<IpNet> = vec!["127.0.0.1/32".parse().expect("valid network")], session_idle: String = "12h".into(), session_absolute: String = "7d".into(), signup: bool = true, oidc: Vec<OidcProviderConfig> = Vec::new() });
+
+/// `[[web.oidc]]`: unique slugs, an https issuer (http only on loopback),
+/// exactly one way to the client secret, and `openid` among the scopes.
+fn validate_oidc(providers: &mut [OidcProviderConfig]) -> Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    for provider in providers.iter_mut() {
+        let name = provider.name.as_str();
+        if name.is_empty()
+            || name.len() > 32
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            || !seen.insert(name.to_owned())
+        {
+            return Err(Error::Validation(
+                "web.oidc[].name must be a unique lowercase slug".into(),
+            ));
+        }
+        if provider.display_name.trim().is_empty() {
+            return Err(Error::Validation(format!(
+                "web.oidc.{name}.display_name is empty"
+            )));
+        }
+        let issuer = provider.issuer.trim_end_matches('/');
+        let loopback = issuer.starts_with("http://localhost")
+            || issuer.starts_with("http://127.0.0.1")
+            || issuer.starts_with("http://[::1]");
+        if !(issuer.starts_with("https://") || loopback) {
+            return Err(Error::Validation(format!(
+                "web.oidc.{name}.issuer must be an https URL (http only for loopback development)"
+            )));
+        }
+        provider.issuer = issuer.to_owned();
+        if provider.client_id.trim().is_empty() {
+            return Err(Error::Validation(format!(
+                "web.oidc.{name}.client_id is empty"
+            )));
+        }
+        match (&provider.client_secret, &provider.client_secret_file) {
+            (Some(secret), None) if !secret.expose().trim().is_empty() => {}
+            (None, Some(file)) => {
+                let value = read_secret_file(file, &format!("web.oidc.{name}.client_secret_file"))?;
+                provider.client_secret = Some(value.into());
+            }
+            _ => {
+                return Err(Error::Validation(format!(
+                    "web.oidc.{name} needs exactly one of client_secret or client_secret_file"
+                )));
+            }
+        }
+        if !provider.scopes.iter().any(|scope| scope == "openid") {
+            provider.scopes.insert(0, "openid".into());
+        }
+    }
+    Ok(())
+}
+
+/// One `OpenID` Connect provider a reader may sign in with (`[[web.oidc]]`).
+///
+/// Discovery, Authorization Code with PKCE, `state` and `nonce`, and an ID
+/// token whose `email_verified` claim is required before an address is
+/// trusted. Any conforming provider works; Google is one (`issuer =
+/// "https://accounts.google.com"`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OidcProviderConfig {
+    /// Slug in URLs: lowercase letters, digits and hyphens.
+    pub name: String,
+    /// What the login page calls it.
+    pub display_name: String,
+    /// The issuer URL discovery is fetched from and ID tokens must name.
+    pub issuer: String,
+    /// The client id registered with the provider.
+    pub client_id: String,
+    /// The client secret inline (development only); prefer `client_secret_file`.
+    /// Redacted in `Debug` and when serialized.
+    pub client_secret: Option<SmtpAuthSecret>,
+    /// A file holding the client secret, readable by the service user only.
+    pub client_secret_file: Option<PathBuf>,
+    /// Scopes to request; `openid` is always included.
+    pub scopes: Vec<String>,
+}
+
+impl Default for OidcProviderConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            display_name: String::new(),
+            issuer: String::new(),
+            client_id: String::new(),
+            client_secret: None,
+            client_secret_file: None,
+            scopes: vec!["openid".into(), "email".into(), "profile".into()],
+        }
+    }
+}
 config_struct!(ApiConfig { listen: String = "127.0.0.1:8001".into(), compat_basic_auth: bool = false, compat_basic_auth_allow: Vec<IpNet> = vec!["127.0.0.1/32".parse().expect("valid network")] });
 config_struct!(Argon2Config {
     memory_kib: u32 = 65_536,

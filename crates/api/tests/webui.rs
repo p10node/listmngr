@@ -16,6 +16,8 @@ mod member_admin;
 mod member_search;
 #[path = "webui/notices.rs"]
 mod notices;
+#[path = "webui/oidc.rs"]
+mod oidc;
 #[path = "webui/passkeys.rs"]
 mod passkeys;
 #[path = "webui/posting_limits.rs"]

@@ -168,6 +168,88 @@ fn config_accepts_only_enforced_second_factor_roles() {
 }
 
 #[test]
+fn oidc_providers_are_validated_and_secrets_come_from_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    for (name, body, fragment) in [
+        (
+            "bad slug",
+            "[[web.oidc]]\nname = \"Google!\"\ndisplay_name = \"Google\"\nissuer = \"https://accounts.google.com\"\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+            "web.oidc[].name",
+        ),
+        (
+            "plain http issuer",
+            "[[web.oidc]]\nname = \"corp\"\ndisplay_name = \"Corp\"\nissuer = \"http://idp.example.com\"\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+            "issuer",
+        ),
+        (
+            "no secret",
+            "[[web.oidc]]\nname = \"corp\"\ndisplay_name = \"Corp\"\nissuer = \"https://idp.example.com\"\nclient_id = \"x\"\n",
+            "client_secret",
+        ),
+        (
+            "duplicate",
+            "[[web.oidc]]\nname = \"corp\"\ndisplay_name = \"Corp\"\nissuer = \"https://idp.example.com\"\nclient_id = \"x\"\nclient_secret = \"y\"\n[[web.oidc]]\nname = \"corp\"\ndisplay_name = \"Corp 2\"\nissuer = \"https://idp2.example.com\"\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+            "unique",
+        ),
+    ] {
+        std::fs::write(&path, body).unwrap();
+        let error = Config::load(Some(&path)).unwrap_err().to_string();
+        assert!(error.contains(fragment), "{name}: {error}");
+        assert!(
+            !error.contains("client_secret = ") && !error.contains("\"y\""),
+            "{name}: a secret leaked: {error}"
+        );
+    }
+    let secret = dir.path().join("oidc-secret");
+    std::fs::write(&secret, "PRIVATE-SECRET-SENTINEL\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    std::fs::write(
+        &path,
+        format!(
+            "[[web.oidc]]\nname = \"google\"\ndisplay_name = \"Google\"\nissuer = \"https://accounts.google.com/\"\nclient_id = \"x\"\nclient_secret_file = {secret:?}\nscopes = [\"email\"]\n"
+        ),
+    )
+    .unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    let provider = &config.web.oidc[0];
+    assert_eq!(
+        provider.issuer, "https://accounts.google.com",
+        "trailing slash trimmed"
+    );
+    assert_eq!(
+        provider
+            .client_secret
+            .as_ref()
+            .map(listmngr_core::SmtpAuthSecret::expose),
+        Some("PRIVATE-SECRET-SENTINEL")
+    );
+    let shown = format!("{provider:?}");
+    assert!(
+        !shown.contains("PRIVATE-SECRET-SENTINEL"),
+        "Debug redacts the secret: {shown}"
+    );
+    let shown = serde_json::to_string(&config.web).unwrap();
+    assert!(
+        !shown.contains("PRIVATE-SECRET-SENTINEL"),
+        "serialization redacts the secret: {shown}"
+    );
+    assert_eq!(
+        provider.scopes,
+        ["openid", "email"],
+        "openid is always requested"
+    );
+    assert!(
+        Config::default().web.oidc.is_empty(),
+        "no provider by default"
+    );
+}
+
+#[test]
 fn secret_file_read_errors_are_generic_and_valid_utf8_still_loads() {
     let dir = tempfile::tempdir().unwrap();
     let secret = dir.path().join("PRIVATE-PATH-SENTINEL");

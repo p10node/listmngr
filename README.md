@@ -1862,6 +1862,43 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   form still works without it, and the button is hidden until it runs. The
   relying-party id is the host of `site.base_url`, which must therefore be a
   domain name (`localhost` works for development), not an IP address.
+- `/web/login/oidc/<name>` and `/web/account/oidc`: sign in through an
+  OpenID Connect provider. Each `[[web.oidc]]` entry names one provider
+  (`name` is a slug used in the paths, `display_name` is what the login page
+  shows, `issuer` is the provider's issuer URL — `https://accounts.google.com`
+  for Google, and any provider publishing
+  `/.well-known/openid-configuration` works the same way — with `client_id`
+  and either `client_secret` or `client_secret_file`). The flow is
+  Authorization Code with PKCE (S256), `state` and `nonce`, the redirect URI is
+  `<site.base_url>/web/login/oidc/<name>/callback`, and the ID token is
+  verified against the provider's JWKS (RS256 or ES256) for issuer, audience,
+  expiry and nonce. A provider identity signs in the account it is linked to;
+  otherwise its email — trusted only when the provider asserts
+  `email_verified` — links it to the account that has verified that address,
+  or creates an account just in time with a random, unusable password and
+  that address verified. An unverified email is refused and creates nothing.
+  Signing in through a provider replaces the password step only: an account
+  with two-step sign-in enabled still lands on `/web/login/totp`, and
+  `security.require_2fa_for` applies as usual. The account page links or
+  unlinks each configured provider; unlinking asks for the password when the
+  account has a usable one, and the only link on an account with neither a
+  usable password nor a passkey is refused as the last way in — set a
+  password through `/web/reset` first. Register the callback URL with the
+  provider exactly as above; GitHub is not an OpenID Connect provider (OAuth2
+  only) and is not supported.
+
+  ```toml
+  [[web.oidc]]
+  name = "google"
+  display_name = "Google"
+  issuer = "https://accounts.google.com"
+  client_id = "1234567890-abc.apps.googleusercontent.com"
+  client_secret_file = "/run/secrets/listmngr-google-client-secret"  # mode 0600
+  ```
+
+  The secret never appears in logs or a dumped configuration (it is redacted
+  like the SMTP credentials).
+
 - `/web/account/delete`: delete the account after entering the password
   again. One audited transaction ends every membership held by the account or
   any of its addresses (each with its own `member.delete` audit event, so list

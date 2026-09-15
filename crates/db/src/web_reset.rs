@@ -136,7 +136,7 @@ impl Database {
         .flatten();
         let user: UserId = user.ok_or_else(invalid_token)?.parse().map_err(db_error)?;
         let changed = sqlx::query(
-            "UPDATE user_credentials SET password_hash=$1,password_updated_at=$2,failed_attempts=0 WHERE user_id=$3",
+            "UPDATE user_credentials SET password_hash=$1,password_updated_at=$2,failed_attempts=0,usable=1 WHERE user_id=$3",
         )
         .bind(&hash)
         .bind(crate::now())
