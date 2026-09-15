@@ -70,6 +70,8 @@ cargo test --locked -p listmngr-api --test webui \
   profile::postgres_profile_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::site_notice_tests::postgres_site_notice_contract -- --ignored --exact
+cargo test --locked -p listmngr-api --test webui \
+  signup::postgres_signup_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::dsn_issuance_tests::dsn_issuance_postgres -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \

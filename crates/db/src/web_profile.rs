@@ -29,20 +29,7 @@ impl Profile {
     /// carrying control characters; languages without a catalog; time zones
     /// outside the IANA database.
     pub fn validate(&self) -> Result<()> {
-        let name = self.display_name.trim();
-        if name.is_empty() {
-            return Err(Error::Validation("display_name must not be empty".into()));
-        }
-        if self.display_name.chars().count() > DISPLAY_NAME_MAX {
-            return Err(Error::Validation(format!(
-                "display_name exceeds {DISPLAY_NAME_MAX} characters"
-            )));
-        }
-        if self.display_name.chars().any(char::is_control) {
-            return Err(Error::Validation(
-                "display_name must not contain control characters".into(),
-            ));
-        }
+        validate_display_name(&self.display_name)?;
         if !listmngr_i18n::is_supported(&self.locale) {
             return Err(Error::Validation("locale is not a shipped language".into()));
         }
@@ -53,6 +40,27 @@ impl Profile {
         }
         Ok(())
     }
+}
+
+/// A name a page or a notice can show faithfully.
+/// # Errors
+/// Empty, longer than [`DISPLAY_NAME_MAX`] characters, or carrying control
+/// characters.
+pub fn validate_display_name(display_name: &str) -> Result<()> {
+    if display_name.trim().is_empty() {
+        return Err(Error::Validation("display_name must not be empty".into()));
+    }
+    if display_name.chars().count() > DISPLAY_NAME_MAX {
+        return Err(Error::Validation(format!(
+            "display_name exceeds {DISPLAY_NAME_MAX} characters"
+        )));
+    }
+    if display_name.chars().any(char::is_control) {
+        return Err(Error::Validation(
+            "display_name must not contain control characters".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Every IANA zone name the build knows, sorted, for validation and for a

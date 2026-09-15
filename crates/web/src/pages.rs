@@ -36,6 +36,8 @@ pub struct Login {
     pub shell: Shell,
     /// Session CSRF token.
     pub csrf: String,
+    /// Whether self-service signup is offered.
+    pub signup: bool,
 }
 
 /// The signed-in member's own subscriptions.
@@ -538,4 +540,34 @@ pub struct ProfilePage {
     pub locales: Vec<Choice>,
     /// IANA time zones, the current one selected.
     pub timezones: Vec<Choice>,
+}
+
+/// Self-service account creation.
+#[derive(Debug, Template)]
+#[template(path = "signup.html")]
+pub struct SignupPage {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+}
+
+/// Token entry for address verification.
+#[derive(Debug, Template)]
+#[template(path = "verify.html")]
+pub struct VerifyForm {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Token prefilled from the link, if any.
+    pub token: String,
+}
+
+/// A verified address.
+#[derive(Debug, Template)]
+#[template(path = "verified.html")]
+pub struct Verified {
+    /// Document shell.
+    pub shell: Shell,
 }

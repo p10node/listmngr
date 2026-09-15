@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block content %}<p>{{ shell.t("web-verify-intro") }}</p><form method="post" action="/web/verify">{% call ui::csrf(csrf) %}{% endcall %}<p><label>{{ shell.t("web-verify-token") }} <input name="token" value="{{ token }}" maxlength="128" autocomplete="off" required></label></p><button>{{ shell.t("web-verify-submit") }}</button></form>{% endblock %}

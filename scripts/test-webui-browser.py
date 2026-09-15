@@ -301,6 +301,24 @@ with sync_playwright() as p:
     expect(vietnamese_page.get_by_role('button', name='Gửi hướng dẫn xác nhận', exact=True)).to_be_visible()
     vietnamese_page.screenshot(path=str(out / '15-vietnamese-list.png'), full_page=True)
     vietnamese.close()
+    # P4-ACCOUNT-SIGNUP: an anonymous visitor creates an account; the page never
+    # says whether the address had one, and the token arrives by mail.
+    page.goto(base + '/web/login')
+    page.get_by_role('link', name='Create an account', exact=True).click()
+    expect(page.get_by_role('heading', name='Create an account', exact=True)).to_be_visible()
+    page.get_by_label('Email', exact=True).fill('newcomer@example.com')
+    page.get_by_label('Display name', exact=True).fill('Newcomer <b>')
+    page.get_by_label('Password', exact=True).fill('walrus-corridor-lantern-92')
+    page.get_by_label('Confirm password', exact=True).fill('walrus-corridor-lantern-92')
+    page.get_by_role('button', name='Create account', exact=True).click()
+    expect(page.get_by_role('heading', name='Check your email', exact=True)).to_be_visible()
+    page.screenshot(path=str(out / '16-signup-accepted.png'), full_page=True)
+    # The verification page prefills a token from the link; a bad token is
+    # refused with a 400, which the HTTP tests cover (a deliberate 400 would
+    # count as a console error here).
+    page.goto(base + '/web/verify?token=not-a-real-token')
+    expect(page.get_by_role('heading', name='Verify your email address', exact=True)).to_be_visible()
+    expect(page.get_by_label('Token from email', exact=True)).to_have_value('not-a-real-token')
     headers = context.request.get(base + '/web').headers
     assert headers['content-security-policy'] == (
         "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; "
@@ -334,6 +352,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; own session listed and ended; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; own session listed and ended; anonymous signup accepted and the verification page prefilled; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()

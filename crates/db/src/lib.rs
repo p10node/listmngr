@@ -29,6 +29,8 @@ pub use web_session_inventory::SessionSummary;
 pub mod web_profile;
 pub use web_profile::Profile;
 pub mod site_notices;
+pub mod web_signup;
+pub use web_signup::Signup;
 pub mod workflows;
 
 use std::{
@@ -645,7 +647,7 @@ impl UserRepo<'_> {
         Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
     }
 
-    fn validate_password(self, password: &str) -> Result<()> {
+    pub(crate) fn validate_password(self, password: &str) -> Result<()> {
         if password.len() > 1024 {
             return Err(Error::Validation("password exceeds 1024 bytes".into()));
         }
