@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- List settings in the browser (`P4-LIST-SETTINGS`): the nine Postorius groups as forms on the REST patch engine with a write-nothing preview and inline refusals; header rules (add, edit, reorder, remove, test a value); list and site bans; a template catalogue and editor with placeholder preview; digest send/bump; archiver toggles; deleting a list by typing its id back.
 - OpenID Connect sign-in (`P4-OIDC`): `[[web.oidc]]` providers on the login page, Authorization Code with PKCE and a verified ID token, just-in-time accounts for verified emails, auto-link by verified address, link/unlink under the account with the last-way-in rule; a provider sign-in still meets the two-step policy.
 - Passkeys (`P4-WEBAUTHN`): register WebAuthn credentials under the account, sign in with one alone, remove with the password; a passkey counts as the second factor. First-party `passkeys.js` on the two pages that offer them, under `script-src 'self'`.
 - Two-step sign-in with TOTP and recovery codes (`P4-TOTP`): enrolment with an inline QR code, a second login step, replay and brute-force limits, and the `security.require_2fa_for` policy that keeps server owners out of privileged pages until they enrol. `security.rate_limit.login` is now honoured instead of a fixed five per minute.

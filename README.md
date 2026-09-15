@@ -1,5 +1,57 @@
 # listmngr
 
+## List settings (`P4-LIST-SETTINGS`) — bounded local acceptance verified
+
+Every list setting Mailman's REST configuration accepts is now editable from
+the browser, in the nine groups Postorius uses, at
+`/web/lists/<id>/settings/<group>`: **identity** (with the derived addresses
+and counters shown read-only), **responses**, **messages** (alter messages),
+**dmarc**, **digest**, **acceptance**, **archiving**, **members** (member
+policy) and **bounces**. The older essentials form at `/web/lists/<id>/settings`
+stays, with the group navigation above it. Each group is one form on the same
+patch engine and validator as `PUT/PATCH /api/v1/lists/<id>/config`, so the
+browser cannot store what the API would refuse; a save is one transaction that
+rechecks the owner's session and authority, locks the list row and records the
+`list.config` audit event with the patch. **Preview changes** runs the validator
+on a copy and shows a before/after table of exactly what a save would change —
+nothing is written — and **Save** applies the form. A refused value comes back
+inline, on its field, with the submitted values kept and a 400 status; a form
+rendered this way is the one client error whose body is not replaced by the
+generic failure page. Free-text lists (MIME types, extensions, nonmember
+addresses, DMARC addresses, aliases) are one entry per line.
+
+Beyond the groups, the same navigation reaches:
+
+- **Header rules** (`…/settings/header-matches`): add, edit in place, move up
+  or down, remove; each edit rewrites the ordered set in one audited
+  transaction, an invalid pattern is refused inline, and a **Test a header
+  value** form says which stored rule a value would trip and what it would
+  do, without writing anything.
+- **Bans** (`…/settings/bans`): ban an address (normalized) or a `^` regular
+  expression, lift one, paged twenty at a time. Server owners manage
+  site-wide bans at `/web/admin/bans`.
+- **Templates** (`…/settings/templates`): the catalogue of every `list:*`
+  template with the languages this list stores its own text in; an editor per
+  template and language that shows the text in effect and its source
+  (list, domain, site or built-in), a **Preview** that expands the
+  placeholders with sample values, the placeholder reference, **Save text**
+  (`template.set`) and removal of the list's own text (`template.delete`).
+- **Digest** actions: **Send the digest now** flushes what has accumulated and
+  **Start a new volume** bumps the volume (`digest.bump`), from the digest
+  group.
+- **Archivers**: the archiving group records the remote archivers
+  (`mail-archive`, `mhonarc`, `prototype`) for the list, which take effect
+  when `P5-REMOTE-ARCHIVERS` ships; the local archive follows the archive
+  policy.
+- **Delete list** (`…/settings/delete`): the consequences are listed with the
+  current archive policy; the owner types the list id back, and the deletion
+  runs the same list-owned graph removal as `DELETE /api/v1/lists/<id>`,
+  attributed to the owner (`list.delete`).
+
+Every page needs a live session of a list owner or server owner (a moderator
+is refused) and, under `security.require_2fa_for`, an enrolled second factor.
+Vietnamese strings ship for every label, help text and refusal.
+
 ## Aggregate lease authority — bounded acceptance verified
 
 Digest collection now retains the persisted queue deadline before ACK clears it

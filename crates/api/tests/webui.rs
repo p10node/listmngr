@@ -10,6 +10,8 @@ mod emergency;
 mod goodbye;
 #[path = "webui/list_settings.rs"]
 mod list_settings;
+#[path = "webui/list_settings_groups.rs"]
+mod list_settings_groups;
 #[path = "webui/member_admin.rs"]
 mod member_admin;
 #[path = "webui/member_search.rs"]

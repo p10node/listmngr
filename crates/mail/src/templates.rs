@@ -394,6 +394,37 @@ pub fn builtin_in(name: &str, language: &str) -> Option<&'static str> {
     builtin(name)
 }
 
+/// Every placeholder name a list template may use: the list's own, then
+/// the ones the notice producers add for a member, a post or a token.
+pub const PLACEHOLDER_NAMES: &[&str] = &[
+    "listname",
+    "fqdn_listname",
+    "list_id",
+    "short_listname",
+    "list_name",
+    "display_name",
+    "description",
+    "info",
+    "domain",
+    "list_domain",
+    "request_email",
+    "list_requests",
+    "owner_email",
+    "bounces_email",
+    "join_email",
+    "leave_email",
+    "user_email",
+    "user_name",
+    "user_address",
+    "user_delivered_to",
+    "user_language",
+    "subject",
+    "sender_email",
+    "reasons",
+    "token",
+    "site_name",
+];
+
 /// The placeholders every list notice and decoration can use (Mailman names).
 #[must_use]
 pub fn list_placeholders(list: &listmngr_core::MailingList) -> Placeholders {

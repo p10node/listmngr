@@ -1,0 +1,1 @@
+<nav aria-label="{{ shell.t("web-settings-groups") }}"><ul class="settings-groups">{% for group in groups %}<li>{% if group.current %}<a href="{{ group.href }}" aria-current="page">{{ group.label }}</a>{% else %}<a href="{{ group.href }}">{{ group.label }}</a>{% endif %}</li>{% endfor %}</ul></nav>

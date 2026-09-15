@@ -193,6 +193,8 @@ pub struct Settings {
     pub numbers: Vec<NumberField>,
     /// Link back to the administration index.
     pub admin_href: String,
+    /// Every settings group, for the navigation.
+    pub groups: Vec<GroupLink>,
 }
 
 /// A labelled select control.
@@ -799,4 +801,266 @@ pub struct ProviderRow {
     pub linked_email: Option<String>,
     /// Last sign-in through it, already formatted.
     pub last_used: Option<String>,
+}
+
+/// A link in the settings group navigation.
+#[derive(Debug)]
+pub struct GroupLink {
+    /// Page path.
+    pub href: String,
+    /// Translated title.
+    pub label: String,
+    /// Whether this is the page being shown.
+    pub current: bool,
+}
+
+/// One control of a settings group, rendered by `kind`.
+#[derive(Debug)]
+pub struct SettingField {
+    /// Form field name, also the control id.
+    pub name: String,
+    /// Translated label.
+    pub label: String,
+    /// Translated help, empty when there is none.
+    pub help: String,
+    /// `text`, `textarea`, `lines`, `select`, `number` or `decimal`.
+    pub kind: String,
+    /// Current or submitted value, as text.
+    pub value: String,
+    /// Options for a `select`.
+    pub choices: Vec<Choice>,
+    /// Inline refusal, if the submitted value was not accepted.
+    pub error: Option<String>,
+}
+
+/// One row of a preview: what a save would change.
+#[derive(Debug)]
+pub struct DiffRow {
+    /// Translated label.
+    pub label: String,
+    /// Wire name.
+    pub name: String,
+    /// Value now.
+    pub before: String,
+    /// Value after the save.
+    pub after: String,
+}
+
+/// A read-only fact about the list.
+#[derive(Debug)]
+pub struct Fact {
+    /// Translated label.
+    pub label: String,
+    /// Value.
+    pub value: String,
+}
+
+/// One settings group: its form, the read-only facts, an optional preview.
+#[derive(Debug, Template)]
+#[template(path = "settings_group.html")]
+pub struct SettingsGroup {
+    /// Document shell.
+    pub shell: Shell,
+    /// Translated group title.
+    pub title: String,
+    /// Translated introduction.
+    pub intro: String,
+    /// Every group, with the current one marked.
+    pub groups: Vec<GroupLink>,
+    /// Form action.
+    pub action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Read-only facts shown before the form.
+    pub facts: Vec<Fact>,
+    /// The controls.
+    pub fields: Vec<SettingField>,
+    /// A notice, such as "Saved".
+    pub notice: Option<String>,
+    /// A refusal that names no single field.
+    pub error: Option<String>,
+    /// The preview rows; `Some(empty)` means nothing would change.
+    pub preview: Option<Vec<DiffRow>>,
+    /// Extra actions rendered after the form (digest, archivers).
+    pub extras: Vec<ActionForm>,
+    /// Where the list's administration index is.
+    pub admin_href: String,
+}
+
+/// A one-button action or a small form rendered after a group.
+#[derive(Debug)]
+pub struct ActionForm {
+    /// Form action.
+    pub action: String,
+    /// Translated button text.
+    pub button: String,
+    /// Translated explanation.
+    pub help: String,
+    /// Extra controls: `(name, label, choices)`; a select each.
+    pub selects: Vec<SelectField>,
+}
+
+/// One header rule row on the page.
+#[derive(Debug)]
+pub struct HeaderRuleRow {
+    /// Position, from zero.
+    pub position: usize,
+    /// Header name.
+    pub header: String,
+    /// Pattern.
+    pub pattern: String,
+    /// Action choices with the current one selected.
+    pub actions: Vec<Choice>,
+    /// Tag.
+    pub tag: String,
+    /// Whether the tested value matched this rule.
+    pub matched: Option<bool>,
+}
+
+/// The add form of the header rules page.
+#[derive(Debug, Default)]
+pub struct HeaderRuleDraft {
+    /// Header name.
+    pub header: String,
+    /// Pattern.
+    pub pattern: String,
+    /// Tag.
+    pub tag: String,
+}
+
+/// The header rules page.
+#[derive(Debug, Template)]
+#[template(path = "header_rules.html")]
+pub struct HeaderRules {
+    /// Document shell.
+    pub shell: Shell,
+    /// Group navigation.
+    pub groups: Vec<GroupLink>,
+    /// Base path of the page.
+    pub base: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Rules in order.
+    pub rules: Vec<HeaderRuleRow>,
+    /// The add form's values (kept after a refusal).
+    pub draft: HeaderRuleDraft,
+    /// Draft pattern refusal.
+    pub pattern_error: Option<String>,
+    /// Draft header refusal.
+    pub header_error: Option<String>,
+    /// Action choices for the add form.
+    pub actions: Vec<Choice>,
+    /// The tested header and value, and the translated verdict.
+    pub test: Option<(String, String, String)>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+    /// A refusal that names no field.
+    pub error: Option<String>,
+}
+
+/// Bans of one list or of the site.
+#[derive(Debug, Template)]
+#[template(path = "bans.html")]
+pub struct Bans {
+    /// Document shell.
+    pub shell: Shell,
+    /// Group navigation (empty on the site page).
+    pub groups: Vec<GroupLink>,
+    /// Translated introduction.
+    pub intro: String,
+    /// Base path of the page.
+    pub base: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// The bans on this page.
+    pub bans: Vec<String>,
+    /// How many there are in all.
+    pub total: i64,
+    /// The add form's value (kept after a refusal).
+    pub draft: String,
+    /// Draft refusal.
+    pub error: Option<String>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+    /// Previous/next links.
+    pub pagination: Pagination,
+}
+
+/// One template in the catalogue.
+#[derive(Debug)]
+pub struct TemplateRow {
+    /// Name.
+    pub name: String,
+    /// Editor path.
+    pub href: String,
+    /// Languages the list stores its own body in.
+    pub languages: Vec<String>,
+}
+
+/// The template catalogue of a list.
+#[derive(Debug, Template)]
+#[template(path = "templates.html")]
+pub struct TemplateCatalogue {
+    /// Document shell.
+    pub shell: Shell,
+    /// Group navigation.
+    pub groups: Vec<GroupLink>,
+    /// Every known template.
+    pub rows: Vec<TemplateRow>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+}
+
+/// The editor of one template.
+#[derive(Debug, Template)]
+#[template(path = "template_editor.html")]
+pub struct TemplateEditor {
+    /// Document shell.
+    pub shell: Shell,
+    /// Group navigation.
+    pub groups: Vec<GroupLink>,
+    /// Template name.
+    pub name: String,
+    /// Form action.
+    pub action: String,
+    /// Where the catalogue is.
+    pub catalogue_href: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Language choices.
+    pub languages: Vec<Choice>,
+    /// The body being edited.
+    pub body: String,
+    /// Whether the list stores its own body in this language.
+    pub stored: bool,
+    /// Where the effective body comes from.
+    pub source: String,
+    /// The effective body when nothing is stored.
+    pub effective: String,
+    /// The rendered preview, if asked for.
+    pub preview: Option<String>,
+    /// Placeholder names and sample values.
+    pub placeholders: Vec<Fact>,
+    /// A refusal.
+    pub error: Option<String>,
+}
+
+/// The confirmation page that deletes a list.
+#[derive(Debug, Template)]
+#[template(path = "delete_list.html")]
+pub struct DeleteList {
+    /// Document shell.
+    pub shell: Shell,
+    /// Group navigation.
+    pub groups: Vec<GroupLink>,
+    /// The list id to type back.
+    pub list_id: String,
+    /// Translated consequences, one per line.
+    pub consequences: Vec<String>,
+    /// Form action.
+    pub action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// A refusal.
+    pub error: Option<String>,
 }

@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block content %}{% include "settings_nav.html" %}<h2>{{ shell.t("web-delete-list-title") }}</h2>{% if let Some(error) = error %}<p role="alert" class="error">{{ error }}</p>{% endif %}<p>{{ shell.t("web-delete-list-intro") }}</p><ul>{% for line in consequences %}<li>{{ line }}</li>{% endfor %}</ul><form method="post" action="{{ action }}">{% call ui::csrf(csrf) %}{% endcall %}<p><label for="confirm">{{ shell.t("web-delete-list-confirm") }} <code>{{ list_id }}</code></label><input id="confirm" name="confirm" required autocomplete="off"></p><button>{{ shell.t("web-delete-list-submit") }}</button></form>{% endblock %}
