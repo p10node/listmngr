@@ -1,5 +1,39 @@
 # listmngr
 
+## Moderator queues (`P4-HELD-QUEUE`) — bounded local acceptance verified
+
+`/web/moderation` now says what waits on each list a moderator can act on
+(held posts and subscription requests) and links both queues.
+
+**Held posts** (`/web/lists/<id>/held`) show each post with its decoded
+`From`, `To` and `Date`, the first text body rendered as text, the number of
+attachments, and the raw source (first 64 KiB) folded away. Each post has its
+own decision form — keep held, accept, reject, discard — with a comment that
+a rejection sends to the author as the reason, and an optional **Forward a
+copy to** address: the original, wrapped as `message/rfc822`, goes there
+with any decision, exactly as `forward_to` on `POST /api/v1/lists/<id>/held/<id>`;
+a forward to one of the list's own addresses is refused inline. The bulk
+form at the top applies one decision to the ticked posts in one transaction,
+skipping any post decided meanwhile, and reports "N decided, M skipped".
+Under each post, the **Sender** section shows the sender's standing on the
+list (role and posting policy, or not on the list), sets a posting policy for
+the sender — the member's own override, or a nonmember row created for the
+purpose, as Mailman's "moderate sender" does — bans the sender on the list,
+and links to the header rules with a `From` rule for that address prefilled.
+The page loads a first-party `/web/moderation.js` for keyboard shortcuts
+(`j`/`k` move, `a`/`r`/`d`/`h` choose, `s` submits, `?` shows the list); every
+form works without it.
+
+**Subscription requests** (`/web/lists/<id>/requests`) list the requests
+waiting for a moderator and those still waiting for the address to confirm,
+with join or leave, the name given and the time. A moderator accepts,
+rejects (with a reason recorded in the audit event), discards or keeps a
+request; accepting one that still waits for the address makes that
+confirmation unnecessary, as on `POST /api/v1/lists/<id>/requests/<id>`.
+
+Every page needs a live session of a list owner, moderator or server owner
+and, under `security.require_2fa_for`, an enrolled second factor.
+
 ## Member management (`P4-MEMBERS`) — bounded local acceptance verified
 
 `/web/lists/<id>/members` is now the owner's roster of every role: tabs for

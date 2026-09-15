@@ -23,6 +23,8 @@ mod list_settings;
 mod members;
 #[path = "webui_membership.rs"]
 mod membership;
+#[path = "webui_moderation.rs"]
+mod moderation;
 #[path = "webui_oidc.rs"]
 mod oidc;
 #[path = "webui_passkeys.rs"]
@@ -128,36 +130,43 @@ pub fn language(s: &AppState, headers: &HeaderMap) -> &'static str {
     )
 }
 
+/// The first-party assets, each served from this origin with its type.
+fn assets() -> Router<AppState> {
+    fn asset(kind: &'static str, body: &'static str) -> Router<AppState> {
+        Router::new().route(
+            "/",
+            get(move || async move { ([(header::CONTENT_TYPE, kind)], body) }),
+        )
+    }
+    Router::new()
+        .nest(
+            "/web/style.css",
+            asset("text/css; charset=utf-8", listmngr_web::STYLESHEET),
+        )
+        .nest(
+            "/web/passkeys.js",
+            asset(
+                "text/javascript; charset=utf-8",
+                listmngr_web::PASSKEYS_SCRIPT,
+            ),
+        )
+        .nest(
+            "/web/moderation.js",
+            asset(
+                "text/javascript; charset=utf-8",
+                listmngr_web::MODERATION_SCRIPT,
+            ),
+        )
+        .nest(
+            "/web/htmx.min.js",
+            asset("text/javascript; charset=utf-8", listmngr_web::HTMX),
+        )
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/web", get(directory))
-        .route(
-            "/web/style.css",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    listmngr_web::STYLESHEET,
-                )
-            }),
-        )
-        .route(
-            "/web/passkeys.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    listmngr_web::PASSKEYS_SCRIPT,
-                )
-            }),
-        )
-        .route(
-            "/web/htmx.min.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    listmngr_web::HTMX,
-                )
-            }),
-        )
+        .merge(assets())
         .route("/web/login", get(login_form).post(login))
         .route("/web/login/totp", get(totp::login_form).post(totp::login))
         .route("/web/login/oidc/{name}", get(oidc::start))
@@ -220,9 +229,7 @@ pub fn routes() -> Router<AppState> {
         .route("/web/lists/{id}", get(list_page))
         .route("/web/lists/{id}/archive", get(archive::browse))
         .route("/web/lists/{id}/request", post(subscription_request))
-        .route("/web/moderation", get(moderation_index))
-        .route("/web/lists/{id}/held", get(held_page))
-        .route("/web/lists/{id}/held/{held}", post(review))
+        .merge(moderation::routes())
         .route("/web/lists/{id}/confirm", get(confirm_form).post(confirm))
         .layer(DefaultBodyLimit::max(8192))
         .layer(middleware::from_fn(security_headers))
@@ -776,26 +783,7 @@ async fn confirm(
     }))
 }
 
-use listmngr_core::{
-    DeliveryMode, DeliveryStatus, Member, MemberId, MemberRole, SubscriptionMode, UserId,
-};
-async fn own_members(s: &AppState, user: UserId) -> ApiResult<Vec<Member>> {
-    let mut members = Vec::new();
-    for a in s.db.addresses().by_user(user).await? {
-        if a.verified_on.is_none() {
-            continue;
-        }
-        for m in s.db.members().find(&a.email).await? {
-            if m.address_id == a.id
-                && (m.subscription_mode == SubscriptionMode::AsAddress || m.user_id == Some(user))
-                && !members.iter().any(|v: &Member| v.id == m.id)
-            {
-                members.push(m);
-            }
-        }
-    }
-    Ok(members)
-}
+use listmngr_core::{DeliveryMode, DeliveryStatus, MemberId};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreferenceForm {
@@ -823,162 +811,6 @@ async fn preferences(
     )
     .await?;
     Ok(Redirect::to("/web/account").into_response())
-}
-
-async fn can_moderate(s: &AppState, user: UserId, list: &ListId) -> ApiResult<bool> {
-    let u = s.db.users().get(user).await?;
-    if u.is_server_owner
-        && s.db
-            .addresses()
-            .by_user(user)
-            .await?
-            .iter()
-            .any(|a| a.verified_on.is_some())
-    {
-        return Ok(true);
-    }
-    Ok(own_members(s, user)
-        .await?
-        .iter()
-        .any(|m| &m.list_id == list && matches!(m.role, MemberRole::Owner | MemberRole::Moderator)))
-}
-async fn moderation_index(
-    State(s): State<AppState>,
-    Query(paging): Query<BrowserPage>,
-    h: HeaderMap,
-) -> ApiResult<Response> {
-    let session = load(&s, &h).await?;
-    let language = reader_language(&s, &h, &session).await?;
-    privileged(&s, &session).await?;
-    let user = session.user_id.ok_or(Error::Authentication)?;
-    let lists: Vec<(String, String)> = sqlx::query_as(
-        "SELECT l.list_id,l.display_name FROM mailing_lists l WHERE
-         EXISTS (SELECT 1 FROM users u JOIN addresses a ON a.user_id=u.id
-                 WHERE u.id=$1 AND u.is_server_owner=1 AND a.verified_on IS NOT NULL)
-         OR EXISTS (SELECT 1 FROM members m JOIN addresses a ON a.id=m.address_id
-                    WHERE m.list_id=l.list_id AND a.user_id=$1 AND a.verified_on IS NOT NULL
-                    AND (m.subscription_mode='as_address' OR m.user_id=$1)
-                    AND m.role IN ('owner','moderator'))
-         ORDER BY l.list_id LIMIT 21 OFFSET $2",
-    )
-    .bind(user.to_string())
-    .bind(paging.offset()?)
-    .fetch_all(s.db.pool())
-    .await
-    .map_err(|error| database_error(&error))?;
-    let more = lists.len() > 20;
-    let rows = lists
-        .into_iter()
-        .take(20)
-        .map(|(id, name)| listmngr_web::ModerationRow {
-            href: format!("/web/lists/{id}/held"),
-            label: listmngr_i18n::message(language, "web-moderation-held", &[("name", &name)]),
-        })
-        .collect();
-    Ok(html(&listmngr_web::Moderation {
-        shell: Shell::new(language, "web-title-moderation", Nav::Moderation),
-        rows,
-        pagination: paging.pagination("/web/moderation", more),
-    }))
-}
-async fn held_page(
-    State(s): State<AppState>,
-    Path(id): Path<ListId>,
-    Query(paging): Query<BrowserPage>,
-    h: HeaderMap,
-) -> ApiResult<Response> {
-    let session = load(&s, &h).await?;
-    let language = reader_language(&s, &h, &session).await?;
-    privileged(&s, &session).await?;
-    let user = session.user_id.ok_or(Error::Authentication)?;
-    if !can_moderate(&s, user, &id).await? {
-        return Err(denied());
-    }
-    let held: Vec<String> = sqlx::query_scalar("SELECT id FROM held_messages WHERE list_id=$1 AND disposition IS NULL ORDER BY hold_date,id LIMIT 21 OFFSET $2")
-        .bind(id.as_str()).bind(paging.offset()?).fetch_all(s.db.pool()).await.map_err(|error| database_error(&error))?;
-    let more = held.len() > 20;
-    let mut items = Vec::new();
-    for held_id in held.into_iter().take(20) {
-        let item =
-            s.db.moderation()
-                .get(listmngr_db::moderation::HeldId(
-                    held_id.parse().map_err(|_| denied())?,
-                ))
-                .await?;
-        // Bound bytes in SQL, before fetching/decoding a potentially huge raw message.
-        let raw: Vec<u8> =
-            sqlx::query_scalar("SELECT substr(b.raw,1,65536) FROM message_blobs b JOIN messages m ON m.store_key=b.store_key WHERE m.id=$1")
-                .bind(item.message_id.0.to_string())
-                .fetch_one(s.db.pool())
-                .await
-                .map_err(|error| database_error(&error))?;
-        items.push(listmngr_web::HeldItem {
-            subject: item.subject,
-            sender: item.sender,
-            reason: item.reason,
-            source: String::from_utf8_lossy(&raw).into_owned(),
-            action: format!("/web/lists/{}/held/{}", id.as_str(), item.id.0),
-        });
-    }
-    Ok(html(&listmngr_web::Held {
-        shell: Shell::new(language, "web-title-held", Nav::Moderation),
-        csrf: session.csrf.clone(),
-        items,
-        decisions: choices(
-            language,
-            &[
-                ("defer", "web-held-defer"),
-                ("accept", "web-held-accept"),
-                ("reject", "web-held-reject"),
-                ("discard", "web-held-discard"),
-            ],
-            None,
-        ),
-        pagination: paging.pagination(&format!("/web/lists/{id}/held"), more),
-    }))
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Review {
-    #[serde(default)]
-    csrf: String,
-    action: String,
-    #[serde(default)]
-    comment: String,
-}
-async fn review(
-    State(s): State<AppState>,
-    Path((id, held)): Path<(ListId, uuid::Uuid)>,
-    h: HeaderMap,
-    Form(f): Form<Review>,
-) -> ApiResult<Response> {
-    use listmngr_db::moderation::{HeldId, ReviewAction};
-    let session = write_session(&s, &h, &f.csrf).await?;
-    privileged(&s, &session).await?;
-    let user = session.user_id.ok_or(Error::Authentication)?;
-    if !can_moderate(&s, user, &id).await? {
-        return Err(denied());
-    }
-    let held = HeldId(held);
-    let item = s.db.moderation().get(held).await?;
-    if item.list_id != id {
-        return Err(Error::NotFound("held message".into()).into());
-    }
-    if f.comment.len() > 2000 {
-        return Err(Error::Validation("comment too long".into()).into());
-    }
-    let action = match f.action.as_str() {
-        "accept" => ReviewAction::Accept {
-            max_attempts: crate::HELD_OUT_MAX_ATTEMPTS,
-        },
-        "reject" => ReviewAction::Reject,
-        "discard" => ReviewAction::Discard,
-        "defer" => ReviewAction::Defer,
-        _ => return Err(Error::Validation("unsupported decision".into()).into()),
-    };
-    s.db.browser_review(&session, &id, held, &action, &f.comment)
-        .await?;
-    Ok(Redirect::to(&format!("/web/lists/{}/held", id.as_str())).into_response())
 }
 
 fn database_error(error: &sqlx::Error) -> ApiError {

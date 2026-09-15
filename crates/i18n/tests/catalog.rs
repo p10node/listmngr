@@ -80,6 +80,11 @@ const ARGUMENTS: &[(&str, &str)] = &[
     ("position", "1"),
     ("policy", "x"),
     ("reason", "x"),
+    ("held", "1"),
+    ("requests", "1"),
+    ("done", "1"),
+    ("skipped", "0"),
+    ("role", "x"),
 ];
 
 #[test]

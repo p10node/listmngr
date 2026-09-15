@@ -8,6 +8,8 @@ mod delete_account;
 mod emergency;
 #[path = "webui/goodbye.rs"]
 mod goodbye;
+#[path = "webui/held_queue.rs"]
+mod held_queue;
 #[path = "webui/list_settings.rs"]
 mod list_settings;
 #[path = "webui/list_settings_groups.rs"]
@@ -1918,10 +1920,10 @@ async fn moderator_preview_is_bounded_and_queue_pages_are_reachable() {
     let c = login_as(&app, "mod@example.com").await;
     let path = "/web/lists/public.example.com/held";
     let html = text(call(&app, "GET", path, &c, "").await).await;
-    assert_eq!(html.matches("<article>").count(), 20);
+    assert_eq!(html.matches("<article data-held=").count(), 20);
     assert!(html.contains("?page=1"));
     let html = text(call(&app, "GET", &format!("{path}?page=1"), &c, "").await).await;
-    assert_eq!(html.matches("<article>").count(), 1);
+    assert_eq!(html.matches("<article data-held=").count(), 1);
 }
 
 fn private_browser_evidence_directory(output: &str) {
@@ -1974,6 +1976,7 @@ async fn seed_browser_archive(db: &Database) {
 /// Opt-in real Chromium render against the production router, never a live database.
 #[tokio::test]
 #[ignore = "requires WEBUI_BROWSER_PYTHON and WEBUI_BROWSER_SCRIPT; disposable browser acceptance"]
+#[allow(clippy::too_many_lines)] // One fixture, one browser run, its assertions.
 async fn chromium_browser_acceptance() {
     let python = std::env::var("WEBUI_BROWSER_PYTHON").expect("browser Python");
     let script = std::env::var("WEBUI_BROWSER_SCRIPT").expect("browser script");
@@ -1993,6 +1996,34 @@ async fn chromium_browser_acceptance() {
     )
     .await;
     let held_id = held(&db).await;
+    // Two more held posts for the bulk decision, and a moderated request on
+    // the private list for the requests queue.
+    let bulk_a = held(&db).await;
+    let bulk_b = held(&db).await;
+    let private: listmngr_core::ListId = "private.example.com".parse().unwrap();
+    db.lists()
+        .update(
+            &private,
+            &serde_json::json!({"subscription_policy": "moderate"}),
+        )
+        .await
+        .unwrap();
+    db.workflows()
+        .subscribe(
+            &listmngr_db::workflows::AdminSubscription {
+                list: &private,
+                email: "pending-request@example.org",
+                display_name: "Pending Person",
+                pre_verified: true,
+                pre_confirmed: true,
+                pre_approved: false,
+                invitation: false,
+            },
+            &listmngr_db::AuditContext::system(),
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await
+        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     // Passkeys need a domain as the relying-party id; `localhost` resolves to
@@ -2064,12 +2095,36 @@ async fn chromium_browser_acceptance() {
         db.moderation().get(held_id).await.unwrap().disposition,
         Some(listmngr_db::moderation::Disposition::Accepted)
     );
+    for bulk in [bulk_a, bulk_b] {
+        assert_eq!(
+            db.moderation().get(bulk).await.unwrap().disposition,
+            Some(listmngr_db::moderation::Disposition::Discarded),
+            "the bulk decision discarded both"
+        );
+    }
+    let sender_row: (String, Option<String>) = sqlx::query_as("SELECT m.role, m.moderation_action FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id='public.example.com' AND a.email='sender@example.com'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        sender_row,
+        ("nonmember".into(), Some("hold".into())),
+        "moderate sender from the queue"
+    );
+    let accepted_request: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id='private.example.com' AND a.email='pending-request@example.org' AND m.role='member'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        accepted_request, 1,
+        "the request was accepted from the queue"
+    );
     let recipients: Vec<String> = sqlx::query_scalar("SELECT email FROM delivery_recipients WHERE job_id IN (SELECT id FROM queue_jobs WHERE message_id=$1)")
         .bind(db.moderation().get(held_id).await.unwrap().message_id.0.to_string()).fetch_all(db.pool()).await.unwrap();
     assert_eq!(recipients, vec!["browser-joined@example.com"]);
     browser_left_the_database_consistent(&db).await;
     println!(
-        "BROWSER DB PASS: paused preference persisted; confirmed member created; held accepted; exact enabled recipient queued; logout revoked persistent session; signup left an unverified account with one live token; the reset request left one live reset token."
+        "BROWSER DB PASS: paused preference persisted; confirmed member created; held accepted, two more discarded in bulk, the sender moderated, a subscription request accepted; exact enabled recipient queued; logout revoked persistent session; signup left an unverified account with one live token; the reset request left one live reset token."
     );
 }
 
