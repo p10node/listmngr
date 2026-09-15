@@ -3,7 +3,7 @@
 mod member_query;
 use super::{
     ApiResult, AppState, BrowserPage, Form, HeaderMap, IntoResponse, Path, Query, Redirect,
-    Response, Shell, State, html, load, reader_language, write_session,
+    Response, Shell, State, html, load, privileged, reader_language, write_session,
 };
 use listmngr_core::{ListId, MemberId};
 use listmngr_web::{Nav, choices};
@@ -25,6 +25,7 @@ pub(super) async fn index(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
+    privileged(&s, &session).await?;
     let rows = s.db.browser_admin_lists(&session, paging.offset()?).await?;
     let more = rows.len() > 20;
     let rows = rows
@@ -55,6 +56,7 @@ pub(super) async fn members(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
+    privileged(&s, &session).await?;
     let language = reader_language(&s, &headers, &session).await?;
     let rows =
         s.db.browser_search_members(&session, &list, paging.offset()?, &paging.q)
@@ -108,6 +110,7 @@ pub(super) async fn policy(
     Form(form): Form<PolicyForm>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &headers, &form.csrf).await?;
+    privileged(&s, &session).await?;
     let query = MemberQuery {
         q: form.q,
         page: form.page,

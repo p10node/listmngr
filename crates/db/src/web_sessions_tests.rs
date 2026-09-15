@@ -44,10 +44,13 @@ async fn browser_login_issuance_valid_rotates() {
         .create_web_session(None, None, chrono::Utc::now().timestamp_millis())
         .await
         .unwrap();
-    let fresh = db
+    let crate::web_sessions::LoginOutcome::Complete(fresh) = db
         .browser_login("user@example.com", "very secure password", &old)
         .await
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("no second factor is enrolled")
+    };
     assert_eq!(fresh.user_id, Some(u.id));
     assert_ne!(fresh.token, old.token);
     assert!(

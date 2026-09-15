@@ -145,6 +145,29 @@ fn config_rejects_invalid_api_rate_limits() {
 }
 
 #[test]
+fn config_accepts_only_enforced_second_factor_roles() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    std::fs::write(&path, "[security]\nrequire_2fa_for = [\"list_owner\"]\n").unwrap();
+    let error = Config::load(Some(&path)).unwrap_err().to_string();
+    assert!(error.contains("security.require_2fa_for"), "{error}");
+    assert!(error.contains("list_owner"), "{error}");
+    std::fs::write(&path, "[security]\nrequire_2fa_for = []\n").unwrap();
+    assert!(
+        Config::load(Some(&path))
+            .unwrap()
+            .security
+            .require_2fa_for
+            .is_empty()
+    );
+    std::fs::write(&path, "[security]\nrequire_2fa_for = [\"server_owner\"]\n").unwrap();
+    assert_eq!(
+        Config::load(Some(&path)).unwrap().security.require_2fa_for,
+        ["server_owner"]
+    );
+}
+
+#[test]
 fn secret_file_read_errors_are_generic_and_valid_utf8_still_loads() {
     let dir = tempfile::tempdir().unwrap();
     let secret = dir.path().join("PRIVATE-PATH-SENTINEL");

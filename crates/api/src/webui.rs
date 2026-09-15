@@ -29,6 +29,8 @@ mod reset;
 mod settings;
 #[path = "webui_signup.rs"]
 mod signup;
+#[path = "webui_totp.rs"]
+mod totp;
 use crate::{ApiError, ApiResult, AppState};
 use askama::Template;
 use axum::{
@@ -127,6 +129,8 @@ pub fn routes() -> Router<AppState> {
             }),
         )
         .route("/web/login", get(login_form).post(login))
+        .route("/web/login/totp", get(totp::login_form).post(totp::login))
+        .merge(account_routes())
         .route("/web/signup", get(signup::form).post(signup::create))
         .route("/web/verify", get(signup::verify_form).post(signup::verify))
         .route("/web/reset", get(reset::form).post(reset::request))
@@ -145,6 +149,35 @@ pub fn routes() -> Router<AppState> {
             "/web/lists/{id}/members/{member}/policy",
             post(admin::policy),
         )
+        .route("/web/members/{id}/preferences", post(preferences))
+        .route(
+            "/web/members/{id}/leave",
+            get(membership::preview).post(membership::leave),
+        )
+        .route(
+            "/web/members/{id}/recover",
+            get(recovery::preview).post(recovery::recover),
+        )
+        .route("/web/logout", post(logout))
+        .route("/web/lists/{id}", get(list_page))
+        .route("/web/lists/{id}/archive", get(archive::browse))
+        .route("/web/lists/{id}/request", post(subscription_request))
+        .route("/web/moderation", get(moderation_index))
+        .route("/web/lists/{id}/held", get(held_page))
+        .route("/web/lists/{id}/held/{held}", post(review))
+        .route("/web/lists/{id}/confirm", get(confirm_form).post(confirm))
+        .layer(DefaultBodyLimit::max(8192))
+        .layer(middleware::from_fn(security_headers))
+}
+
+/// Self-service pages under `/web/account/…`: second factor, profile,
+/// addresses, tokens, sessions, password and deletion.
+fn account_routes() -> Router<AppState> {
+    Router::new()
+        .route("/web/account/totp", get(totp::status))
+        .route("/web/account/totp/confirm", post(totp::confirm))
+        .route("/web/account/totp/recovery", post(totp::recovery))
+        .route("/web/account/totp/disable", post(totp::disable))
         .route(
             "/web/account/password",
             get(password::form).post(password::change),
@@ -186,25 +219,6 @@ pub fn routes() -> Router<AppState> {
             "/web/account/sessions/{id}/revoke",
             post(account_sessions::revoke),
         )
-        .route("/web/members/{id}/preferences", post(preferences))
-        .route(
-            "/web/members/{id}/leave",
-            get(membership::preview).post(membership::leave),
-        )
-        .route(
-            "/web/members/{id}/recover",
-            get(recovery::preview).post(recovery::recover),
-        )
-        .route("/web/logout", post(logout))
-        .route("/web/lists/{id}", get(list_page))
-        .route("/web/lists/{id}/archive", get(archive::browse))
-        .route("/web/lists/{id}/request", post(subscription_request))
-        .route("/web/moderation", get(moderation_index))
-        .route("/web/lists/{id}/held", get(held_page))
-        .route("/web/lists/{id}/held/{held}", post(review))
-        .route("/web/lists/{id}/confirm", get(confirm_form).post(confirm))
-        .layer(DefaultBodyLimit::max(8192))
-        .layer(middleware::from_fn(security_headers))
 }
 
 async fn directory(
@@ -387,6 +401,17 @@ fn clear_cookie(s: &AppState, response: &mut Response) -> ApiResult<()> {
     );
     Ok(())
 }
+/// Pages that administer or moderate stay closed to a reader the site's
+/// policy requires to enrol a second factor until they do.
+async fn privileged(s: &AppState, session: &WebSession) -> ApiResult<()> {
+    if s.db
+        .browser_second_factor_missing(session, &s.config.security.require_2fa_for)
+        .await?
+    {
+        return Err(Error::Forbidden("second factor required".into()).into());
+    }
+    Ok(())
+}
 async fn write_session(s: &AppState, h: &HeaderMap, csrf: &str) -> ApiResult<WebSession> {
     check_origin(s, h)?;
     let session = load(s, h).await?;
@@ -430,8 +455,13 @@ async fn login(
     if f.password.len() > 1024 {
         return Err(Error::Authentication.into());
     }
-    let fresh = s.db.browser_login(&f.email, &f.password, &session).await?;
-    let mut r = Redirect::to("/web/account").into_response();
+    let (fresh, next) = match s.db.browser_login(&f.email, &f.password, &session).await? {
+        listmngr_db::web_sessions::LoginOutcome::Complete(fresh) => (fresh, "/web/account"),
+        listmngr_db::web_sessions::LoginOutcome::SecondFactor(pending) => {
+            (pending, "/web/login/totp")
+        }
+    };
+    let mut r = Redirect::to(next).into_response();
     set_cookie(&s, &fresh, &mut r)?;
     Ok(r)
 }
@@ -509,9 +539,13 @@ async fn account(
             leave_href: format!("/web/members/{}/leave", m.id),
         });
     }
+    let second_factor_missing =
+        s.db.browser_second_factor_missing(&session, &s.config.security.require_2fa_for)
+            .await?;
     Ok(html(&listmngr_web::Account {
         shell: Shell::new(language, "web-title-account", Nav::Account),
         csrf: session.csrf.clone(),
+        second_factor_missing,
         signed_in: listmngr_i18n::message(
             language,
             "web-account-signed-in",
@@ -719,6 +753,7 @@ async fn moderation_index(
 ) -> ApiResult<Response> {
     let session = load(&s, &h).await?;
     let language = reader_language(&s, &h, &session).await?;
+    privileged(&s, &session).await?;
     let user = session.user_id.ok_or(Error::Authentication)?;
     let lists: Vec<(String, String)> = sqlx::query_as(
         "SELECT l.list_id,l.display_name FROM mailing_lists l WHERE
@@ -758,6 +793,7 @@ async fn held_page(
 ) -> ApiResult<Response> {
     let session = load(&s, &h).await?;
     let language = reader_language(&s, &h, &session).await?;
+    privileged(&s, &session).await?;
     let user = session.user_id.ok_or(Error::Authentication)?;
     if !can_moderate(&s, user, &id).await? {
         return Err(denied());
@@ -822,6 +858,7 @@ async fn review(
 ) -> ApiResult<Response> {
     use listmngr_db::moderation::{HeldId, ReviewAction};
     let session = write_session(&s, &h, &f.csrf).await?;
+    privileged(&s, &session).await?;
     let user = session.user_id.ok_or(Error::Authentication)?;
     if !can_moderate(&s, user, &id).await? {
         return Err(denied());

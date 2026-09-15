@@ -1011,6 +1011,13 @@ impl Config {
                 "antispam.jump_chain must be one of accept, hold, reject, discard".into(),
             ));
         }
+        for role in &config.security.require_2fa_for {
+            if role != "server_owner" {
+                return Err(Error::Validation(format!(
+                    "security.require_2fa_for: unknown role {role:?}; only \"server_owner\" is enforced"
+                )));
+            }
+        }
         validate_rate_limit("login", &config.security.rate_limit.login)?;
         validate_rate_limit("subscribe", &config.security.rate_limit.subscribe)?;
         validate_rate_limit("api", &config.security.rate_limit.api)?;

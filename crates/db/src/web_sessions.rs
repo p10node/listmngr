@@ -21,7 +21,7 @@ pub struct WebSession {
 pub(crate) fn digest(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
 }
-fn secret() -> String {
+pub(crate) fn secret() -> String {
     let mut b = [0_u8; 32];
     rand::rng().fill_bytes(&mut b);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
@@ -40,6 +40,28 @@ struct VerifiedBrowserLogin {
     version: String,
 }
 
+/// What a correct password yields. Deliberately not `Debug`-derived: a
+/// session carries credentials.
+pub enum LoginOutcome {
+    /// The password was enough; the session is signed in.
+    Complete(WebSession),
+    /// The password passed; the session is anonymous until a one-time code
+    /// or a recovery code completes it (`Database::browser_second_factor`).
+    SecondFactor(WebSession),
+}
+
+impl std::fmt::Debug for LoginOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Complete(_) => "LoginOutcome::Complete(..)",
+            Self::SecondFactor(_) => "LoginOutcome::SecondFactor(..)",
+        })
+    }
+}
+
+/// How long a password-only session waits for its second step.
+pub const SECOND_FACTOR_WINDOW_MS: i64 = 10 * 60 * 1000;
+
 impl Database {
     /// Verify a browser password and rotate its live CSRF session.
     /// # Errors
@@ -49,7 +71,7 @@ impl Database {
         email: &str,
         password: &str,
         previous: &WebSession,
-    ) -> Result<WebSession> {
+    ) -> Result<LoginOutcome> {
         let proof = self.verify_browser_login(email, password).await?;
         self.issue_browser_login(proof, previous).await
     }
@@ -103,7 +125,7 @@ impl Database {
         &self,
         proof: VerifiedBrowserLogin,
         previous: &WebSession,
-    ) -> Result<WebSession> {
+    ) -> Result<LoginOutcome> {
         // Argon2 has already finished. Reserve the writer BEFORE re-reading
         // authority; ordinary password/address/session DML must conflict here.
         let mut tx = self.browser_write_tx().await?;
@@ -130,6 +152,36 @@ impl Database {
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
+        // An enrolled second factor turns the password into half a login: the
+        // session stays anonymous, remembers whom it is for, and expires soon.
+        let enrolled: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_totp WHERE user_id=$1 AND confirmed_at IS NOT NULL",
+        )
+        .bind(proof.user.to_string())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        if enrolled > 0 {
+            sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at,pending_user_id) VALUES($1,$2,NULL,$3,$4,$5,$6,$7)")
+                .bind(digest(&token)).bind(&csrf).bind(&proof.version).bind(now_ms + SECOND_FACTOR_WINDOW_MS)
+                .bind(crate::web_session_inventory::session_id()).bind(now_ms).bind(proof.user.to_string())
+                .execute(&mut *tx).await.map_err(db_error)?;
+            Self::record_tx_with_context(
+                &mut tx,
+                &AuditContext::new(Some(proof.user), None, None),
+                "web.login.password",
+                "user",
+                &proof.user.to_string(),
+                serde_json::json!({"second_factor": "pending"}),
+            )
+            .await?;
+            tx.commit().await.map_err(db_error)?;
+            return Ok(LoginOutcome::SecondFactor(WebSession {
+                token,
+                csrf,
+                user_id: None,
+            }));
+        }
         sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)")
             .bind(digest(&token)).bind(&csrf).bind(proof.user.to_string()).bind(&proof.version).bind(now_ms+28_800_000)
             .bind(crate::web_session_inventory::session_id()).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
@@ -143,11 +195,11 @@ impl Database {
         )
         .await?;
         tx.commit().await.map_err(db_error)?;
-        Ok(WebSession {
+        Ok(LoginOutcome::Complete(WebSession {
             token,
             csrf,
             user_id: Some(proof.user),
-        })
+        }))
     }
 
     /// Create or rotate a session, atomically revoking its predecessor and auditing.

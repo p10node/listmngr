@@ -1,7 +1,7 @@
 //! Owner settings forms; no bearer credentials or stale list snapshots.
 use super::{
     ApiResult, AppState, Form, HeaderMap, IntoResponse, Path, Redirect, Response, Shell, State,
-    html, load, reader_language, write_session,
+    html, load, privileged, reader_language, write_session,
 };
 use listmngr_core::{ListId, ModerationAction};
 use listmngr_web::{Nav, NumberField, SelectField, choices};
@@ -28,6 +28,7 @@ pub(super) async fn form(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
+    privileged(&s, &session).await?;
     let language = reader_language(&s, &headers, &session).await?;
     let list = s.db.browser_list_settings(&session, &id).await?;
     let selects = [
@@ -150,6 +151,7 @@ pub(super) async fn save(
     Form(form): Form<SettingsForm>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &headers, &form.csrf).await?;
+    privileged(&s, &session).await?;
     let advertised = match form.advertised.as_str() {
         "true" => true,
         "false" => false,
