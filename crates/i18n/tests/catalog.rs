@@ -79,6 +79,7 @@ const ARGUMENTS: &[(&str, &str)] = &[
     ("state", "x"),
     ("position", "1"),
     ("policy", "x"),
+    ("reason", "x"),
 ];
 
 #[test]
