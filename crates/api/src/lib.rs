@@ -881,6 +881,9 @@ pub fn router(db: Database, config: Config) -> Router {
             .unwrap_or(&config.security.rate_limit.api),
     );
     let post_auth_rate = RateLimiter::from_config(&config.security.rate_limit.api);
+    // `security.rate_limit.login`: one bucket for every password check the
+    // browser surface performs, so an attacker cannot buy Argon2 time.
+    let web_login_rate = RateLimiter::from_config(&config.security.rate_limit.login);
     // `Config::load` validated `[mta]`; a bad value here can only come from
     // a caller-built config and must not take the API down.
     let mta_maps = listmngr_mail::mta::MapWriter::from_config(&config.mta)
@@ -894,7 +897,7 @@ pub fn router(db: Database, config: Config) -> Router {
         config,
         pre_auth_rate: Arc::new(pre_auth_rate),
         post_auth_rate: Arc::new(post_auth_rate),
-        web_login_rate: Arc::new(RateLimiter::from_config("5/min")),
+        web_login_rate: Arc::new(web_login_rate),
         flavor: ApiFlavor::V1,
         mta_maps,
         queue_metrics: Arc::new(std::sync::Mutex::new(None)),

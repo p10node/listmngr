@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block content %}<p>{{ shell.t("web-login-totp-intro") }}</p><form method="post" action="/web/login/totp">{% call ui::csrf(csrf) %}{% endcall %}<p><label>{{ shell.t("web-login-totp-code") }} <input name="code" autocomplete="one-time-code" maxlength="16" required></label></p><button>{{ shell.t("web-login-totp-submit") }}</button></form>{% endblock %}

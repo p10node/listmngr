@@ -48,6 +48,8 @@ pub struct Account {
     pub shell: Shell,
     /// Session CSRF token.
     pub csrf: String,
+    /// The site requires a second factor this reader has not enrolled.
+    pub second_factor_missing: bool,
     /// "Signed in as …" line.
     pub signed_in: String,
     /// Subscriptions on this page.
@@ -692,4 +694,44 @@ pub struct DeleteAccount {
 pub struct AccountDeleted {
     /// Document shell.
     pub shell: Shell,
+}
+
+/// Second-factor status and enrolment.
+#[derive(Debug, Template)]
+#[template(path = "totp.html")]
+pub struct TotpPage {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// A confirmed second factor exists.
+    pub enabled: bool,
+    /// The site requires this reader to enrol.
+    pub required: bool,
+    /// Pending secret, base32.
+    pub secret: String,
+    /// Pending provisioning URI.
+    pub uri: String,
+    /// Pending provisioning QR code as inline SVG, generated server-side.
+    pub qr: String,
+}
+
+/// Recovery codes, shown once.
+#[derive(Debug, Template)]
+#[template(path = "totp_codes.html")]
+pub struct TotpCodes {
+    /// Document shell.
+    pub shell: Shell,
+    /// The codes.
+    pub codes: Vec<String>,
+}
+
+/// The second step of a login.
+#[derive(Debug, Template)]
+#[template(path = "login_totp.html")]
+pub struct LoginTotp {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
 }

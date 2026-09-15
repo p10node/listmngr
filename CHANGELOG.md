@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- Two-step sign-in with TOTP and recovery codes (`P4-TOTP`): enrolment with an inline QR code, a second login step, replay and brute-force limits, and the `security.require_2fa_for` policy that keeps server owners out of privileged pages until they enrol. `security.rate_limit.login` is now honoured instead of a fixed five per minute.
 - `/web/account/delete`: self-service account deletion confirmed with the password — memberships, addresses, tokens, credential and sessions go in one audited transaction; the last server owner is refused (`P4-ACCOUNT-DELETE`).
 - `/web/account/tokens`: mint, list and revoke API tokens within the reader's authority — list owners bind list-level scopes to their lists, server owners mint unbound ones — with the secret shown once (`P4-ACCOUNT-TOKENS`).
 - `/web/account/addresses`: add addresses to the account (proven by the mailed token), choose the primary one, and remove others; removal keeps list subscriptions and forgets verification (`P4-ACCOUNT-ADDRESSES`). Signing up with a verified address nobody owns now requires proving it again.
