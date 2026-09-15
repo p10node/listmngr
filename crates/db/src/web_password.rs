@@ -71,7 +71,7 @@ impl Database {
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(db_error)?;
-        let changed = sqlx::query("UPDATE user_credentials SET password_hash=$1,password_updated_at=$2 WHERE user_id=$3 AND password_hash=$4 AND password_updated_at=$5")
+        let changed = sqlx::query("UPDATE user_credentials SET password_hash=$1,password_updated_at=$2,usable=1 WHERE user_id=$3 AND password_hash=$4 AND password_updated_at=$5")
             .bind(new_hash).bind(crate::now()).bind(user.to_string()).bind(old_hash).bind(old_version)
             .execute(&mut *tx).await.map_err(db_error)?.rows_affected();
         if changed != 1 {

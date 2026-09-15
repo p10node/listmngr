@@ -153,6 +153,7 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/account-tokens-schema.snapshot").lines())
             .chain(include_str!("fixtures/totp-schema.snapshot").lines())
             .chain(include_str!("fixtures/passkeys-schema.snapshot").lines())
+            .chain(include_str!("fixtures/oidc-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )

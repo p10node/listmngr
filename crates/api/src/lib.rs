@@ -9,6 +9,7 @@ mod bounce_config;
 mod bounces;
 mod digest;
 mod header_matches;
+pub mod oidc;
 mod queues;
 mod requests;
 
@@ -671,6 +672,8 @@ pub struct AppState {
     post_auth_rate: Arc<RateLimiter>,
     web_login_rate: Arc<RateLimiter>,
     flavor: ApiFlavor,
+    /// `[[web.oidc]]`: the identity providers the login page offers.
+    oidc: Arc<oidc::Providers>,
     /// `[mta] incoming`: the map writer regenerated after list changes.
     mta_maps: Option<Arc<listmngr_mail::mta::MapWriter>>,
     /// The queue-depth part of `/metrics`, refreshed at most every few
@@ -898,6 +901,7 @@ pub fn router(db: Database, config: Config) -> Router {
             None
         })
         .map(Arc::new);
+    let oidc = Arc::new(oidc::Providers::from_config(&config.web.oidc));
     let state = AppState {
         db,
         config,
@@ -905,6 +909,7 @@ pub fn router(db: Database, config: Config) -> Router {
         post_auth_rate: Arc::new(post_auth_rate),
         web_login_rate: Arc::new(web_login_rate),
         flavor: ApiFlavor::V1,
+        oidc,
         mta_maps,
         queue_metrics: Arc::new(std::sync::Mutex::new(None)),
     };
