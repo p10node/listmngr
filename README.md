@@ -1735,8 +1735,8 @@ before, so the pages are byte-compatible with the previous output.
   catalog (`crates/i18n/locales/{en,vi}.ftl`). Each request negotiates the
   document language from the browser's ordered `Accept-Language` preferences,
   then `site.default_language`, then English, and stamps it on `<html lang>`.
-  A signed-in user's stored `preferred_language` does not override the browser
-  yet. Only `en` and `vi` ship.
+  A signed-in reader's profile language (`/web/account/profile`) takes
+  precedence over the browser. Only `en` and `vi` ship.
 - **Appearance.** `crates/web/assets/style.css` holds design tokens that both
   colour schemes bind; dark mode follows `prefers-color-scheme` and needs no
   per-page markup.
@@ -1770,6 +1770,13 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
 - `/web/account`: your verified-address member subscriptions, delivery-mode and
   enabled/self-paused preference forms, and POST logout. Moderator/bounce-disabled
   delivery cannot be re-enabled here.
+- `/web/account/profile`: display name, interface language and IANA time zone.
+  The interface language a reader chooses wins over the browser's
+  `Accept-Language` on every page they open while signed in; it does not change
+  the language of list notices, which stays a subscription preference. One
+  validator serves this form and the REST user patch: names are non-empty,
+  at most 256 characters and free of control characters; the language must be
+  a shipped catalog (`en`, `vi`); the zone must be an IANA name.
 - `/web/account/sessions`: every browser currently signed in to the account,
   with when it was issued and when it expires, the one making the request
   marked. A reader can end one session or every other session; each revocation

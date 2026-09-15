@@ -2,7 +2,7 @@
 //! others. Sessions are addressed by an opaque id; the token never appears.
 use super::{
     ApiResult, AppState, Csrf, Form, HeaderMap, IntoResponse, Path, Redirect, Response, Shell,
-    State, html, language, load, write_session,
+    State, html, load, reader_language, write_session,
 };
 use listmngr_web::Nav;
 
@@ -17,7 +17,7 @@ fn moment(milliseconds: i64) -> String {
 
 pub(super) async fn index(State(s): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
-    let language = language(&s, &headers);
+    let language = reader_language(&s, &headers, &session).await?;
     let listed = s.db.browser_sessions(&session).await?;
     let others = listed.iter().any(|item| !item.current);
     let sessions = listed

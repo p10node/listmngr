@@ -3,6 +3,8 @@
 //! Handlers build view models; `listmngr_web` owns every byte of markup and
 //! escapes every value at compile time (ADR-0004). No handler concatenates
 //! HTML, and no page loads a third-party asset.
+#[path = "webui_account_profile.rs"]
+mod account_profile;
 #[path = "webui_account_sessions.rs"]
 mod account_sessions;
 #[path = "webui_admin.rs"]
@@ -48,6 +50,22 @@ fn html<T: Template>(template: &T) -> Response {
 /// The reader's language: their browser's ordered preferences, then the site
 /// default, then English. Nothing else — never the list, never a forwarded
 /// header — chooses the document language.
+/// The language for a page a signed-in reader opens: the interface language
+/// from their profile when it names a shipped catalog, else what
+/// [`language`] would negotiate for the browser alone.
+async fn reader_language(
+    s: &AppState,
+    headers: &HeaderMap,
+    session: &WebSession,
+) -> ApiResult<&'static str> {
+    let negotiated = language(s, headers);
+    let chosen = s.db.browser_locale(session).await?;
+    Ok(chosen
+        .as_deref()
+        .and_then(listmngr_i18n::supported_match)
+        .unwrap_or(negotiated))
+}
+
 pub fn language(s: &AppState, headers: &HeaderMap) -> &'static str {
     let header = headers
         .get(header::ACCEPT_LANGUAGE)
@@ -113,6 +131,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/web/account/password",
             get(password::form).post(password::change),
+        )
+        .route(
+            "/web/account/profile",
+            get(account_profile::form).post(account_profile::save),
         )
         .route("/web/account/sessions", get(account_sessions::index))
         .route(
@@ -335,7 +357,11 @@ async fn write_session(s: &AppState, h: &HeaderMap, csrf: &str) -> ApiResult<Web
 async fn login_form(State(s): State<AppState>, h: HeaderMap) -> ApiResult<Response> {
     let session = anonymous(&s, &h).await?;
     let mut r = html(&listmngr_web::Login {
-        shell: Shell::new(language(&s, &h), "web-title-login", Nav::Login),
+        shell: Shell::new(
+            reader_language(&s, &h, &session).await?,
+            "web-title-login",
+            Nav::Login,
+        ),
         csrf: session.csrf.clone(),
     });
     set_cookie(&s, &session, &mut r)?;
@@ -379,7 +405,7 @@ async fn account(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
-    let language = language(&s, &headers);
+    let language = reader_language(&s, &headers, &session).await?;
     let u =
         s.db.users()
             .get(session.user_id.ok_or(Error::Authentication)?)
@@ -487,7 +513,7 @@ async fn list_page(
         return Err(Error::NotFound("list".into()).into());
     }
     let session = anonymous(&s, &h).await?;
-    let language = language(&s, &h);
+    let language = reader_language(&s, &h, &session).await?;
     let mut r = html(&listmngr_web::ListPage {
         shell: Shell::titled(language, list.display_name.clone(), Nav::Lists),
         description: list.description.clone(),
@@ -544,7 +570,7 @@ async fn confirm_form(
         return Err(Error::Validation("token".into()).into());
     }
     let session = anonymous(&s, &h).await?;
-    let language = language(&s, &h);
+    let language = reader_language(&s, &h, &session).await?;
     let mut r = html(&listmngr_web::ConfirmForm {
         shell: Shell::new(language, "web-title-confirm", Nav::Lists),
         intro: listmngr_i18n::message(language, "web-confirm-intro", &[("list", id.as_str())]),
@@ -650,7 +676,7 @@ async fn moderation_index(
     h: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &h).await?;
-    let language = language(&s, &h);
+    let language = reader_language(&s, &h, &session).await?;
     let user = session.user_id.ok_or(Error::Authentication)?;
     let lists: Vec<(String, String)> = sqlx::query_as(
         "SELECT l.list_id,l.display_name FROM mailing_lists l WHERE
@@ -689,7 +715,7 @@ async fn held_page(
     h: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &h).await?;
-    let language = language(&s, &h);
+    let language = reader_language(&s, &h, &session).await?;
     let user = session.user_id.ok_or(Error::Authentication)?;
     if !can_moderate(&s, user, &id).await? {
         return Err(denied());

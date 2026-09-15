@@ -48,7 +48,8 @@ pub use pages::{
     Preferences, Recover, SelectField, Settings, Subscription, Unsubscribe, Unsubscribed,
 };
 pub use pages::{
-    ApiDocs, ArchiveCompat, ArchiveCompatEntry, DocOperation, DocPath, SessionRow, Sessions,
+    ApiDocs, ArchiveCompat, ArchiveCompatEntry, DocOperation, DocPath, ProfilePage, SessionRow,
+    Sessions,
 };
 
 /// The stylesheet, served from this origin with the design tokens the shell and

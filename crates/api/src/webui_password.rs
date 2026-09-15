@@ -1,7 +1,7 @@
 //! Authenticated password change; password reset/recovery is a separate workflow.
 use super::{
     ApiError, ApiResult, AppState, Error, Form, HeaderMap, Response, Shell, State, header, html,
-    language, load, write_session,
+    load, reader_language, write_session,
 };
 use listmngr_web::Nav;
 use serde::Deserialize;
@@ -10,7 +10,11 @@ pub(super) async fn form(State(s): State<AppState>, headers: HeaderMap) -> ApiRe
     let session = load(&s, &headers).await?;
     session.user_id.ok_or(Error::Authentication)?;
     Ok(html(&listmngr_web::Password {
-        shell: Shell::new(language(&s, &headers), "web-title-password", Nav::Account),
+        shell: Shell::new(
+            reader_language(&s, &headers, &session).await?,
+            "web-title-password",
+            Nav::Account,
+        ),
         csrf: session.csrf,
     }))
 }
@@ -41,7 +45,7 @@ pub(super) async fn change(
         .await?;
     let mut response = html(&listmngr_web::PasswordChanged {
         shell: Shell::new(
-            language(&s, &headers),
+            reader_language(&s, &headers, &session).await?,
             "web-title-password-changed",
             Nav::Account,
         ),

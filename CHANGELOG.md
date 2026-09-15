@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- `/web/account/profile` edits the reader's display name, interface language and time zone, audited in one transaction; the chosen language then wins over `Accept-Language` while signed in (`P4-ACCOUNT-PROFILE`). The same validator now guards the REST user patch.
 - `/web/account/sessions` lists the reader's own signed-in browsers and ends one or every other session, each revocation audited in its own transaction (`P4-ACCOUNT-SESSIONS`).
 
 ### Changed
