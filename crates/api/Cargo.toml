@@ -35,7 +35,9 @@ utoipa.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+ciborium.workspace = true
 oas3 = "0.22.0"
+p256.workspace = true
 prometheus-parse = "0.2.5"
 tempfile = "=3.27.0"
 tower.workspace = true

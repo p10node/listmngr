@@ -17,6 +17,7 @@ hmac.workspace = true
 percent-encoding.workspace = true
 qrcode.workspace = true
 sha1.workspace = true
+webauthn_rp.workspace = true
 listmngr-core = { path = "../core", version = "0.1.0" }
 listmngr-i18n = { path = "../i18n", version = "0.1.0" }
 listmngr-mail = { path = "../mail", version = "0.1.0" }

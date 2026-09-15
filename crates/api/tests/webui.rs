@@ -16,6 +16,8 @@ mod member_admin;
 mod member_search;
 #[path = "webui/notices.rs"]
 mod notices;
+#[path = "webui/passkeys.rs"]
+mod passkeys;
 #[path = "webui/posting_limits.rs"]
 mod posting_limits;
 #[path = "webui/profile.rs"]
@@ -1987,8 +1989,11 @@ async fn chromium_browser_acceptance() {
     let held_id = held(&db).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    // Passkeys need a domain as the relying-party id; `localhost` resolves to
+    // the bound loopback address and is a secure context for WebAuthn.
+    let public = format!("http://localhost:{}", address.port());
     let mut config = Config::default();
-    config.site.base_url = format!("http://{address}");
+    config.site.base_url = public.clone();
     let app = listmngr_api::router(db.clone(), config);
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -1997,7 +2002,7 @@ async fn chromium_browser_acceptance() {
     let mut child = tokio::task::spawn_blocking(move || {
         std::process::Command::new(python)
             .arg(script)
-            .env("WEBUI_URL", format!("http://{address}"))
+            .env("WEBUI_URL", public)
             .env("WEBUI_OUTPUT", output)
             .env("WEBUI_CONFIRMATION_FILE", child_token_path)
             .env("WEBUI_TEST_PASSWORD", "very secure password")
