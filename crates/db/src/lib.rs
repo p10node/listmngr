@@ -30,6 +30,7 @@ pub mod web_profile;
 pub use web_profile::Profile;
 pub mod site_notices;
 pub mod web_addresses;
+pub mod web_delete;
 pub mod web_tokens;
 pub use web_addresses::OwnAddress;
 pub use web_tokens::{OwnToken, TokenAuthority, TokenRequest};
