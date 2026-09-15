@@ -570,6 +570,11 @@ pub(super) struct Notice {
     saved: String,
     #[serde(default)]
     language: String,
+    /// A header rule to prefill (the held queue's shortcut).
+    #[serde(default)]
+    header: String,
+    #[serde(default)]
+    pattern: String,
 }
 
 fn notice(language: &str, q: &Notice) -> Option<String> {
@@ -967,12 +972,17 @@ pub(super) async fn rules(
     privileged(&s, &session).await?;
     let language = reader_language(&s, &headers, &session).await?;
     let rows = s.db.browser_header_matches(&session, &id).await?;
+    let draft = HeaderRuleDraft {
+        header: q.header.chars().take(1024).collect(),
+        pattern: q.pattern.chars().take(1024).collect(),
+        tag: String::new(),
+    };
     Ok(render_rules(
         language,
         &session.csrf,
         &id,
         &rows,
-        HeaderRuleDraft::default(),
+        draft,
         None,
         None,
         None,

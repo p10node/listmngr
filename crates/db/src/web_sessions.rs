@@ -486,13 +486,27 @@ impl Database {
         action: &crate::moderation::ReviewAction,
         reason: &str,
     ) -> Result<()> {
+        self.browser_review_forwarding(session, list, held, action, reason, None)
+            .await
+    }
+
+    /// [`Self::browser_review`] with Mailman's `forward_to`: a copy of the
+    /// held post goes to that address in the same transaction.
+    /// # Errors
+    /// Rejects revoked authority, a held post of another list, a forward
+    /// address that is not a mailbox or is the list's own, and database or
+    /// audit failures.
+    pub async fn browser_review_forwarding(
+        &self,
+        session: &WebSession,
+        list: &listmngr_core::ListId,
+        held: crate::moderation::HeldId,
+        action: &crate::moderation::ReviewAction,
+        reason: &str,
+        forward_to: Option<&str>,
+    ) -> Result<()> {
         let mut tx = self.browser_write_tx().await?;
-        let user = Self::browser_user_tx(&mut tx, session).await?;
-        let allowed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users u WHERE u.id=$1 AND ((u.is_server_owner=1 AND EXISTS (SELECT 1 FROM addresses a WHERE a.user_id=u.id AND a.verified_on IS NOT NULL)) OR EXISTS (SELECT 1 FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=$2 AND a.user_id=u.id AND a.verified_on IS NOT NULL AND (m.subscription_mode='as_address' OR m.user_id=u.id) AND m.role IN ('owner','moderator')))")
-            .bind(user.to_string()).bind(list.as_str()).fetch_one(&mut *tx).await.map_err(db_error)?;
-        if allowed != 1 {
-            return Err(Error::Forbidden("browser moderator authority".into()));
-        }
+        let user = Self::moderator_tx(&mut tx, session, list).await?;
         let matches: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM held_messages WHERE id=$1 AND list_id=$2")
                 .bind(held.0.to_string())
@@ -510,7 +524,7 @@ impl Database {
             &AuditContext::new(Some(user), None, None),
             action,
             reason,
-            None,
+            forward_to,
             chrono::Utc::now().timestamp_millis(),
         )
         .await?;

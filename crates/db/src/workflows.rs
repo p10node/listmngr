@@ -728,10 +728,24 @@ impl<'a> WorkflowRepo<'a> {
         context: &AuditContext,
     ) -> Result<()> {
         let mut tx = self.db.pool().begin().await.map_err(db_error)?;
-        lock(&mut tx).await?;
+        Self::decide_tx(&mut tx, self.db, id, decision, reason, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    /// [`Self::decide`] inside the caller's transaction. Returns the list
+    /// the request belongs to.
+    pub(crate) async fn decide_tx(
+        tx: &mut Transaction<'_, Any>,
+        db: &Database,
+        id: &str,
+        decision: RequestDecision,
+        reason: &str,
+        context: &AuditContext,
+    ) -> Result<ListId> {
+        lock(tx).await?;
         let row = sqlx::query("SELECT list_id,original_email,email,action FROM subscription_workflows WHERE id=$1 AND state IN ('pending_confirmation','pending_moderation')")
             .bind(id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(db_error)?
             .ok_or_else(|| Error::NotFound("subscription request".into()))?;
@@ -746,18 +760,18 @@ impl<'a> WorkflowRepo<'a> {
             RequestDecision::Accept => {
                 let address = Address::new(&original_email, String::new())?;
                 if matches!(action, SubscriptionAction::Join)
-                    && crate::bans::is_banned(&mut *tx, &list, &original_email).await?
+                    && crate::bans::is_banned(&mut **tx, &list, &original_email).await?
                 {
                     return Err(Error::Validation("address is banned".into()));
                 }
-                apply_membership(&mut tx, self.db, &list, &address, action).await?;
-                close_request(&mut tx, id).await?;
+                apply_membership(tx, db, &list, &address, action).await?;
+                close_request(tx, id).await?;
             }
-            RequestDecision::Reject => close_request(&mut tx, id).await?,
+            RequestDecision::Reject => close_request(tx, id).await?,
             RequestDecision::Discard => {
                 sqlx::query("DELETE FROM subscription_workflows WHERE id=$1")
                     .bind(id)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(db_error)?;
             }
@@ -765,7 +779,7 @@ impl<'a> WorkflowRepo<'a> {
             RequestDecision::Defer => {}
         }
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             decision.audit(),
             "list",
@@ -773,7 +787,7 @@ impl<'a> WorkflowRepo<'a> {
             serde_json::json!({"workflow_id":id,"action":action.name(),"reason":reason}),
         )
         .await?;
-        tx.commit().await.map_err(db_error)
+        Ok(list)
     }
 }
 /// Called only after an actual membership INSERT, inside its audited transaction.
@@ -1804,7 +1818,7 @@ async fn enqueue_confirmation(
     .await
 }
 
-fn pending_row(row: &sqlx::any::AnyRow) -> Result<PendingRequest> {
+pub(crate) fn pending_row(row: &sqlx::any::AnyRow) -> Result<PendingRequest> {
     Ok(PendingRequest {
         id: row.try_get("id").map_err(db_error)?,
         list_id: row
