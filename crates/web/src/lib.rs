@@ -56,6 +56,7 @@ pub use pages::{
     ActionForm, Bans, DeleteList, DiffRow, Fact, GroupLink, HeaderRuleDraft, HeaderRuleRow,
     HeaderRules, SettingField, SettingsGroup, TemplateCatalogue, TemplateEditor, TemplateRow,
 };
+pub use pages::{Flag, MassSubscribe, MemberOptionsPage, Roster};
 pub use pages::{
     LoginTotp, Oidc, PasskeyRow, Passkeys, ProviderLink, ProviderRow, TotpCodes, TotpPage,
 };
@@ -159,6 +160,7 @@ pub struct Shell {
     title: String,
     active: Nav,
     scripts: bool,
+    htmx: bool,
 }
 
 impl Shell {
@@ -171,6 +173,7 @@ impl Shell {
             title: listmngr_i18n::message(language, title, &[]),
             active,
             scripts: false,
+            htmx: false,
         }
     }
 
@@ -188,6 +191,21 @@ impl Shell {
         self.scripts
     }
 
+    /// The page loads the vendored htmx for partial updates; every form and
+    /// link on it works without it.
+    #[must_use]
+    pub const fn with_htmx(mut self) -> Self {
+        self.htmx = true;
+        self.scripts = true;
+        self
+    }
+
+    /// Whether the page loads htmx.
+    #[must_use]
+    pub const fn htmx(&self) -> bool {
+        self.htmx
+    }
+
     /// A shell whose title is data, such as a list's display name.
     #[must_use]
     pub fn titled(language: &str, title: String, active: Nav) -> Self {
@@ -196,6 +214,7 @@ impl Shell {
             title,
             active,
             scripts: false,
+            htmx: false,
         }
     }
 

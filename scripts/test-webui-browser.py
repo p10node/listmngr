@@ -1,5 +1,6 @@
 """Disposable Chromium acceptance. No cookies/passwords/tokens written to evidence."""
 import base64
+import re
 import hashlib
 import hmac
 import os
@@ -239,9 +240,15 @@ with sync_playwright() as p:
     print('Settings groups/rules/bans/templates/delete confirmation: PASS', flush=True)
     page.goto(base + '/web/admin')
     page.locator('a[href="/web/lists/public.example.com/members"]').click()
+    axe_scan(page, '/web/lists/public.example.com/members')
+    # The search is an htmx swap of the roster: the page is not reloaded
+    # (a marker set on the document survives) and the URL is pushed.
+    page.evaluate("document.body.dataset.marker = 'kept'")
     page.get_by_label('Search member email', exact=True).fill('BROWSER@EXAMPLE.COM')
     page.get_by_role('button', name='Search members', exact=True).click()
     expect(page.locator('article')).to_have_count(1)
+    expect(page).to_have_url(re.compile(r'q=BROWSER'))
+    assert page.evaluate("document.body.dataset.marker") == 'kept', 'htmx swapped the roster in place'
     admin_member = page.locator('article').filter(has=page.get_by_role('heading', name='browser@example.com', exact=True))
     admin_member.get_by_label('Posting policy', exact=True).select_option('hold')
     admin_member.get_by_role('button', name='Save posting policy', exact=True).click()
@@ -261,6 +268,51 @@ with sync_playwright() as p:
     page.get_by_role('link', name='Clear search', exact=True).click()
     expect(page.get_by_label('Search member email', exact=True)).to_have_value('')
     expect(admin_member).to_be_visible()
+    # Rosters of the other roles, mass subscription, one member's options,
+    # bounce reset, removal and the export.
+    page.get_by_role('link', name='Owners', exact=True).click()
+    expect(page).to_have_url(re.compile(r'role=owner'))
+    expect(page.locator('main')).to_contain_text('No matching members.')  # the fixture owner is a server owner, not a list owner
+    page.get_by_role('link', name='Members', exact=True).click()
+    page.get_by_role('link', name='Add members', exact=True).click()
+    expect(page.get_by_role('heading', name='Add members', exact=True)).to_be_visible()
+    page.get_by_label('Addresses', exact=True).fill('Chromium One <chromium-one@example.org>\nchromium-two@example.org\nnot-an-address')
+    page.get_by_label('The people have asked to join', exact=True).check()
+    page.get_by_label('Approved by a moderator', exact=True).check()
+    page.get_by_role('button', name='Add these members', exact=True).click()
+    expect(page.get_by_role('heading', name='What happened', exact=True)).to_be_visible()
+    expect(page.locator('table')).to_contain_text('chromium-one@example.org')
+    expect(page.locator('table')).to_contain_text('Subscribed')
+    expect(page.locator('table')).to_contain_text('not an email address')
+    page.screenshot(path=str(out / '33-mass-subscribe.png'), full_page=True)
+    page.get_by_role('link', name='List members', exact=True).click()
+    page.get_by_label('Search member email', exact=True).fill('chromium-one')
+    page.get_by_role('button', name='Search members', exact=True).click()
+    expect(page.locator('article')).to_have_count(1)
+    page.get_by_role('link', name='Options', exact=True).click()
+    expect(page.get_by_role('heading', name='chromium-one@example.org', exact=True)).to_be_visible()
+    axe_scan(page, '/web/lists/public.example.com/members/<member>')
+    page.get_by_label('Delivery mode', exact=True).select_option('mime_digests')
+    page.get_by_label('Display name', exact=True).fill('Chromium One <renamed>')
+    page.get_by_role('button', name='Save options', exact=True).click()
+    expect(page.get_by_role('status')).to_contain_text('Saved')
+    expect(page.get_by_label('Delivery mode', exact=True)).to_have_value('mime_digests')
+    expect(page.get_by_label('Display name', exact=True)).to_have_value('Chromium One <renamed>')
+    page.get_by_role('button', name='Reset bounce score and enable delivery', exact=True).click()
+    expect(page.get_by_role('status')).to_contain_text('bounce score was reset')
+    page.screenshot(path=str(out / '34-member-options.png'), full_page=True)
+    export = context.request.get(base + '/web/lists/public.example.com/members/export.csv')
+    assert export.status == 200 and export.headers['content-type'].startswith('text/csv'), export.status
+    assert 'chromium-one@example.org,Chromium One <renamed>,member' in export.text(), export.text()[:400]
+    page.get_by_role('button', name='Remove from the list', exact=True).click()
+    expect(page.get_by_role('status')).to_contain_text('Removed 1')
+    page.get_by_label('Addresses to remove', exact=True).fill('chromium-two@example.org')
+    page.get_by_role('button', name='Remove selected', exact=True).click()
+    expect(page.get_by_role('status')).to_contain_text('Removed 1')
+    page.get_by_label('Search member email', exact=True).fill('chromium')
+    page.get_by_role('button', name='Search members', exact=True).click()
+    expect(page.locator('article')).to_have_count(0)
+    print('Member rosters/mass subscribe/options/bounce reset/export/removal: PASS', flush=True)
     page.goto(base + '/web/account')
     public_subscription = page.locator('section').filter(has=page.get_by_role('heading', name='public.example.com', exact=True))
     public_subscription.get_by_label('Delivery status').select_option('by_user')
@@ -570,6 +622,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials. Settings groups previewed/refused inline/saved, a header rule added, tested and removed, a ban added and lifted, a template previewed, saved and removed, and the delete confirmation refused a wrong id.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials. Settings groups previewed/refused inline/saved, a header rule added, tested and removed, a ban added and lifted, a template previewed, saved and removed, and the delete confirmation refused a wrong id. Member rosters per role, an htmx search swap, mass subscription with outcomes, a member\'s options and bounce reset, a CSV export, and removals by button and by pasted address.')
     context.close()
     browser.close()
