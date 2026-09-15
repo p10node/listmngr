@@ -318,16 +318,26 @@ impl TemplateRepo<'_> {
 
 /// Candidate `(scope, scope_id, language)` triples, most specific first.
 fn candidates(list: &MailingList, language: &str) -> Vec<(&'static str, String, String)> {
+    scoped_candidates(
+        vec![
+            Scope::List(list.id.clone()).column_values(),
+            Scope::Domain(list.id.mail_host().to_owned()).column_values(),
+            Scope::Site.column_values(),
+        ],
+        language,
+    )
+}
+
+/// Each scope in order, in `language` then English.
+fn scoped_candidates(
+    scopes: Vec<(&'static str, String)>,
+    language: &str,
+) -> Vec<(&'static str, String, String)> {
     let mut languages = vec![language.to_owned()];
     if language != DEFAULT_LANGUAGE {
         languages.push(DEFAULT_LANGUAGE.to_owned());
     }
-    let scopes: [(&'static str, String); 3] = [
-        Scope::List(list.id.clone()).column_values(),
-        Scope::Domain(list.id.mail_host().to_owned()).column_values(),
-        Scope::Site.column_values(),
-    ];
-    let mut out = Vec::with_capacity(6);
+    let mut out = Vec::with_capacity(scopes.len() * languages.len());
     for (scope, id) in scopes {
         for lang in &languages {
             out.push((scope, id.clone(), lang.clone()));
@@ -345,8 +355,28 @@ pub(crate) async fn resolve_tx(
     list: &MailingList,
     language: &str,
 ) -> Result<Resolved> {
+    resolve_candidates(tx, name, candidates(list, language), language).await
+}
+
+/// Resolution for mail the site sends outside any list: the site scope, then
+/// the built-in.
+pub(crate) async fn resolve_site_tx(
+    tx: &mut Transaction<'_, Any>,
+    name: &str,
+    language: &str,
+) -> Result<Resolved> {
+    let candidates = scoped_candidates(vec![Scope::Site.column_values()], language);
+    resolve_candidates(tx, name, candidates, language).await
+}
+
+async fn resolve_candidates(
+    tx: &mut Transaction<'_, Any>,
+    name: &str,
+    candidates: Vec<(&'static str, String, String)>,
+    language: &str,
+) -> Result<Resolved> {
     validate_name(name)?;
-    for (scope, scope_id, lang) in candidates(list, language) {
+    for (scope, scope_id, lang) in candidates {
         let row = sqlx::query(
             "SELECT uri, body FROM templates WHERE name=$1 AND scope=$2 AND scope_id=$3 AND language=$4",
         )

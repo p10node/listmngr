@@ -1,5 +1,24 @@
 # Architecture
 
+## Site notices — bounded local acceptance verified
+
+`crates/db/src/site_notices.rs` produces mail the site sends to a person
+outside any list. The envelope is the configured `site.site_owner` (carried by
+`Database::with_site`, applied by the CLI from `[site]`), the Message-ID domain
+is the owner's mail host, and `crate::templates::resolve_site_tx` resolves the
+body at the site scope then the built-in, in the recipient's negotiated
+language. The bytes go through the same `enqueue_raw_notice` path every
+generated notice uses — store, message, `out` job, `workflow_notices` row — in
+the caller's transaction, with a message context of `{"site": true,
+"site_mail_host": …}` and no `list_id`.
+
+The out runner already sends a notice's bytes as they are on the strength of
+its `workflow_notices` row; the one list-coupled step, DKIM, now signs for
+`site_mail_host` when the context has no `list_id` **and** the notice row
+exists — a forged site context on a non-notice job is still invalid. DSN
+binding and bounce recording were already no-ops without a `list_id`, so a
+site notice binds no list delivery authority.
+
 ## Profile and interface language — bounded local acceptance verified
 
 `crates/db/src/web_profile.rs` holds the one validator for a user's display

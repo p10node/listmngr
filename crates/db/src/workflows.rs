@@ -1575,6 +1575,24 @@ pub(crate) async fn enqueue_notice_from(
     now_ms: i64,
     mail_from: Option<&str>,
 ) -> Result<()> {
+    // Context is routing metadata only; the job-bound row below is authority.
+    let context = serde_json::json!({"list_id":list.as_str()}).to_string();
+    enqueue_raw_notice(tx, &context, email, id, raw, now_ms, mail_from).await
+}
+
+/// The store, message, outgoing job and notice-authority row for one
+/// generated message, whatever it is scoped to. `context` is the routing
+/// metadata the out runner reads; the `workflow_notices` row is what lets the
+/// runner send the bytes as they are.
+pub(crate) async fn enqueue_raw_notice(
+    tx: &mut Transaction<'_, Any>,
+    context: &str,
+    email: &str,
+    id: &str,
+    raw: Vec<u8>,
+    now_ms: i64,
+    mail_from: Option<&str>,
+) -> Result<()> {
     let key = format!("{:x}", Sha256::digest(&raw));
     let message_id = MessageId(Uuid::now_v7());
     sqlx::query("INSERT INTO message_blobs(store_key,raw) VALUES($1,$2)")
@@ -1583,8 +1601,6 @@ pub(crate) async fn enqueue_notice_from(
         .execute(&mut **tx)
         .await
         .map_err(db_error)?;
-    // Context is routing metadata only; the job-bound row below is authority.
-    let context = serde_json::json!({"list_id":list.as_str()}).to_string();
     sqlx::query(
         "INSERT INTO messages(id,store_key,external_id,context,created_at) VALUES($1,$2,$3,$4,$5)",
     )
@@ -1805,7 +1821,7 @@ fn pending_row(row: &sqlx::any::AnyRow) -> Result<PendingRequest> {
 
 /// Support ASCII dot-atom mailboxes only for notices: no SMTPUTF8, no
 /// quoted local parts.
-fn notice_mailbox(email: &str) -> Result<()> {
+pub(crate) fn notice_mailbox(email: &str) -> Result<()> {
     let local = email.split_once('@').map_or("", |(local, _)| local);
     if !email.is_ascii()
         || !local

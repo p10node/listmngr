@@ -219,3 +219,7 @@ web-profile-save = Save profile
 # Language names are endonyms in every catalog, as a language picker shows them.
 web-language-en = English
 web-language-vi = Tiếng Việt
+
+# Mail the site sends outside any list (P4-SITE-NOTICES).
+notice-site-verify-subject = Confirm your email address for { $site_name }
+notice-site-reset-subject = Reset your password for { $site_name }
