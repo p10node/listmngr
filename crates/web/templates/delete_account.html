@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block content %}<p>{{ shell.t("web-delete-intro") }}</p><ul><li>{{ shell.t("web-delete-memberships") }}</li><li>{{ shell.t("web-delete-addresses") }}</li><li>{{ shell.t("web-delete-tokens") }}</li><li>{{ shell.t("web-delete-keeps") }}</li></ul><form method="post" action="/web/account/delete">{% call ui::csrf(csrf) %}{% endcall %}<p><label>{{ shell.t("web-delete-password") }} <input type="password" name="password" autocomplete="current-password" maxlength="1024" required></label></p><button>{{ shell.t("web-delete-submit") }}</button></form><p><a href="/web/account">{{ shell.t("web-cancel") }}</a></p>{% endblock %}
