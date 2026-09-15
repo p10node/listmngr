@@ -1,7 +1,7 @@
 //! Verified-session confirmation only; no mailbox challenge or probe is sent.
 use super::{
     ApiResult, AppState, Csrf, Form, HeaderMap, IntoResponse, Path, Redirect, Response, Shell,
-    State, html, language, load, write_session,
+    State, html, load, reader_language, write_session,
 };
 use listmngr_web::Nav;
 pub(super) async fn recover(
@@ -20,7 +20,7 @@ pub(super) async fn preview(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = load(&s, &headers).await?;
-    let language = language(&s, &headers);
+    let language = reader_language(&s, &headers, &session).await?;
     let (list, email) = s.db.browser_recover_preview(&session, member).await?;
     Ok(html(&listmngr_web::Recover {
         shell: Shell::new(language, "web-title-recover", Nav::Account),

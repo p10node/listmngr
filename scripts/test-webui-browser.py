@@ -193,6 +193,24 @@ with sync_playwright() as p:
     page.get_by_label('Password', exact=True).fill('new strong password phrase 2026!')
     page.get_by_role('button', name='Log in', exact=True).click()
     expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
+    # P4-ACCOUNT-PROFILE: the reader's interface language wins over the browser's.
+    page.get_by_role('link', name='Your profile', exact=True).click()
+    expect(page.get_by_role('heading', name='Your profile', exact=True)).to_be_visible()
+    page.get_by_label('Display name', exact=True).fill('Trình duyệt <b>')
+    page.get_by_label('Interface language', exact=True).select_option('vi')
+    page.get_by_label('Time zone', exact=True).select_option('Asia/Ho_Chi_Minh')
+    page.get_by_role('button', name='Save profile', exact=True).click()
+    expect(page.get_by_role('heading', name='Hồ sơ của bạn', exact=True)).to_be_visible()
+    assert page.evaluate('document.documentElement.lang') == 'vi', 'profile language applied'
+    expect(page.get_by_label('Múi giờ', exact=True)).to_have_value('Asia/Ho_Chi_Minh')
+    page.screenshot(path=str(out / '13-profile-vietnamese.png'), full_page=True)
+    page.get_by_label('Ngôn ngữ giao diện', exact=True).select_option('en')
+    page.get_by_label('Tên hiển thị', exact=True).fill('Browser Reader')
+    page.get_by_role('button', name='Lưu hồ sơ', exact=True).click()
+    expect(page.get_by_role('heading', name='Your profile', exact=True)).to_be_visible()
+    assert page.evaluate('document.documentElement.lang') == 'en'
+    page.goto(base + '/web/account')
+    expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
     # P4-ACCOUNT-SESSIONS: the reader sees this browser's own session and can end it.
     page.get_by_role('link', name='Signed-in browsers', exact=True).click()
     expect(page.get_by_role('heading', name='Signed-in browsers', exact=True)).to_be_visible()
@@ -316,6 +334,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; own session listed and ended; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; own session listed and ended; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()

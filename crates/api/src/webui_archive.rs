@@ -103,7 +103,11 @@ pub(super) async fn browse(
         )
             .into_response());
     }
-    render(&id, &query, &messages, super::language(&s, &headers))
+    let language = match &session {
+        Some(session) => super::reader_language(&s, &headers, session).await?,
+        None => super::language(&s, &headers),
+    };
+    render(&id, &query, &messages, language)
 }
 
 fn render(

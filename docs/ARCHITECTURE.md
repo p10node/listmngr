@@ -1,5 +1,20 @@
 # Architecture
 
+## Profile and interface language — bounded local acceptance verified
+
+`crates/db/src/web_profile.rs` holds the one validator for a user's display
+name, interface language and time zone (`Profile::validate`): non-empty,
+bounded, control-free names; a language a shipped catalog serves; an IANA zone
+name from `chrono-tz`. The browser form and the REST user patch both go through
+it, so neither surface can store what the other would refuse. The browser write
+runs under `browser_write_tx` + `browser_user_tx` with one `user.profile` audit
+event in the same transaction.
+
+`webui::reader_language` decides the language of a page a signed-in reader
+opens: the profile locale when it names a shipped catalog, else what
+`webui::language` negotiates for the browser alone. Anonymous pages, the
+failure page and the compatibility archive path keep the browser negotiation.
+
 ## Session inventory — bounded local acceptance verified
 
 `web_sessions` rows carry an opaque `id` and a `created_at` since migration
