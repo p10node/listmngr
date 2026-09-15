@@ -2,7 +2,7 @@
 //! once, revoke.
 use super::{
     ApiResult, AppState, Csrf, Form, HeaderMap, IntoResponse, Path, Redirect, Response, Shell,
-    State, html, load, reader_language, write_session,
+    State, html, load, privileged, reader_language, write_session,
 };
 use listmngr_core::Error;
 use listmngr_db::TokenRequest;
@@ -99,6 +99,7 @@ pub(super) async fn create(
         }
     }
     let session = write_session(&s, &headers, &csrf).await?;
+    privileged(&s, &session).await?;
     request.scopes.sort();
     request.scopes.dedup();
     let issued = s.db.browser_create_token(&session, &request).await?;

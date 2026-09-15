@@ -1,5 +1,24 @@
 # Architecture
 
+## Two-step sign-in — bounded local acceptance verified
+
+`crates/db/src/totp.rs` implements RFC 6238 over HMAC-SHA1 with the RFC 4648
+base32 alphabet, checked against the RFC's own test vectors; `verify` accepts
+the steps `now-1..=now+1` that are later than the last accepted step, so a
+code is used once. `crates/db/src/web_totp.rs` holds enrolment (a pending
+secret in `user_totp` that only counts once a code confirms it), the ten
+recovery codes (`user_recovery_codes`, digests only), the second step and the
+password-guarded regenerate/disable. Migration `0045` adds the two tables and
+gives `web_sessions` a `pending_user_id` and a failure counter: a correct
+password on an enrolled account writes a session that is anonymous to every
+page (`user_id` NULL) but names whom it is for and expires in ten minutes;
+`browser_second_factor` rotates it into a full session in the same transaction
+as the step or recovery-code consumption and the `web.login` audit event.
+`webui::privileged` enforces `security.require_2fa_for`: a server owner without
+a confirmed factor gets 403 from administration, moderation and token minting.
+The QR code is an inline SVG from the `qrcode` crate, so the enrolment page
+still loads nothing and runs no script.
+
 ## Account deletion — bounded local acceptance verified
 
 `crates/db/src/web_delete.rs` re-verifies the password with Argon2 before the

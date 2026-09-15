@@ -158,7 +158,9 @@ async fn case(db: &Database, sqlite: bool, change: &str) {
         .unwrap()
         .unwrap();
     if change == "valid" {
-        let fresh = result.unwrap();
+        let crate::web_sessions::LoginOutcome::Complete(fresh) = result.unwrap() else {
+            panic!("no second factor is enrolled")
+        };
         assert_eq!(fresh.user_id, Some(user.id));
         assert_ne!(fresh.token, previous_token);
         assert!(

@@ -1,9 +1,30 @@
 """Disposable Chromium acceptance. No cookies/passwords/tokens written to evidence."""
+import base64
+import hashlib
+import hmac
 import os
 import mailbox
+import struct
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+
+
+def totp_code(secret_base32, step_offset=0):
+    """RFC 6238 with SHA-1, six digits and 30-second steps, as an app would."""
+    key = base64.b32decode(secret_base32 + '=' * (-len(secret_base32) % 8))
+    counter = int(time.time()) // 30 + step_offset
+    digest = hmac.new(key, struct.pack('>q', counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    binary = struct.unpack('>I', digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return f'{binary % 1_000_000:06d}'
+
+
+def second_step(page, code):
+    """The page after a correct password on an enrolled account."""
+    expect(page.get_by_role('heading', name='Enter your one-time code', exact=True)).to_be_visible()
+    page.get_by_label('Code', exact=True).fill(code)
+    page.get_by_role('button', name='Finish signing in', exact=True).click()
 
 base = os.environ['WEBUI_URL']
 out = Path(os.environ['WEBUI_OUTPUT'])
@@ -27,6 +48,24 @@ with sync_playwright() as p:
     page.get_by_label('Password', exact=True).fill(os.environ['WEBUI_TEST_PASSWORD'])
     page.get_by_role('button', name='Log in', exact=True).click()
     expect(page.get_by_role('heading', name='My subscriptions')).to_be_visible()
+    # P4-TOTP: the site requires a second factor of a server owner; until one
+    # is enrolled the administration pages answer 403.
+    expect(page.locator('main')).to_contain_text('requires a second sign-in step')
+    closed = context.request.get(base + '/web/admin')
+    assert closed.status == 403, 'administration stays closed before enrolment'
+    page.get_by_role('link', name='Two-step sign-in', exact=True).first.click()
+    expect(page.get_by_role('heading', name='Two-step sign-in', exact=True)).to_be_visible()
+    totp_secret = page.locator('#totp-secret').inner_text()
+    assert len(totp_secret) == 32
+    assert page.locator('svg').count() == 1, 'an inline QR code'
+    page.get_by_label('Six-digit code from the app', exact=True).fill(totp_code(totp_secret))
+    page.get_by_role('button', name='Turn on two-step sign-in', exact=True).click()
+    recovery_codes = [c.inner_text() for c in page.locator('li code').all()]
+    assert len(recovery_codes) == 10, recovery_codes
+    # Screenshots must not carry live recovery codes into the evidence folder.
+    page.evaluate("document.querySelectorAll('li code').forEach(c => c.textContent = 'redacted')")
+    page.screenshot(path=str(out / '21-totp-recovery-codes.png'), full_page=True)
+    page.goto(base + '/web/account')
     page.get_by_role('link', name='List administration', exact=True).click()
     expect(page.get_by_role('heading', name='List administration', exact=True)).to_be_visible()
     page.locator('a[href="/web/lists/public.example.com/settings"]').click()
@@ -192,6 +231,9 @@ with sync_playwright() as p:
     page.get_by_label('Email', exact=True).fill('browser@example.com')
     page.get_by_label('Password', exact=True).fill('new strong password phrase 2026!')
     page.get_by_role('button', name='Log in', exact=True).click()
+    # P4-TOTP: the password alone is half a login; the next step's code is
+    # accepted as drift, since confirmation consumed the current step.
+    second_step(page, totp_code(totp_secret, 1))
     expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
     # P4-ACCOUNT-PROFILE: the reader's interface language wins over the browser's.
     page.get_by_role('link', name='Your profile', exact=True).click()
@@ -264,6 +306,8 @@ with sync_playwright() as p:
     page.get_by_label('Email', exact=True).fill('browser@example.com')
     page.get_by_label('Password', exact=True).fill('new strong password phrase 2026!')
     page.get_by_role('button', name='Log in', exact=True).click()
+    # P4-TOTP: a recovery code completes the login once.
+    second_step(page, recovery_codes[0])
     expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
     page.get_by_role('button', name='Log out', exact=True).click()
     expect(page.get_by_role('heading', name='Mailing lists')).to_be_visible()
@@ -403,6 +447,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()
