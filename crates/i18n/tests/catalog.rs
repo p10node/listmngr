@@ -75,6 +75,7 @@ const ARGUMENTS: &[(&str, &str)] = &[
     ("address", "x"),
     ("mode", "x"),
     ("status", "x"),
+    ("site_name", "x"),
 ];
 
 #[test]

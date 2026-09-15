@@ -1712,6 +1712,26 @@ held-review intent resolves recipients inside that lock and atomically schedules
 Out, Digest and policy-enabled Archive children. See the canonical convergence
 entry in the parity ledger; prior donor gate results below are historical.
 
+## Mail the site sends outside any list (`P4-SITE-NOTICES`)
+
+Address verification and password reset mail belong to no list, so they leave
+as **site notices**: `From:` and the Message-ID domain are `site.site_owner`,
+templates resolve at the site scope then the built-in (`site:user:action:verify`,
+`site:user:action:reset`, in `en` and `vi`), the subject comes from the shared
+catalog, and the out runner signs for the owner's domain when `[[mta.dkim_signing]]`
+has a key for it. Like every generated notice they leave with a null reverse
+path, carry no `List-*` header and bind no list delivery authority. Producers
+enqueue inside their own transaction (`Database::site_notices().enqueue_tx`),
+so a business write and its mail commit together.
+
+```toml
+[site]
+name = "Example Lists"                  # $site_name in site notices
+site_owner = "postmaster@lists.example.com"  # From: of site notices; DKIM domain
+```
+
+No producer ships yet; `P4-ACCOUNT-SIGNUP` and `P4-ACCOUNT-RESET` are the first.
+
 ## API reference without a CDN (`P1-API-DOCS-ORIGIN`)
 
 `/api/docs` is a server-rendered reference generated from the same OpenAPI value
