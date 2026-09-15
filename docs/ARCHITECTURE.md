@@ -1,5 +1,20 @@
 # Architecture
 
+## Account deletion — bounded local acceptance verified
+
+`crates/db/src/web_delete.rs` re-verifies the password with Argon2 before the
+writer reservation, rebinds the session under `browser_write_tx` +
+`browser_user_tx`, refuses the last server owner with a verified address, and
+then removes in one transaction: memberships through the user or any of their
+addresses (with their preferences and one `member.delete` audit event each),
+address rows (pending tokens cascade) and their preferences, API tokens,
+credential, sessions, domain ownerships; `held_messages.moderator_id` and
+`moderation_log.moderator_id` are set to NULL because those references are
+`ON DELETE RESTRICT`; then the user row and its preferences, and one
+`user.delete` audit event with counts. The REST `DELETE /users/{id}` keeps its
+older semantics (unlink addresses, keep memberships) and is a separate
+administrative surface.
+
 ## Own API tokens — bounded local acceptance verified
 
 The API authorizes on a token's scopes and bounds alone, never on the roles

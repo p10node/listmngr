@@ -1836,6 +1836,14 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   unbound. The secret is shown once, on the page that follows creation, and
   never stored. Revocation takes effect at once. Changing or resetting the
   password does not revoke tokens.
+- `/web/account/delete`: delete the account after entering the password
+  again. One audited transaction ends every membership held by the account or
+  any of its addresses (each with its own `member.delete` audit event, so list
+  owners can see why a member vanished), removes the addresses and their
+  pending tokens, the API tokens, the credential, the sessions and any domain
+  ownership, unlinks the account from moderation history, and deletes the
+  user row. Posted messages stay in archives; the audit log keeps the actor id
+  as text. The last server owner cannot delete themselves.
 - `/web/account/sessions`: every browser currently signed in to the account,
   with when it was issued and when it expires, the one making the request
   marked. A reader can end one session or every other session; each revocation

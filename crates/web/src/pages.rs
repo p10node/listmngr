@@ -675,3 +675,21 @@ pub struct TokenIssued {
     /// The secret, shown once.
     pub token: String,
 }
+
+/// Confirmation before deleting the account.
+#[derive(Debug, Template)]
+#[template(path = "delete_account.html")]
+pub struct DeleteAccount {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+}
+
+/// The account is gone.
+#[derive(Debug, Template)]
+#[template(path = "account_deleted.html")]
+pub struct AccountDeleted {
+    /// Document shell.
+    pub shell: Shell,
+}

@@ -5,6 +5,8 @@
 //! HTML, and no page loads a third-party asset.
 #[path = "webui_account_addresses.rs"]
 mod account_addresses;
+#[path = "webui_account_delete.rs"]
+mod account_delete;
 #[path = "webui_account_profile.rs"]
 mod account_profile;
 #[path = "webui_account_sessions.rs"]
@@ -170,6 +172,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/web/account/tokens/{id}/revoke",
             post(account_tokens::revoke),
+        )
+        .route(
+            "/web/account/delete",
+            get(account_delete::form).post(account_delete::delete),
         )
         .route("/web/account/sessions", get(account_sessions::index))
         .route(
