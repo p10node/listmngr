@@ -3,6 +3,8 @@
 //! Handlers build view models; `listmngr_web` owns every byte of markup and
 //! escapes every value at compile time (ADR-0004). No handler concatenates
 //! HTML, and no page loads a third-party asset.
+#[path = "webui_account_addresses.rs"]
+mod account_addresses;
 #[path = "webui_account_profile.rs"]
 mod account_profile;
 #[path = "webui_account_sessions.rs"]
@@ -146,6 +148,18 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/web/account/profile",
             get(account_profile::form).post(account_profile::save),
+        )
+        .route(
+            "/web/account/addresses",
+            get(account_addresses::index).post(account_addresses::add),
+        )
+        .route(
+            "/web/account/addresses/{id}/primary",
+            post(account_addresses::primary),
+        )
+        .route(
+            "/web/account/addresses/{id}/remove",
+            post(account_addresses::remove),
         )
         .route("/web/account/sessions", get(account_sessions::index))
         .route(

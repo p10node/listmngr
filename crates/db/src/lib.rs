@@ -29,6 +29,8 @@ pub use web_session_inventory::SessionSummary;
 pub mod web_profile;
 pub use web_profile::Profile;
 pub mod site_notices;
+pub mod web_addresses;
+pub use web_addresses::OwnAddress;
 pub mod web_reset;
 pub mod web_signup;
 pub use web_signup::Signup;

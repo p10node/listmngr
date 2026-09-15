@@ -1,5 +1,19 @@
 # Architecture
 
+## Own addresses — bounded local acceptance verified
+
+`crates/db/src/web_addresses.rs` manages the reader's addresses under
+`browser_write_tx` + `browser_user_tx`. Adding shares `issue_verification`
+with signup (token row, hourly cooldown, site notice) and links an address
+nobody owns while clearing any earlier `verified_on`, because verification is
+proof for *this* account; an address another account owns commits nothing.
+Removal unlinks (`user_id = NULL`) and clears `verified_on`, deletes the
+address's pending tokens and keeps memberships, which reference the address
+row with `ON DELETE RESTRICT` anyway. Signup's `claim_account` applies the
+same rule to a verified address nobody owns: it is linked and must be proven
+again, so an administrative verification can never turn into an account for
+someone who did not read the mailbox.
+
 ## Password reset — bounded local acceptance verified
 
 `crates/db/src/web_reset.rs` mirrors signup. `browser_reset_request` looks the
