@@ -208,3 +208,14 @@ web-sessions-end-this = Sign this browser out
 web-sessions-end-others = End every other session
 web-sessions-note = Sessions also end on their own at the time shown, and changing your password ends all of them. This page shows browser sessions only, not API tokens.
 web-account-sessions-link = Signed-in browsers
+web-title-profile = Your profile
+web-account-profile-link = Your profile
+web-profile-intro = Your name as pages and notices show it, the language this interface uses for you, and your time zone.
+web-profile-display-name = Display name
+web-profile-locale = Interface language
+web-profile-timezone = Time zone
+web-profile-note = The interface language applies to pages you open while signed in and takes precedence over your browser's language preference. The language of list notices is a subscription preference and is not changed here.
+web-profile-save = Save profile
+# Language names are endonyms in every catalog, as a language picker shows them.
+web-language-en = English
+web-language-vi = Tiếng Việt

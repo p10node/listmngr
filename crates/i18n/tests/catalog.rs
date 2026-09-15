@@ -93,8 +93,9 @@ fn every_english_message_resolves_with_the_known_placeables() {
 #[test]
 fn every_english_message_has_a_vietnamese_translation() {
     for id in listmngr_i18n::message_ids() {
-        if id == "confirm-subject" {
-            // Deliberately identical: a machine-parsed subject, not prose.
+        if id == "confirm-subject" || id.starts_with("web-language-") {
+            // Deliberately identical: a machine-parsed subject, and language
+            // names shown as endonyms in every language.
             continue;
         }
         assert_ne!(

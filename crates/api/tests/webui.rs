@@ -14,6 +14,8 @@ mod member_search;
 mod notices;
 #[path = "webui/posting_limits.rs"]
 mod posting_limits;
+#[path = "webui/profile.rs"]
+mod profile;
 #[path = "webui/sessions.rs"]
 mod sessions;
 #[path = "webui/subject_prefix.rs"]
