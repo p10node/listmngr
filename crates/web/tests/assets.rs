@@ -18,6 +18,7 @@ fn no_asset_reaches_out_to_another_origin() {
         ("style.css", listmngr_web::STYLESHEET),
         ("htmx.min.js", listmngr_web::HTMX),
         ("passkeys.js", listmngr_web::PASSKEYS_SCRIPT),
+        ("moderation.js", listmngr_web::MODERATION_SCRIPT),
     ] {
         for marker in ["http://", "https://", "//cdn", "unpkg", "jsdelivr"] {
             assert!(

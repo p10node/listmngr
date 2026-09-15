@@ -375,20 +375,34 @@ pub struct ModerationRow {
     pub href: String,
     /// Translated link text.
     pub label: String,
+    /// Subscription requests link.
+    pub requests_href: String,
+    /// Translated counts of what waits.
+    pub waiting: String,
 }
 
 /// The held-message queue of one list.
 #[derive(Debug, Template)]
 #[template(path = "held.html")]
 pub struct Held {
-    /// Document shell.
+    /// Document shell, loading the shortcuts script.
     pub shell: Shell,
     /// Session CSRF token.
     pub csrf: String,
+    /// Where bulk decisions post.
+    pub bulk_action: String,
+    /// Where the requests queue is.
+    pub requests_href: String,
     /// Held messages on this page.
     pub items: Vec<HeldItem>,
     /// Available decisions.
     pub decisions: Vec<Choice>,
+    /// The sender moderation choices, unselected.
+    pub sender_actions: Vec<Choice>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+    /// A refusal that names no field.
+    pub error: Option<String>,
     /// Queue paging.
     pub pagination: Pagination,
 }
@@ -396,16 +410,77 @@ pub struct Held {
 /// One held message awaiting a decision.
 #[derive(Debug)]
 pub struct HeldItem {
+    /// Held id, for the bulk selection and the shortcuts.
+    pub id: String,
     /// Subject as held.
     pub subject: String,
     /// Envelope sender.
     pub sender: String,
     /// Why the message was held.
     pub reason: String,
+    /// When it was held, formatted.
+    pub held_at: String,
+    /// Decoded `From`, `To`, `Date`.
+    pub from: String,
+    pub to: String,
+    pub date: String,
+    /// The text body, decoded; empty when there is none.
+    pub body: String,
+    /// How many attachments the MIME structure names.
+    pub attachments: usize,
     /// Bounded raw source.
     pub source: String,
     /// Decision form target.
     pub action: String,
+    /// The submitted forward address to keep after a refusal.
+    pub forward_to: String,
+    /// Forward refusal, if any.
+    pub forward_error: Option<String>,
+    /// Where "moderate sender" posts.
+    pub sender_action: String,
+    /// The sender's current standing, translated.
+    pub sender_standing: String,
+    /// Sender moderation choices with the current one selected.
+    pub sender_choices: Vec<Choice>,
+    /// Where "ban sender" posts; `None` when already banned.
+    pub ban_action: Option<String>,
+    /// The header-rule shortcut.
+    pub rule_href: String,
+}
+
+/// The subscription requests queue of one list.
+#[derive(Debug, Template)]
+#[template(path = "requests.html")]
+pub struct Requests {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Where the held queue is.
+    pub held_href: String,
+    /// The requests.
+    pub items: Vec<RequestItem>,
+    /// Decision choices.
+    pub decisions: Vec<Choice>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+}
+
+/// One undecided subscription request.
+#[derive(Debug)]
+pub struct RequestItem {
+    /// The address as written.
+    pub email: String,
+    /// Display name, possibly empty.
+    pub display_name: String,
+    /// Translated: join or leave.
+    pub action: String,
+    /// Translated: who it waits for.
+    pub waiting: String,
+    /// When it was made, formatted.
+    pub requested_at: String,
+    /// Decision form target.
+    pub decide_action: String,
 }
 
 /// Archive reading and search for one list.
