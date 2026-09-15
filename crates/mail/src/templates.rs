@@ -14,7 +14,9 @@ pub const MAX_BODY_BYTES: usize = 65_536;
 /// The Mailman names come from `docs/PLAN.md` §4.9; `list:user:notice:help`
 /// and `list:user:notice:receipt` are listmngr additions for the email-command
 /// help reply and the confirmation completion receipt, which Mailman
-/// generates in code.
+/// generates in code. The `site:user:action:*` names are listmngr additions
+/// for mail the site sends to a person outside any list — Mailman leaves
+/// address verification and password reset to Django.
 pub const NAMES: &[&str] = &[
     "domain:admin:notice:new-list",
     "list:admin:action:post",
@@ -49,6 +51,8 @@ pub const NAMES: &[&str] = &[
     "list:user:notice:rejected",
     "list:user:notice:warning",
     "list:user:notice:welcome",
+    "site:user:action:reset",
+    "site:user:action:verify",
 ];
 
 #[must_use]
@@ -338,6 +342,41 @@ pub fn builtin(name: &str) -> Option<&'static str> {
              with the word 'help' in the subject or body (don't include the\n\
              quotes), and you will get back a message with instructions.\n"
         }
+        "site:user:action:verify" => {
+            "Email Address Verification\n\
+             \n\
+             Hello, this is the mailing list server at $domain.\n\
+             \n\
+             Someone, most likely you, asked $site_name to verify that\n\
+             \n    $user_email\n\
+             \n\
+             is your email address. To confirm, open\n\
+             \n    $verify_url\n\
+             \n\
+             and enter this token:\n\
+             \n    $token\n\
+             \n\
+             The token works once and expires. If you did not ask for this, you\n\
+             can ignore this message; nothing changes until the token is used.\n"
+        }
+        "site:user:action:reset" => {
+            "Password Reset\n\
+             \n\
+             Hello, this is the mailing list server at $domain.\n\
+             \n\
+             Someone, most likely you, asked $site_name to reset the password of\n\
+             the account for\n\
+             \n    $user_email\n\
+             \n\
+             To choose a new password, open\n\
+             \n    $reset_url\n\
+             \n\
+             and enter this token:\n\
+             \n    $token\n\
+             \n\
+             The token works once and expires. If you did not ask for this, you\n\
+             can ignore this message; your password stays as it is.\n"
+        }
         _ => return None,
     })
 }
@@ -397,6 +436,15 @@ impl Placeholders {
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&str> {
         self.0.get(name).map(String::as_str)
+    }
+
+    /// `defaults` for every name this set does not already carry.
+    #[must_use]
+    pub fn with_defaults(mut self, defaults: Self) -> Self {
+        for (name, value) in defaults.0 {
+            self.0.entry(name).or_insert(value);
+        }
+        self
     }
 }
 

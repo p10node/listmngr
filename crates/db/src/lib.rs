@@ -28,6 +28,7 @@ pub mod web_sessions;
 pub use web_session_inventory::SessionSummary;
 pub mod web_profile;
 pub use web_profile::Profile;
+pub mod site_notices;
 pub mod workflows;
 
 use std::{
@@ -108,6 +109,11 @@ pub struct Database {
     bounce_probes: Option<i64>,
     /// `[mta] verp_format` / `verp_delimiter`, for the probe's own sender.
     verp_format: String,
+    /// `site.name`, for mail the site sends outside any list.
+    site_name: String,
+    /// `site.site_owner`: the `From:` of mail the site sends outside any list,
+    /// and the domain such mail is signed for.
+    site_owner: String,
 }
 
 impl Database {
@@ -145,6 +151,8 @@ impl Database {
             base_url: String::new(),
             bounce_probes: None,
             verp_format: listmngr_core::verp::DEFAULT_FORMAT.into(),
+            site_name: "Example Lists".into(),
+            site_owner: "postmaster@example.com".into(),
         })
     }
     /// Carry `[mailman] bounce_probes` / `bounce_probe_lifetime_secs` and the
@@ -192,6 +200,29 @@ impl Database {
     #[must_use]
     pub fn base_url(&self) -> Option<&str> {
         (!self.base_url.is_empty()).then_some(self.base_url.as_str())
+    }
+    /// Carry `site.name` and `site.site_owner` for mail the site sends
+    /// outside any list. The defaults mirror the configuration defaults.
+    #[must_use]
+    pub fn with_site(mut self, name: &str, owner: &str) -> Self {
+        name.trim().clone_into(&mut self.site_name);
+        owner.trim().clone_into(&mut self.site_owner);
+        self
+    }
+    /// The site name notices show.
+    #[must_use]
+    pub fn site_name(&self) -> &str {
+        &self.site_name
+    }
+    /// The site owner address notices are sent from.
+    #[must_use]
+    pub fn site_owner(&self) -> &str {
+        &self.site_owner
+    }
+    /// Producer of mail the site sends to a person outside any list.
+    #[must_use]
+    pub const fn site_notices(&self) -> site_notices::SiteNoticeRepo<'_> {
+        site_notices::SiteNoticeRepo { db: self }
     }
     /// # Errors
     ///
