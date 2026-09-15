@@ -1,5 +1,31 @@
 # Architecture
 
+## OpenID Connect sign-in — bounded local acceptance verified
+
+`crates/api/src/oidc.rs` is the relying-party client: discovery cached per
+provider, Authorization Code with PKCE (S256), `state` and `nonce` minted per
+ceremony, the token exchange with `client_secret_post` and the code verifier,
+and ID-token verification against the provider's JWKS (RS256 through `rsa`,
+ES256 through `p256`; one key refresh on an unknown `kid`) for issuer,
+audience, `exp`, `iat` and a constant-time nonce comparison. It is stateless:
+the ceremony a browser is in the middle of is JSON on
+`web_sessions.oidc_state` (migration `0047`), parked by
+`browser_oidc_park` and taken-and-cleared by `browser_oidc_take`, so a
+callback answers one ceremony once and a stray or replayed callback is a 400.
+`crates/db/src/web_oidc.rs` resolves a verified identity in one transaction:
+the account linked to `(provider, subject)` in `user_oidc`; else, for a
+verified email only, the account owning that verified address (linked on the
+spot) or a just-in-time account whose credential row holds a random Argon2
+hash and `user_credentials.usable = 0` (set back to 1 by a reset or password
+change). Like the password, a provider sign-in is half a login for an account
+with TOTP enrolled (`LoginOutcome::SecondFactor`), and it audits `web.login`
+or `web.login.password` with `method: oidc`. Linking runs the same ceremony
+with purpose `link` from a CSRF-protected POST; unlinking re-verifies the
+password when the account has a usable one and refuses the last way in
+(no usable password, no passkey, no other link). Tests run a mock provider
+(`crates/api/tests/webui/mock_oidc.rs`) on a loopback port that checks the
+PKCE challenge and client secret and signs ES256 ID tokens.
+
 ## Passkeys — bounded local acceptance verified
 
 `crates/db/src/web_passkeys.rs` drives `webauthn_rp` 0.3 (pure Rust, no

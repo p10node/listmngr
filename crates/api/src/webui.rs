@@ -19,6 +19,8 @@ mod admin;
 mod archive;
 #[path = "webui_membership.rs"]
 mod membership;
+#[path = "webui_oidc.rs"]
+mod oidc;
 #[path = "webui_passkeys.rs"]
 mod passkeys;
 #[path = "webui_password.rs"]
@@ -154,6 +156,8 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/web/login", get(login_form).post(login))
         .route("/web/login/totp", get(totp::login_form).post(totp::login))
+        .route("/web/login/oidc/{name}", get(oidc::start))
+        .route("/web/login/oidc/{name}/callback", get(oidc::callback))
         .route("/web/login/passkey/start", post(passkeys::login_start))
         .route(
             "/web/login/passkey/finish",
@@ -203,6 +207,9 @@ pub fn routes() -> Router<AppState> {
 /// addresses, tokens, sessions, password and deletion.
 fn account_routes() -> Router<AppState> {
     Router::new()
+        .route("/web/account/oidc", get(oidc::index))
+        .route("/web/account/oidc/{name}/link", post(oidc::link))
+        .route("/web/account/oidc/{name}/unlink", post(oidc::unlink))
         .route("/web/account/passkeys", get(passkeys::index))
         .route(
             "/web/account/passkeys/register/start",
@@ -477,6 +484,7 @@ async fn login_form(State(s): State<AppState>, h: HeaderMap) -> ApiResult<Respon
         .with_scripts(),
         csrf: session.csrf.clone(),
         signup: s.config.web.signup,
+        providers: oidc::offered(&s),
     }));
     set_cookie(&s, &session, &mut r)?;
     Ok(r)

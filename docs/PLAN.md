@@ -38,8 +38,9 @@ PostgreSQL PASS", R1/O1 OPEN) đã bị vượt qua; nội dung cũ giữ trong 
   chuyển sang askama trong P4-SHELL: một đường render duy nhất, shell i18n
   (`Accept-Language` → `site.default_language` → `en`), design tokens + dark
   mode, a11y baseline (axe không critical/serious), htmx 2.0.10 vendored phục vụ
-  từ chính origin nhưng chưa trang nào nạp. Chưa có accounts/2FA/OIDC, chưa CSP
-  nonce (chưa cần vì chưa có script). Xem §7.0 và Phase 4.
+  từ chính origin nhưng chưa trang nào nạp. Accounts (P4-ACCOUNT-*), TOTP,
+  passkeys (`passkeys.js` là script first-party duy nhất, `script-src 'self'`)
+  và OIDC đã đóng; chưa CSP nonce (chưa cần). Xem §7.0 và Phase 4.
 - Phase 5: threading + Message-ID-Hash tương thích HyperKitty + archive đọc cơ
   bản (P2-ARCHIVE-AUTHORITY). Chưa có search/UI đầy đủ.
 
@@ -55,8 +56,8 @@ trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
 (38 tests, PostgreSQL 14.24 dùng một lần rồi drop). Ledger đã cập nhật.
 
 Chưa có: bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE), toàn bộ
-Phase 4–7 trừ các lát nêu trên (P4-SHELL, toàn bộ P4-ACCOUNT-*, P4-TOTP và
-P4-WEBAUTHN đã đóng; kế tiếp là P4-OIDC). Chi tiết và thứ tự ở §7.
+Phase 4–7 trừ các lát nêu trên (P4-SHELL, toàn bộ P4-ACCOUNT-*, P4-TOTP,
+P4-WEBAUTHN, P4-OIDC đã đóng; kế tiếp là P4-LIST-SETTINGS). Chi tiết và thứ tự ở §7.
 
 ## 0. Tóm tắt 1 phút
 
@@ -915,7 +916,7 @@ Work packages, theo thứ tự; mỗi ID một nhánh:
 | ~~P4-ACCOUNT-DELETE~~ (xong) | S | xoá tài khoản (gốc erase cho P4-GDPR): xác nhận lại mật khẩu; membership/address/token/credential/session/domain-owner xoá cùng transaction; chủ máy chủ cuối cùng bị từ chối                                                                             | ĐẠT: `crates/api/tests/webui/delete_account.rs` + contract PostgreSQL; mỗi membership một audit `member.delete` |
 | ~~P4-TOTP~~ (xong)   | S      | TOTP (RFC 6238, drift ±1, mỗi mã một lần) + 10 recovery code băm; QR SVG server-side; `require_2fa_for = ["server_owner"]` chặn trang quản trị/kiểm duyệt/mint token đến khi enrol                                                                                                        | ĐẠT: `crates/api/tests/webui/totp.rs` + contract PostgreSQL; Chromium enrol → login 2 bước → recovery code |
 | ~~P4-WEBAUTHN~~ (xong) | M    | passkeys (`webauthn_rp` thuần Rust — không OpenSSL, giữ build musl), đăng ký/xoá key, đăng nhập không mật khẩu; passkey = yếu tố thứ hai; script first-party duy nhất `passkeys.js` dưới `script-src 'self'`                                                                        | ĐẠT: `crates/api/tests/webui/passkeys.rs` với soft authenticator ES256 + contract PostgreSQL; Chromium CDP virtual authenticator |
-| P4-OIDC              | M      | OIDC generic + presets Google/GitHub; link/unlink; JIT account với email đã verify                                                                                                                                                                                                                | mock OIDC provider trong test                                                                   |
+| ~~P4-OIDC~~ (xong)   | M      | OIDC generic (Google chạy qua discovery chuẩn; GitHub chỉ OAuth2 → không hỗ trợ); Authorization Code + PKCE S256, `state`/`nonce`, ID token verify RS256/ES256 qua JWKS; link/unlink dưới account (unlink cần mật khẩu, từ chối lối vào cuối); JIT account chỉ khi `email_verified`, mật khẩu ngẫu nhiên `usable=0`; login qua provider vẫn qua bước TOTP nếu đã bật | ĐẠT: `crates/api/tests/webui/oidc.rs` với mock provider (`mock_oidc.rs`) + contract PostgreSQL |
 | P4-LIST-SETTINGS     | L      | 9 nhóm §4.1 theo form, validate inline phía server, diff preview + audit; header filters CRUD/thứ tự/regex test; bans list + site; templates editor + preview + placeholders help + language; digest; archivers; delete list (confirm + archive policy)                                           | mỗi nhóm round-trip UI = REST cùng handler                                                      |
 | P4-MEMBERS           | L      | rosters 4 role, search/paginate (htmx partial + fallback), per-member options (moderation_action, delivery, preferences), mass subscribe (textarea/file, pre_*/invite/welcome), mass removal, export CSV, bounce info + re-enable                                                                 | no-JS fallback test cho mọi partial                                                             |
 | P4-HELD-QUEUE        | M      | held list + preview (rendered + raw), bulk accept/reject/discard/defer, reject reason, forward (cần P2-HELD-FORWARD), "moderate sender", "ban sender", "add header match", keyboard shortcuts; subscription/unsubscription requests                                                               | e2e post → held → moderate                                                                      |
