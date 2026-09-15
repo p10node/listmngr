@@ -78,6 +78,8 @@ cargo test --locked -p listmngr-api --test webui \
   addresses::postgres_addresses_contract -- --ignored --exact
 cargo test --locked -p listmngr-api --test webui \
   tokens::postgres_tokens_contract -- --ignored --exact
+cargo test --locked -p listmngr-api --test webui \
+  delete_account::postgres_delete_account_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::dsn_issuance_tests::dsn_issuance_postgres -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \

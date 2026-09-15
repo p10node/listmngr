@@ -48,9 +48,9 @@ pub use pages::{
     Preferences, Recover, SelectField, Settings, Subscription, Unsubscribe, Unsubscribed,
 };
 pub use pages::{
-    AddressRow, Addresses, ApiDocs, ArchiveCompat, ArchiveCompatEntry, DocOperation, DocPath,
-    ProfilePage, ResetConfirm, ResetDone, ResetRequest, SessionRow, Sessions, SignupPage,
-    TokenIssued, TokenRow, Tokens, Verified, VerifyForm,
+    AccountDeleted, AddressRow, Addresses, ApiDocs, ArchiveCompat, ArchiveCompatEntry,
+    DeleteAccount, DocOperation, DocPath, ProfilePage, ResetConfirm, ResetDone, ResetRequest,
+    SessionRow, Sessions, SignupPage, TokenIssued, TokenRow, Tokens, Verified, VerifyForm,
 };
 
 /// The stylesheet, served from this origin with the design tokens the shell and
