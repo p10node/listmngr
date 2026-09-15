@@ -193,8 +193,11 @@ impl Database {
         if !policy_requires(&mut tx, user, required_roles).await? {
             return Ok(false);
         }
+        // A confirmed one-time password or a passkey (verified on the
+        // authenticator) is a second factor.
         let enrolled: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_totp WHERE user_id=$1 AND confirmed_at IS NOT NULL",
+            "SELECT (SELECT COUNT(*) FROM user_totp WHERE user_id=$1 AND confirmed_at IS NOT NULL)
+                  + (SELECT COUNT(*) FROM user_passkeys WHERE user_id=$1)",
         )
         .bind(user.to_string())
         .fetch_one(&mut *tx)

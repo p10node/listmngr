@@ -19,6 +19,8 @@ mod admin;
 mod archive;
 #[path = "webui_membership.rs"]
 mod membership;
+#[path = "webui_passkeys.rs"]
+mod passkeys;
 #[path = "webui_password.rs"]
 mod password;
 #[path = "webui_recovery.rs"]
@@ -57,6 +59,19 @@ use serde::Deserialize;
 /// way `write!` into a `String` fails.
 fn html<T: Template>(template: &T) -> Response {
     Html(template.render().expect("template renders")).into_response()
+}
+
+/// A page that loads the first-party passkey script: the middleware's default
+/// CSP allows no script at all, so this one allows `'self'` scripts and the
+/// same-origin fetches the ceremonies make.
+fn scripted(mut response: Response) -> Response {
+    response.headers_mut().insert(
+        axum::http::HeaderName::from_static("content-security-policy"),
+        axum::http::HeaderValue::from_static(
+            "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        ),
+    );
+    response
 }
 
 /// The reader's language: their browser's ordered preferences, then the site
@@ -120,6 +135,15 @@ pub fn routes() -> Router<AppState> {
             }),
         )
         .route(
+            "/web/passkeys.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    listmngr_web::PASSKEYS_SCRIPT,
+                )
+            }),
+        )
+        .route(
             "/web/htmx.min.js",
             get(|| async {
                 (
@@ -130,6 +154,11 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/web/login", get(login_form).post(login))
         .route("/web/login/totp", get(totp::login_form).post(totp::login))
+        .route("/web/login/passkey/start", post(passkeys::login_start))
+        .route(
+            "/web/login/passkey/finish",
+            post(passkeys::login_finish).layer(DefaultBodyLimit::max(65_536)),
+        )
         .merge(account_routes())
         .route("/web/signup", get(signup::form).post(signup::create))
         .route("/web/verify", get(signup::verify_form).post(signup::verify))
@@ -174,6 +203,16 @@ pub fn routes() -> Router<AppState> {
 /// addresses, tokens, sessions, password and deletion.
 fn account_routes() -> Router<AppState> {
     Router::new()
+        .route("/web/account/passkeys", get(passkeys::index))
+        .route(
+            "/web/account/passkeys/register/start",
+            post(passkeys::register_start),
+        )
+        .route(
+            "/web/account/passkeys/register/finish",
+            post(passkeys::register_finish).layer(DefaultBodyLimit::max(65_536)),
+        )
+        .route("/web/account/passkeys/{id}/remove", post(passkeys::remove))
         .route("/web/account/totp", get(totp::status))
         .route("/web/account/totp/confirm", post(totp::confirm))
         .route("/web/account/totp/recovery", post(totp::recovery))
@@ -290,13 +329,20 @@ async fn security_headers(request: Request, next: Next) -> Response {
         ("referrer-policy", "strict-origin"),
         ("x-content-type-options", "nosniff"),
         ("x-frame-options", "DENY"),
-        (
-            "content-security-policy",
-            "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-        ),
     ] {
         r.headers_mut()
             .insert(axum::http::HeaderName::from_static(k), v.parse().unwrap());
+    }
+    // A page that loads the first-party script sets its own, wider policy
+    // (`scripted`); everything else forbids scripts entirely.
+    let csp = axum::http::HeaderName::from_static("content-security-policy");
+    if !r.headers().contains_key(&csp) {
+        r.headers_mut().insert(
+            csp,
+            axum::http::HeaderValue::from_static(
+                "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+            ),
+        );
     }
     r
 }
@@ -422,15 +468,16 @@ async fn write_session(s: &AppState, h: &HeaderMap, csrf: &str) -> ApiResult<Web
 }
 async fn login_form(State(s): State<AppState>, h: HeaderMap) -> ApiResult<Response> {
     let session = anonymous(&s, &h).await?;
-    let mut r = html(&listmngr_web::Login {
+    let mut r = scripted(html(&listmngr_web::Login {
         shell: Shell::new(
             reader_language(&s, &h, &session).await?,
             "web-title-login",
             Nav::Login,
-        ),
+        )
+        .with_scripts(),
         csrf: session.csrf.clone(),
         signup: s.config.web.signup,
-    });
+    }));
     set_cookie(&s, &session, &mut r)?;
     Ok(r)
 }

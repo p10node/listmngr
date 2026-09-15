@@ -1,7 +1,12 @@
 [advisories]
 yanked = "deny"
 unmaintained = "workspace"
-ignore = []
+# RUSTSEC-2023-0071 (Marvin attack, `rsa`): a timing side channel in RSA
+# *private-key* operations. The only `rsa` use in this tree is `webauthn_rp`
+# verifying RS256 passkey signatures with the credential's *public* key; no
+# RSA private key exists in listmngr. The same id is ignored in the
+# `cargo audit` gate (CLAUDE.md). Re-evaluate when `rsa` publishes a fix.
+ignore = [{ id = "RUSTSEC-2023-0071", reason = "public-key signature verification only (webauthn_rp); no RSA private-key operation in listmngr" }]
 
 [licenses]
 allow = [
