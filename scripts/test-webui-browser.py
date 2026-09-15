@@ -65,6 +65,23 @@ with sync_playwright() as p:
     # Screenshots must not carry live recovery codes into the evidence folder.
     page.evaluate("document.querySelectorAll('li code').forEach(c => c.textContent = 'redacted')")
     page.screenshot(path=str(out / '21-totp-recovery-codes.png'), full_page=True)
+    # P4-WEBAUTHN: a virtual authenticator (CDP) stands in for the device; the
+    # page's own script runs the ceremony and the key is listed afterwards.
+    cdp = context.new_cdp_session(page)
+    cdp.send('WebAuthn.enable')
+    virtual = cdp.send('WebAuthn.addVirtualAuthenticator', {'options': {
+        'protocol': 'ctap2', 'transport': 'internal', 'hasResidentKey': True,
+        'hasUserVerification': True, 'isUserVerified': True, 'automaticPresenceSimulation': True,
+    }})['authenticatorId']
+    page.goto(base + '/web/account/passkeys')
+    expect(page.get_by_role('heading', name='Passkeys', exact=True)).to_be_visible()
+    assert page.locator('script[src="/web/passkeys.js"]').count() == 1, 'the one first-party script'
+    page.get_by_label('Name for this passkey', exact=True).fill('Virtual authenticator')
+    page.get_by_role('button', name='Add a passkey', exact=True).click()
+    expect(page.get_by_role('heading', name='Virtual authenticator', exact=True)).to_be_visible()
+    stored = cdp.send('WebAuthn.getCredentials', {'authenticatorId': virtual})['credentials']
+    assert len(stored) == 1 and stored[0]['isResidentCredential'], stored
+    page.screenshot(path=str(out / '22-passkeys.png'), full_page=True)
     page.goto(base + '/web/account')
     page.get_by_role('link', name='List administration', exact=True).click()
     expect(page.get_by_role('heading', name='List administration', exact=True)).to_be_visible()
@@ -312,6 +329,21 @@ with sync_playwright() as p:
     page.get_by_role('button', name='Log out', exact=True).click()
     expect(page.get_by_role('heading', name='Mailing lists')).to_be_visible()
     assert not any(c['name'] == 'listmngr_session' for c in context.cookies())
+    # P4-WEBAUTHN: a passwordless login with the passkey, then its removal.
+    page.goto(base + '/web/login')
+    page.get_by_role('button', name='Sign in with a passkey', exact=True).click()
+    expect(page.get_by_role('heading', name='My subscriptions', exact=True)).to_be_visible()
+    page.goto(base + '/web/admin')
+    expect(page.get_by_role('heading', name='List administration', exact=True)).to_be_visible()
+    page.goto(base + '/web/account/passkeys')
+    page.get_by_label('Your password', exact=True).fill('new strong password phrase 2026!')
+    page.get_by_role('button', name='Remove passkey', exact=True).click()
+    expect(page.locator('main')).to_contain_text('You have no passkeys.')
+    cdp.send('WebAuthn.removeVirtualAuthenticator', {'authenticatorId': virtual})
+    page.goto(base + '/web/account')
+    page.get_by_role('button', name='Log out', exact=True).click()
+    expect(page.get_by_role('heading', name='Mailing lists')).to_be_visible()
+    assert not any(c['name'] == 'listmngr_session' for c in context.cookies())
     denied_archive = context.request.get(base + '/web/lists/private.example.com/archive?message=private-browser-archive&format=mbox')
     assert denied_archive.status == 403
     assert 'Private archived body' not in denied_archive.text()
@@ -447,6 +479,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials.')
     context.close()
     browser.close()

@@ -1849,6 +1849,19 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   a server owner who has not enrolled out of list administration, moderation
   and token minting until they do; the account page says so. Only
   `"server_owner"` is an accepted value.
+- `/web/account/passkeys`: WebAuthn passkeys. Registration asks the
+  authenticator for a discoverable credential with user verification; the
+  public key and signature counter are stored in `webauthn_rp`'s binary
+  encoding, the ceremony a browser is in the middle of lives on its session,
+  and a response for another origin or a stale challenge is refused. "Sign in
+  with a passkey" on the login page is passwordless and needs no further
+  step — user verification on the device is the second factor — so a passkey
+  also satisfies `security.require_2fa_for`. Removal needs the password. These
+  two pages are the only ones that load a script: `/web/passkeys.js`,
+  first-party, with a CSP of `script-src 'self'; connect-src 'self'`; every
+  form still works without it, and the button is hidden until it runs. The
+  relying-party id is the host of `site.base_url`, which must therefore be a
+  domain name (`localhost` works for development), not an IP address.
 - `/web/account/delete`: delete the account after entering the password
   again. One audited transaction ends every membership held by the account or
   any of its addresses (each with its own `member.delete` audit event, so list

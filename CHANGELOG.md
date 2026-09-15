@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- Passkeys (`P4-WEBAUTHN`): register WebAuthn credentials under the account, sign in with one alone, remove with the password; a passkey counts as the second factor. First-party `passkeys.js` on the two pages that offer them, under `script-src 'self'`.
 - Two-step sign-in with TOTP and recovery codes (`P4-TOTP`): enrolment with an inline QR code, a second login step, replay and brute-force limits, and the `security.require_2fa_for` policy that keeps server owners out of privileged pages until they enrol. `security.rate_limit.login` is now honoured instead of a fixed five per minute.
 - `/web/account/delete`: self-service account deletion confirmed with the password — memberships, addresses, tokens, credential and sessions go in one audited transaction; the last server owner is refused (`P4-ACCOUNT-DELETE`).
 - `/web/account/tokens`: mint, list and revoke API tokens within the reader's authority — list owners bind list-level scopes to their lists, server owners mint unbound ones — with the secret shown once (`P4-ACCOUNT-TOKENS`).
@@ -33,6 +34,7 @@
 - CLI member find/delete validate normalized IDNA addresses; adapter validation and missing-resource errors retain their stable exit categories.
 
 ### Security
+- `deny.toml` ignores RUSTSEC-2023-0071 (`rsa` Marvin attack) with the recorded reason: the only `rsa` use is public-key signature verification of RS256 passkeys; no RSA private key exists in listmngr.
 - `/api/docs` no longer loads Swagger UI from a CDN (`P1-API-DOCS-ORIGIN`). The API reference is rendered from this server's own OpenAPI document, contains no script, and carries the strict browser CSP; `/openapi.json` still serves any external explorer.
 - htmx 2.0.10 is vendored (0BSD) and served from this origin with its SHA-384 pinned by a test; no browser page loads a third-party asset, and pages keep `default-src 'none'` with no script element.
 - `rustls` moved to 0.23.45 in the lockfile for RUSTSEC-2026-0285 (TLS 1.3 handshake messages accepted across encryption-level boundaries).

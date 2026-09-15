@@ -17,4 +17,5 @@ To update: fetch the new version, record its hash here and in
 `listmngr_web::HTMX_SHA384`, and re-run the gates.
 
 `style.css` is first-party and ships the design tokens both colour schemes
-bind.
+bind. `passkeys.js` is first-party too: the WebAuthn ceremonies, the only
+script any page loads, and only on the pages that offer passkeys.

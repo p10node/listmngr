@@ -735,3 +735,28 @@ pub struct LoginTotp {
     /// Session CSRF token.
     pub csrf: String,
 }
+
+/// The reader's passkeys and the form that registers one.
+#[derive(Debug, Template)]
+#[template(path = "passkeys.html")]
+pub struct Passkeys {
+    /// Document shell, with the script.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Registered passkeys, oldest first.
+    pub passkeys: Vec<PasskeyRow>,
+}
+
+/// One listed passkey.
+#[derive(Debug)]
+pub struct PasskeyRow {
+    /// Row id for the removal form.
+    pub id: String,
+    /// Name.
+    pub name: String,
+    /// Registration time, already formatted.
+    pub created: String,
+    /// Last use, already worded.
+    pub last_used: String,
+}

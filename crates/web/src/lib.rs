@@ -52,7 +52,7 @@ pub use pages::{
     DeleteAccount, DocOperation, DocPath, ProfilePage, ResetConfirm, ResetDone, ResetRequest,
     SessionRow, Sessions, SignupPage, TokenIssued, TokenRow, Tokens, Verified, VerifyForm,
 };
-pub use pages::{LoginTotp, TotpCodes, TotpPage};
+pub use pages::{LoginTotp, PasskeyRow, Passkeys, TotpCodes, TotpPage};
 
 /// The stylesheet, served from this origin with the design tokens the shell and
 /// every page share. Both colour schemes come from the same token names.
@@ -63,6 +63,11 @@ pub const STYLESHEET: &str = include_str!("../assets/style.css");
 /// `assets/README.md` records the exact provenance, license and hash. No page
 /// loads it until a work package needs progressive enhancement.
 pub const HTMX: &str = include_str!("../assets/htmx.min.js");
+
+/// The passkey ceremonies, first-party and served from this origin. It is the
+/// only script any page loads; pages that include it carry a CSP that allows
+/// `'self'` scripts and fetches.
+pub const PASSKEYS_SCRIPT: &str = include_str!("../assets/passkeys.js");
 
 /// SHA-384 of [`HTMX`], base64 as an `integrity` attribute spells it. A test
 /// pins this so a swapped asset fails the build gates rather than reaching a
@@ -147,6 +152,7 @@ pub struct Shell {
     language: &'static str,
     title: String,
     active: Nav,
+    scripts: bool,
 }
 
 impl Shell {
@@ -158,7 +164,22 @@ impl Shell {
             language,
             title: listmngr_i18n::message(language, title, &[]),
             active,
+            scripts: false,
         }
+    }
+
+    /// The page loads the first-party passkey script and needs a CSP that
+    /// allows it; every form on the page still works without it.
+    #[must_use]
+    pub const fn with_scripts(mut self) -> Self {
+        self.scripts = true;
+        self
+    }
+
+    /// Whether the page loads the first-party script.
+    #[must_use]
+    pub const fn scripts(&self) -> bool {
+        self.scripts
     }
 
     /// A shell whose title is data, such as a list's display name.
@@ -168,6 +189,7 @@ impl Shell {
             language: listmngr_i18n::negotiate(language),
             title,
             active,
+            scripts: false,
         }
     }
 
