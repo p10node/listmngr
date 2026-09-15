@@ -55,8 +55,8 @@ trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
 (38 tests, PostgreSQL 14.24 dùng một lần rồi drop). Ledger đã cập nhật.
 
 Chưa có: bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE), toàn bộ
-Phase 4–7 trừ các lát nêu trên (P4-SHELL và toàn bộ P4-ACCOUNT-* đã đóng; kế
-tiếp là P4-TOTP). Chi tiết và thứ tự ở §7.
+Phase 4–7 trừ các lát nêu trên (P4-SHELL, toàn bộ P4-ACCOUNT-* và P4-TOTP đã
+đóng; kế tiếp là P4-WEBAUTHN). Chi tiết và thứ tự ở §7.
 
 ## 0. Tóm tắt 1 phút
 
@@ -913,7 +913,7 @@ Work packages, theo thứ tự; mỗi ID một nhánh:
 | ~~P4-ACCOUNT-ADDRESSES~~ (xong) | M | addresses add/verify/primary/remove; gỡ = unlink + quên verified, giữ membership; địa chỉ của tài khoản khác → im lặng                                                                                                                                       | ĐẠT: `crates/api/tests/webui/addresses.rs` thêm → verify → primary → gỡ + contract PostgreSQL; Chromium |
 | ~~P4-ACCOUNT-TOKENS~~ (xong) | S | API token của user (tạo/liệt kê/thu hồi) trên UI; scope theo thẩm quyền: chủ list chỉ scope list gắn với list của mình, chủ máy chủ mọi scope không gắn                                                                                                  | ĐẠT: `crates/api/tests/webui/tokens.rs` + contract PostgreSQL; token chỉ hiện một lần; thu hồi tức thì; Chromium |
 | ~~P4-ACCOUNT-DELETE~~ (xong) | S | xoá tài khoản (gốc erase cho P4-GDPR): xác nhận lại mật khẩu; membership/address/token/credential/session/domain-owner xoá cùng transaction; chủ máy chủ cuối cùng bị từ chối                                                                             | ĐẠT: `crates/api/tests/webui/delete_account.rs` + contract PostgreSQL; mỗi membership một audit `member.delete` |
-| P4-TOTP              | S      | TOTP setup/verify + recovery codes; tuỳ chọn bắt buộc cho server owner                                                                                                                                                                                                                            | e2e enrol → login 2 bước → recovery code                                                        |
+| ~~P4-TOTP~~ (xong)   | S      | TOTP (RFC 6238, drift ±1, mỗi mã một lần) + 10 recovery code băm; QR SVG server-side; `require_2fa_for = ["server_owner"]` chặn trang quản trị/kiểm duyệt/mint token đến khi enrol                                                                                                        | ĐẠT: `crates/api/tests/webui/totp.rs` + contract PostgreSQL; Chromium enrol → login 2 bước → recovery code |
 | P4-WEBAUTHN          | M      | passkeys (webauthn-rs), đăng ký/xoá key, đăng nhập không mật khẩu                                                                                                                                                                                                                                 | Playwright virtual authenticator                                                                |
 | P4-OIDC              | M      | OIDC generic + presets Google/GitHub; link/unlink; JIT account với email đã verify                                                                                                                                                                                                                | mock OIDC provider trong test                                                                   |
 | P4-LIST-SETTINGS     | L      | 9 nhóm §4.1 theo form, validate inline phía server, diff preview + audit; header filters CRUD/thứ tự/regex test; bans list + site; templates editor + preview + placeholders help + language; digest; archivers; delete list (confirm + archive policy)                                           | mỗi nhóm round-trip UI = REST cùng handler                                                      |

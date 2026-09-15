@@ -32,6 +32,8 @@ mod subject_prefix;
 mod subject_prefix_controls;
 #[path = "webui/tokens.rs"]
 mod tokens;
+#[path = "webui/totp.rs"]
+mod totp;
 
 use axum::{
     body::{Body, to_bytes},
@@ -47,6 +49,17 @@ async fn fixture() -> (Database, axum::Router) {
     seeded_fixture(db).await
 }
 async fn seeded_fixture(db: Database) -> (Database, axum::Router) {
+    seeded_fixture_configured(db, |_| {}).await
+}
+/// The shared fixture: two lists on one domain, and a router whose
+/// production defaults of five password checks a minute and a mandatory
+/// second factor for server owners are switched off, because many flows sign
+/// in repeatedly and use privileged pages as a server owner; each default has
+/// its own test.
+async fn seeded_fixture_configured(
+    db: Database,
+    configure: impl FnOnce(&mut Config),
+) -> (Database, axum::Router) {
     db.domains().create("example.com", "", None).await.unwrap();
     for (name, advertised) in [("public", true), ("private", false)] {
         let id = format!("{name}.example.com").parse().unwrap();
@@ -70,8 +83,20 @@ async fn seeded_fixture(db: Database) -> (Database, axum::Router) {
     }
     let mut config = Config::default();
     config.site.base_url = "http://localhost".into();
+    config.security.rate_limit.login = "1000/min".into();
+    config.security.require_2fa_for = Vec::new();
+    configure(&mut config);
     let app = listmngr_api::router(db.clone(), config);
     (db, app)
+}
+/// The production login budget, for the tests that measure it.
+async fn strict_login_fixture() -> (Database, axum::Router) {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    seeded_fixture_configured(db, |config| {
+        config.security.rate_limit.login = "5/min".into();
+    })
+    .await
 }
 async fn call(app: &axum::Router, method: &str, path: &str, cookie: &str, body: &str) -> Response {
     app.clone()
@@ -1568,7 +1593,7 @@ async fn moderator_review_is_scoped_verified_escaped_and_has_real_queue_effects(
 
 #[tokio::test]
 async fn password_attempts_have_a_separate_small_global_budget() {
-    let (_, app) = fixture().await;
+    let (_, app) = strict_login_fixture().await;
     let (c, x) = session(&app).await;
     for _ in 0..5 {
         assert_eq!(
@@ -1687,7 +1712,7 @@ async fn origin_csrf_expiry_password_change_and_cookie_transport_are_enforced() 
 
 #[tokio::test]
 async fn rate_limit_html_preserves_retry_after() {
-    let (_, app) = fixture().await;
+    let (_, app) = strict_login_fixture().await;
     let (c, x) = session(&app).await;
     for _ in 0..5 {
         call(
@@ -1760,6 +1785,7 @@ async fn real_tcp_browser_self_service_and_moderation_smoke() {
     let address = listener.local_addr().unwrap();
     let mut config = Config::default();
     config.site.base_url = format!("http://{address}");
+    config.security.require_2fa_for = Vec::new();
     let app = listmngr_api::router(db.clone(), config);
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();

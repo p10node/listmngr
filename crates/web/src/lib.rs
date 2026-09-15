@@ -52,6 +52,7 @@ pub use pages::{
     DeleteAccount, DocOperation, DocPath, ProfilePage, ResetConfirm, ResetDone, ResetRequest,
     SessionRow, Sessions, SignupPage, TokenIssued, TokenRow, Tokens, Verified, VerifyForm,
 };
+pub use pages::{LoginTotp, TotpCodes, TotpPage};
 
 /// The stylesheet, served from this origin with the design tokens the shell and
 /// every page share. Both colour schemes come from the same token names.

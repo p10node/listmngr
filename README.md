@@ -1836,6 +1836,19 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   unbound. The secret is shown once, on the page that follows creation, and
   never stored. Revocation takes effect at once. Changing or resetting the
   password does not revoke tokens.
+- `/web/account/totp`: two-step sign-in with a time-based one-time password
+  (RFC 6238: SHA-1, six digits, 30-second steps, one step of drift either
+  way). Enrolment shows a base32 secret, an `otpauth://` URI and an inline QR
+  code rendered on the server; the first correct code confirms it and shows
+  ten single-use recovery codes once (stored as SHA-256 digests). Afterwards
+  the password alone yields a pending session that can do nothing but the
+  second step at `/web/login/totp`; the right code (each accepted once) or a
+  recovery code rotates it into a signed-in session, and five wrong codes end
+  it. Regenerating recovery codes and turning two-step sign-in off need the
+  password. `security.require_2fa_for = ["server_owner"]` (the default) keeps
+  a server owner who has not enrolled out of list administration, moderation
+  and token minting until they do; the account page says so. Only
+  `"server_owner"` is an accepted value.
 - `/web/account/delete`: delete the account after entering the password
   again. One audited transaction ends every membership held by the account or
   any of its addresses (each with its own `member.delete` audit event, so list
@@ -1860,6 +1873,11 @@ Upgrading past migration `0043` signs every browser out once: the migration
 deletes existing session rows rather than backfilling them with an id derived
 from a credential digest. Sessions are short-lived (eight hours authenticated),
 so this costs one login.
+
+`security.rate_limit.login` (default `5/min`) is now the bucket every browser
+password check draws from — login, password change, reset confirmation,
+deletion, and the second-factor management forms; it was previously fixed at
+five a minute regardless of configuration.
 
 Sessions use opaque random credentials, hashed storage, independent CSRF secrets,
 rotation at login, server-side logout revocation and password-version checks.

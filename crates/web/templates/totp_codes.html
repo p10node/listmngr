@@ -1,0 +1,2 @@
+{% extends "base.html" %}
+{% block content %}<p>{{ shell.t("web-totp-codes-intro") }}</p><ul>{% for code in codes %}<li><code>{{ code }}</code></li>{% endfor %}</ul><p>{{ shell.t("web-totp-codes-note") }}</p><p><a href="/web/account/totp">{{ shell.t("web-title-totp") }}</a></p>{% endblock %}

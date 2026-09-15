@@ -47,14 +47,17 @@ async fn seed(db: &Database) -> (listmngr_core::Member, WebSession) {
         .create_web_session(None, None, chrono::Utc::now().timestamp_millis())
         .await
         .unwrap();
-    let session = db
+    let listmngr_db::web_sessions::LoginOutcome::Complete(session) = db
         .browser_login(
             "own@recover.invalid",
             "a very secure fixture password",
             &anon,
         )
         .await
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("no second factor is enrolled")
+    };
     (m, session)
 }
 
