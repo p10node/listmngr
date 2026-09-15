@@ -9,6 +9,8 @@ mod account_addresses;
 mod account_profile;
 #[path = "webui_account_sessions.rs"]
 mod account_sessions;
+#[path = "webui_account_tokens.rs"]
+mod account_tokens;
 #[path = "webui_admin.rs"]
 mod admin;
 #[path = "webui_archive.rs"]
@@ -160,6 +162,14 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/web/account/addresses/{id}/remove",
             post(account_addresses::remove),
+        )
+        .route(
+            "/web/account/tokens",
+            get(account_tokens::index).post(account_tokens::create),
+        )
+        .route(
+            "/web/account/tokens/{id}/revoke",
+            post(account_tokens::revoke),
         )
         .route("/web/account/sessions", get(account_sessions::index))
         .route(
