@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>{{ title }}</title><link>{{ site }}</link><description>{{ title }}</description><lastBuildDate>{{ updated }}</lastBuildDate>{% for entry in entries %}<item><title>{{ entry.title }}</title><link>{{ entry.link }}</link><guid>{{ entry.link }}</guid><pubDate>{{ entry.date }}</pubDate><dc:creator>{{ entry.author }}</dc:creator><description>{{ entry.summary }}</description></item>{% endfor %}</channel></rss>

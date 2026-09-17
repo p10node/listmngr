@@ -1,6 +1,10 @@
 //! Archive browser with repository-owned session/membership authorization:
-//! the recent-posts list, one thread as a tree, one post with its stored
-//! attachments, the owner's reattach form, and the opt-in avatar proxy.
+//! the recent-posts list with the index's result count and highlights,
+//! one thread as a tree (marking it seen for a signed-in reader), one post
+//! with its stored attachments, the owner's reattach form, the opt-in
+//! avatar proxy, and the browsing pages: overview, thread lists by
+//! activity and month, sender pages keyed by an address digest, and the
+//! Atom and RSS feeds.
 use crate::{ApiError, ApiResult, AppState};
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -8,7 +12,10 @@ use axum::response::{IntoResponse, Redirect, Response};
 use listmngr_archive::render::{Addresses, Mode};
 use listmngr_archive::threading::{Node, order};
 use listmngr_core::{ArchiveRenderingMode, Error, ListId};
-use listmngr_web::{Nav, Shell};
+use listmngr_db::archive::ArchiveMessage;
+use listmngr_db::archive::browse::{Poster, ThreadSelection, ThreadSummary, month_bounds};
+use listmngr_db::web_sessions::WebSession;
+use listmngr_web::{ArchiveLinks, Nav, PosterRow, Shell, ThreadRow};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -40,6 +47,53 @@ pub(super) struct ArchiveQuery {
 const fn first_page() -> u32 {
     1
 }
+impl Default for ArchiveQuery {
+    fn default() -> Self {
+        Self {
+            page: 1,
+            q: String::new(),
+            thread: String::new(),
+            message: None,
+            attachment: None,
+            format: ArchiveFormat::Html,
+            saved: String::new(),
+        }
+    }
+}
+fn links(id: &ListId) -> ArchiveLinks {
+    let base = format!("/web/lists/{}/archive", id.as_str());
+    ArchiveLinks {
+        overview_href: format!("{base}/overview"),
+        threads_href: format!("{base}/threads"),
+        posts_href: base.clone(),
+        atom_href: format!("{base}/feed.atom"),
+        rss_href: format!("{base}/feed.rss"),
+    }
+}
+fn thread_link(id: &ListId, thread: &str) -> String {
+    format!("/web/lists/{}/archive/thread/{thread}", id.as_str())
+}
+fn sender_link(id: &ListId, email: &str) -> String {
+    format!(
+        "/web/lists/{}/archive/senders/{}",
+        id.as_str(),
+        digest(email)
+    )
+}
+/// The digest that names a sender's page and avatar, never the address.
+fn digest(email: &str) -> String {
+    use sha2::Digest as _;
+    format!(
+        "{:x}",
+        sha2::Sha256::digest(email.trim().to_ascii_lowercase())
+    )
+}
+fn when(date_ms: Option<i64>) -> String {
+    date_ms
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+        .map(|date| date.format("%Y-%m-%d %H:%M UTC").to_string())
+        .unwrap_or_default()
+}
 fn link(id: &ListId, q: &str, thread: &str, page: u32) -> ApiResult<String> {
     let encoded =
         serde_urlencoded::to_string([("q", q), ("thread", thread), ("page", &page.to_string())])
@@ -64,7 +118,34 @@ pub(super) async fn browse(
     Query(query): Query<ArchiveQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    let session = archive_session(&s, &headers).await?;
+    browse_with(&s, &id, &query, &headers, false).await
+}
+
+/// `GET /web/lists/{id}/archive/thread/{thread}`: one thread as a tree,
+/// at its canonical address; absent threads are not found.
+pub(super) async fn thread_page(
+    State(s): State<AppState>,
+    Path((id, thread)): Path<(ListId, String)>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    if thread.is_empty() || thread.len() > 200 {
+        return Err(Error::Validation("archive query bounds".into()).into());
+    }
+    let query = ArchiveQuery {
+        thread,
+        ..ArchiveQuery::default()
+    };
+    browse_with(&s, &id, &query, &headers, true).await
+}
+
+async fn browse_with(
+    s: &AppState,
+    id: &ListId,
+    query: &ArchiveQuery,
+    headers: &HeaderMap,
+    must_exist: bool,
+) -> ApiResult<Response> {
+    let session = archive_session(s, headers).await?;
     if query.attachment.is_some()
         && (query.message.is_none() || query.format != ArchiveFormat::Html)
     {
@@ -80,7 +161,10 @@ pub(super) async fn browse(
         && !query.thread.is_empty()
         && query.q.is_empty()
         && query.format == ArchiveFormat::Html;
-    let messages = select_messages(&s, &id, &query, session.as_ref(), tree).await?;
+    let (messages, total) = select_messages(s, id, query, session.as_ref(), tree).await?;
+    if must_exist && messages.is_empty() {
+        return Err(Error::NotFound("archive thread".into()).into());
+    }
     if let Some(index) = query.attachment {
         // The legacy MIME projection, kept for links made before attachments
         // were stored; new pages link the stored rows.
@@ -93,48 +177,89 @@ pub(super) async fn browse(
             raw,
         ));
     }
-    let language = match &session {
-        Some(session) => super::reader_language(&s, &headers, session).await?,
-        None => super::language(&s, &headers),
+    if tree && let Some(session) = &session {
+        s.db.archive()
+            .browser_mark_viewed(id, session, &query.thread, super::now())
+            .await?;
+    }
+    let viewer = viewer(s, id, headers, session.as_ref()).await?;
+    let view = View {
+        s,
+        id,
+        query,
+        viewer: &viewer,
+        tree,
+        terms: if total.is_some() {
+            listmngr_archive::render::terms(&query.q)
+        } else {
+            Vec::new()
+        },
     };
-    let reader = session.as_ref().and_then(|session| session.user_id);
+    render(&view, &messages, total)
+}
+
+/// What the reader's session decides for every archive page.
+struct Viewer {
+    language: &'static str,
+    addresses: Addresses,
+    mode: Mode,
+    owner: bool,
+    csrf: Option<String>,
+}
+
+async fn viewer(
+    s: &AppState,
+    id: &ListId,
+    headers: &HeaderMap,
+    session: Option<&WebSession>,
+) -> ApiResult<Viewer> {
+    let language = language_for(s, headers, session).await?;
+    let reader = session.and_then(|session| session.user_id);
     let addresses = if reader.is_some() {
         Addresses::Shown
     } else {
         Addresses::Obfuscated
     };
     let owner = match reader {
-        Some(_) => s.db.browser_standing(reader, &id).await?.administers(),
+        Some(_) => s.db.browser_standing(reader, id).await?.administers(),
         None => false,
     };
-    let list = s.db.lists().get(&id).await?;
+    let list = s.db.lists().get(id).await?;
     let mode = match list.archive_rendering_mode {
         ArchiveRenderingMode::Markdown => Mode::Markdown,
         ArchiveRenderingMode::Text => Mode::Text,
     };
-    let view = View {
-        s: &s,
-        id: &id,
-        query: &query,
+    Ok(Viewer {
         language,
         addresses,
         mode,
         owner,
-        tree,
-        csrf: session.as_ref().map(|session| session.csrf.clone()),
-    };
-    render(&view, &messages)
+        csrf: session.map(|session| session.csrf.clone()),
+    })
+}
+
+async fn language_for(
+    s: &AppState,
+    headers: &HeaderMap,
+    session: Option<&WebSession>,
+) -> ApiResult<&'static str> {
+    Ok(match session {
+        Some(session) => super::reader_language(s, headers, session).await?,
+        None => super::language(s, headers),
+    })
 }
 
 /// The posts a page shows: one by permalink, one thread as a tree, a page
-/// of search hits from the index, or a page from the database.
+/// of search hits from the index (with the index's count of all matches),
+/// or a page from the database.
 async fn select_messages(
     s: &AppState,
     id: &ListId,
     query: &ArchiveQuery,
-    session: Option<&listmngr_db::web_sessions::WebSession>,
+    session: Option<&WebSession>,
     tree: bool,
-) -> ApiResult<Vec<listmngr_db::archive::ArchiveMessage>> {
+) -> ApiResult<(Vec<ArchiveMessage>, Option<usize>)> {
+    let mut total = None;
     let messages = if let Some(hash) = &query.message {
         if query.page != 1 || !query.q.is_empty() || !query.thread.is_empty() {
             return Err(Error::Validation(
@@ -166,6 +291,7 @@ async fn select_messages(
             limit: 21,
             offset: usize::try_from(query.page - 1).unwrap_or(0) * 20,
         })?;
+        total = Some(results.total);
         let mut messages = Vec::with_capacity(results.hits.len());
         for hit in results.hits {
             match s
@@ -196,7 +322,7 @@ async fn select_messages(
             )
             .await?
     };
-    Ok(messages)
+    Ok((messages, total))
 }
 
 /// What one page render needs.
@@ -204,12 +330,10 @@ struct View<'a> {
     s: &'a AppState,
     id: &'a ListId,
     query: &'a ArchiveQuery,
-    language: &'static str,
-    addresses: Addresses,
-    mode: Mode,
-    owner: bool,
+    viewer: &'a Viewer,
     tree: bool,
-    csrf: Option<String>,
+    /// The search words to mark, when the index answered.
+    terms: Vec<String>,
 }
 
 fn download(content_type: &str, filename: &str, bytes: Vec<u8>) -> Response {
@@ -256,10 +380,7 @@ fn safe_content_type(declared: &str) -> &str {
 
 /// The posts of a page in display order with their depths: the tree
 /// order for a thread view, the stored order (all roots) otherwise.
-fn placement(
-    tree: bool,
-    messages: &[listmngr_db::archive::ArchiveMessage],
-) -> Vec<listmngr_archive::threading::Placed> {
+fn placement(tree: bool, messages: &[ArchiveMessage]) -> Vec<listmngr_archive::threading::Placed> {
     if tree {
         return order(
             &messages
@@ -285,10 +406,10 @@ fn placement(
 /// One post as the page shows it.
 fn message_view(
     view: &View<'_>,
-    message: &listmngr_db::archive::ArchiveMessage,
+    message: &ArchiveMessage,
     depth: usize,
 ) -> ApiResult<listmngr_web::ArchiveMessage> {
-    let (id, language) = (view.id, view.language);
+    let (id, language) = (view.id, view.viewer.language);
     let quoted = |count: usize| {
         listmngr_i18n::message(
             language,
@@ -297,36 +418,36 @@ fn message_view(
         )
     };
     let (attachments, unavailable) = attachments(id, message, language)?;
-    let avatar = view.s.config.archive.gravatar.then(|| {
-        use sha2::Digest as _;
-        let digest = sha2::Sha256::digest(message.sender_email.trim().to_ascii_lowercase());
-        format!("/web/gravatar/{digest:x}")
-    });
+    let avatar = view
+        .s
+        .config
+        .archive
+        .gravatar
+        .then(|| format!("/web/gravatar/{}", digest(&message.sender_email)));
+    let addresses = view.viewer.addresses;
+    let body_html =
+        listmngr_archive::render::body_html(&message.body, view.viewer.mode, addresses, &quoted);
     Ok(listmngr_web::ArchiveMessage {
         hash: message.hash.clone(),
         subject: message.subject.clone(),
+        subject_html: listmngr_archive::render::highlight(
+            &listmngr_archive::render::escape(&message.subject),
+            &view.terms,
+        ),
         thread_href: link(id, "", &message.thread, 1)?,
+        sender_href: sender_link(id, &message.sender_email),
         permalink: message_link(id, &message.hash)?,
         sender: message.sender_name.clone(),
-        sender_email: listmngr_archive::render::sender_email(&message.sender_email, view.addresses),
+        sender_email: listmngr_archive::render::sender_email(&message.sender_email, addresses),
         avatar,
-        date: message
-            .date_ms
-            .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
-            .map(|date| date.format("%Y-%m-%d %H:%M UTC").to_string())
-            .unwrap_or_default(),
+        date: when(message.date_ms),
         in_reply_to: message
             .parent
             .as_ref()
             .map(|parent| message_link(id, parent))
             .transpose()?,
         depth: depth.min(8),
-        body_html: listmngr_archive::render::body_html(
-            &message.body,
-            view.mode,
-            view.addresses,
-            &quoted,
-        ),
+        body_html: listmngr_archive::render::highlight(&body_html, &view.terms),
         attachments,
         attachments_unavailable: unavailable,
     })
@@ -334,9 +455,10 @@ fn message_view(
 
 fn render(
     view: &View<'_>,
-    messages: &[listmngr_db::archive::ArchiveMessage],
+    messages: &[ArchiveMessage],
+    total: Option<usize>,
 ) -> ApiResult<Response> {
-    let (id, query, language) = (view.id, view.query, view.language);
+    let (id, query, language) = (view.id, view.query, view.viewer.language);
     if query.format == ArchiveFormat::Mbox {
         return Ok((
             [
@@ -356,7 +478,7 @@ fn render(
             rendered.push(message_view(view, message, place.depth)?);
         }
     }
-    let reattach = match (view.owner, &view.csrf, &query.message) {
+    let reattach = match (view.viewer.owner, &view.viewer.csrf, &query.message) {
         (true, Some(csrf), Some(hash)) => Some(listmngr_web::ReattachForm {
             action: format!("/web/lists/{}/archive/reattach", id.as_str()),
             csrf: csrf.clone(),
@@ -406,6 +528,14 @@ fn render(
         },
         reattach,
         notice,
+        links: links(id),
+        results: total.map(|total| {
+            listmngr_i18n::message(
+                language,
+                "web-archive-results",
+                &[("count", &total.to_string()), ("query", &query.q)],
+            )
+        }),
     };
     let response = super::html(&page);
     Ok(if view.s.config.archive.gravatar {
@@ -420,7 +550,7 @@ fn render(
 /// be produced at all.
 fn attachments(
     id: &ListId,
-    message: &listmngr_db::archive::ArchiveMessage,
+    message: &ArchiveMessage,
     language: &str,
 ) -> ApiResult<(Vec<listmngr_web::ArchiveAttachment>, bool)> {
     if !message.attachments.is_empty() {
@@ -589,10 +719,7 @@ fn avatar_response(content_type: &str, bytes: bytes::Bytes) -> Response {
         .into_response()
 }
 
-async fn archive_session(
-    s: &AppState,
-    headers: &HeaderMap,
-) -> ApiResult<Option<listmngr_db::web_sessions::WebSession>> {
+async fn archive_session(s: &AppState, headers: &HeaderMap) -> ApiResult<Option<WebSession>> {
     match super::load(s, headers).await {
         Ok(session) => Ok(Some(session)),
         Err(ApiError(Error::Authentication)) => Ok(None),
@@ -613,4 +740,378 @@ fn message_link(id: &ListId, hash: &str) -> ApiResult<String> {
     let encoded = serde_urlencoded::to_string([("message", hash)])
         .map_err(|error| Error::Validation(error.to_string()))?;
     Ok(format!("/web/lists/{}/archive?{encoded}", id.as_str()))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PageQuery {
+    #[serde(default = "first_page")]
+    page: u32,
+}
+
+fn thread_row(id: &ListId, summary: &ThreadSummary) -> ThreadRow {
+    ThreadRow {
+        href: thread_link(id, &summary.thread),
+        subject: summary.subject.clone(),
+        posts: summary.posts,
+        participants: summary.participants,
+        last: when(Some(summary.last_ms)),
+        last_sender: summary.last_sender.clone(),
+        unread: summary.unread,
+    }
+}
+
+fn poster_row(id: &ListId, poster: &Poster, addresses: Addresses) -> PosterRow {
+    PosterRow {
+        href: sender_link(id, &poster.email),
+        name: if poster.name.is_empty() {
+            listmngr_archive::render::sender_email(&poster.email, addresses)
+        } else {
+            poster.name.clone()
+        },
+        posts: poster.posts,
+    }
+}
+
+/// `GET /web/lists/{id}/archive/overview`: figures, months, the latest
+/// and the most active threads, the senders who posted most.
+pub(super) async fn overview(
+    State(s): State<AppState>,
+    Path(id): Path<ListId>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    let session = archive_session(&s, &headers).await?;
+    let overview =
+        s.db.archive()
+            .browser_overview(&id, session.as_ref(), super::now())
+            .await?;
+    let language = language_for(&s, &headers, session.as_ref()).await?;
+    let addresses = if session.as_ref().is_some_and(|s| s.user_id.is_some()) {
+        Addresses::Shown
+    } else {
+        Addresses::Obfuscated
+    };
+    let page = listmngr_web::ArchiveOverview {
+        shell: Shell::titled(
+            language,
+            listmngr_i18n::message(
+                language,
+                "web-title-archive-overview",
+                &[("list", id.as_str())],
+            ),
+            Nav::Lists,
+        ),
+        list: id.as_str().to_owned(),
+        links: links(&id),
+        posts: overview.posts,
+        threads: overview.threads,
+        participants: overview.participants,
+        months: overview
+            .months
+            .iter()
+            .map(|month| listmngr_web::MonthRow {
+                label: format!("{:04}-{:02}", month.year, month.month),
+                href: format!(
+                    "/web/lists/{}/archive/threads/{:04}/{:02}",
+                    id.as_str(),
+                    month.year,
+                    month.month
+                ),
+                posts: month.posts,
+            })
+            .collect(),
+        recent: overview.recent.iter().map(|t| thread_row(&id, t)).collect(),
+        active: overview.active.iter().map(|t| thread_row(&id, t)).collect(),
+        top_posters: overview
+            .top_posters
+            .iter()
+            .map(|p| poster_row(&id, p, addresses))
+            .collect(),
+    };
+    Ok(super::html(&page))
+}
+
+/// `GET /web/lists/{id}/archive/threads`: threads by latest activity.
+pub(super) async fn threads(
+    State(s): State<AppState>,
+    Path(id): Path<ListId>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    threads_page(&s, &id, &headers, query.page, None).await
+}
+
+/// `GET /web/lists/{id}/archive/threads/{year}/{month}`: the threads with
+/// posts in one month.
+pub(super) async fn threads_month(
+    State(s): State<AppState>,
+    Path((id, year, month)): Path<(ListId, i32, u32)>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    if !(1970..=9999).contains(&year) {
+        return Err(Error::Validation("archive month".into()).into());
+    }
+    threads_page(&s, &id, &headers, query.page, Some((year, month))).await
+}
+
+async fn threads_page(
+    s: &AppState,
+    id: &ListId,
+    headers: &HeaderMap,
+    page: u32,
+    month: Option<(i32, u32)>,
+) -> ApiResult<Response> {
+    if !(1..=5001).contains(&page) {
+        return Err(Error::Validation("archive query bounds".into()).into());
+    }
+    let selection = match month {
+        Some((year, month)) => {
+            let (from_ms, until_ms) = month_bounds(year, month)?;
+            ThreadSelection::Between { from_ms, until_ms }
+        }
+        None => ThreadSelection::Latest,
+    };
+    let session = archive_session(s, headers).await?;
+    let rows =
+        s.db.archive()
+            .browser_threads(id, session.as_ref(), selection, i64::from(page - 1) * 20)
+            .await?;
+    let language = language_for(s, headers, session.as_ref()).await?;
+    let base = format!("/web/lists/{}/archive/threads", id.as_str());
+    let (heading, base) = match month {
+        Some((year, month)) => (
+            listmngr_i18n::message(
+                language,
+                "web-archive-month-threads",
+                &[("month", &format!("{year:04}-{month:02}"))],
+            ),
+            format!("{base}/{year:04}/{month:02}"),
+        ),
+        None => (
+            listmngr_i18n::message(language, "web-archive-latest-threads", &[]),
+            base,
+        ),
+    };
+    let page_view = listmngr_web::ArchiveThreads {
+        shell: Shell::titled(
+            language,
+            listmngr_i18n::message(
+                language,
+                "web-title-archive-threads",
+                &[("list", id.as_str())],
+            ),
+            Nav::Lists,
+        ),
+        heading,
+        links: links(id),
+        threads: rows.iter().take(20).map(|t| thread_row(id, t)).collect(),
+        previous: (page > 1).then(|| format!("{base}?page={}", page - 1)),
+        next: (rows.len() > 20 && page < 5001).then(|| format!("{base}?page={}", page + 1)),
+    };
+    Ok(super::html(&page_view))
+}
+
+/// `GET /web/lists/{id}/archive/senders/{digest}`: one sender's posts,
+/// found by the digest of the address.
+pub(super) async fn sender(
+    State(s): State<AppState>,
+    Path((id, wanted)): Path<(ListId, String)>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    if wanted.len() != 64 || !wanted.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Error::Validation("sender digest".into()).into());
+    }
+    if !(1..=5001).contains(&query.page) {
+        return Err(Error::Validation("archive query bounds".into()).into());
+    }
+    let session = archive_session(&s, &headers).await?;
+    let senders =
+        s.db.archive()
+            .browser_senders(&id, session.as_ref())
+            .await?;
+    let wanted = wanted.to_ascii_lowercase();
+    let matching: Vec<&Poster> = senders
+        .iter()
+        .filter(|p| digest(&p.email) == wanted)
+        .collect();
+    let Some(first) = matching.first() else {
+        return Err(Error::NotFound("archive sender".into()).into());
+    };
+    let email = first.email.clone();
+    let name = matching
+        .iter()
+        .find(|p| !p.name.is_empty())
+        .map(|p| p.name.clone());
+    let posts: i64 = matching.iter().map(|p| p.posts).sum();
+    let messages =
+        s.db.archive()
+            .browser_sender_posts(
+                &id,
+                session.as_ref(),
+                &email,
+                i64::from(query.page - 1) * 20,
+            )
+            .await?;
+    let viewer = viewer(&s, &id, &headers, session.as_ref()).await?;
+    let default_query = ArchiveQuery::default();
+    let view = View {
+        s: &s,
+        id: &id,
+        query: &default_query,
+        viewer: &viewer,
+        tree: false,
+        terms: Vec::new(),
+    };
+    let language = viewer.language;
+    let shown = listmngr_archive::render::sender_email(&email, viewer.addresses);
+    let base = format!("/web/lists/{}/archive/senders/{wanted}", id.as_str());
+    let page = listmngr_web::ArchiveSender {
+        shell: Shell::titled(
+            language,
+            listmngr_i18n::message(
+                language,
+                "web-title-archive-sender",
+                &[("list", id.as_str())],
+            ),
+            Nav::Lists,
+        ),
+        heading: listmngr_i18n::message(
+            language,
+            "web-archive-sender-title",
+            &[("name", name.as_deref().unwrap_or(&shown))],
+        ),
+        email: shown,
+        count: listmngr_i18n::message(
+            language,
+            "web-archive-sender-posts",
+            &[("count", &posts.to_string())],
+        ),
+        links: links(&id),
+        messages: messages
+            .iter()
+            .take(20)
+            .map(|message| message_view(&view, message, 0))
+            .collect::<ApiResult<Vec<_>>>()?,
+        previous: (query.page > 1).then(|| format!("{base}?page={}", query.page - 1)),
+        next: (messages.len() > 20 && query.page < 5001)
+            .then(|| format!("{base}?page={}", query.page + 1)),
+    };
+    let response = super::html(&page);
+    Ok(if s.config.archive.gravatar {
+        with_images(response)
+    } else {
+        response
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FeedKind {
+    Atom,
+    Rss,
+}
+
+/// `GET /web/lists/{id}/archive/feed.atom`
+pub(super) async fn feed_atom(
+    State(s): State<AppState>,
+    Path(id): Path<ListId>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    feed(&s, &id, &headers, FeedKind::Atom).await
+}
+
+/// `GET /web/lists/{id}/archive/feed.rss`
+pub(super) async fn feed_rss(
+    State(s): State<AppState>,
+    Path(id): Path<ListId>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    feed(&s, &id, &headers, FeedKind::Rss).await
+}
+
+/// The latest twenty posts as a feed: subjects, senders' names (never an
+/// address), a text summary with addresses obfuscated, absolute links.
+async fn feed(
+    s: &AppState,
+    id: &ListId,
+    headers: &HeaderMap,
+    kind: FeedKind,
+) -> ApiResult<Response> {
+    use askama::Template as _;
+    use listmngr_archive::render::obfuscate;
+    let session = archive_session(s, headers).await?;
+    let messages =
+        s.db.archive()
+            .browser_latest_posts(id, session.as_ref())
+            .await?;
+    let origin = s.config.site.base_url.trim_end_matches('/');
+    let updated = messages
+        .iter()
+        .filter_map(|m| m.date_ms)
+        .max()
+        .unwrap_or_else(super::now);
+    let stamp = |ms: i64| match kind {
+        FeedKind::Atom => rfc3339(ms),
+        FeedKind::Rss => rfc2822(ms),
+    };
+    let mut entries = Vec::with_capacity(messages.len());
+    for message in &messages {
+        entries.push(listmngr_web::FeedEntry {
+            title: message.subject.clone(),
+            link: format!("{origin}{}", message_link(id, &message.hash)?),
+            date: stamp(message.date_ms.unwrap_or(updated)),
+            author: if message.sender_name.is_empty() {
+                obfuscate(&message.sender_email)
+            } else {
+                message.sender_name.clone()
+            },
+            summary: obfuscate(&message.body).chars().take(500).collect(),
+        });
+    }
+    let title = format!("{} archive", id.as_str());
+    let site = format!("{origin}/web/lists/{}/archive", id.as_str());
+    let (content_type, body) = match kind {
+        FeedKind::Atom => (
+            "application/atom+xml; charset=utf-8",
+            listmngr_web::AtomFeed {
+                title,
+                site,
+                updated: stamp(updated),
+                entries,
+            }
+            .render(),
+        ),
+        FeedKind::Rss => (
+            "application/rss+xml; charset=utf-8",
+            listmngr_web::RssFeed {
+                title,
+                site,
+                updated: stamp(updated),
+                entries,
+            }
+            .render(),
+        ),
+    };
+    let body = body.map_err(|error| ApiError(Error::Validation(error.to_string())))?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+fn rfc3339(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .unwrap_or_default()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+fn rfc2822(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .unwrap_or_default()
+        .to_rfc2822()
 }

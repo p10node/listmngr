@@ -243,6 +243,22 @@ pub fn routes() -> Router<AppState> {
         .route("/web/logout", post(logout))
         .route("/web/lists/{id}", get(lists::list_page))
         .route("/web/lists/{id}/archive", get(archive::browse))
+        .route("/web/lists/{id}/archive/overview", get(archive::overview))
+        .route("/web/lists/{id}/archive/threads", get(archive::threads))
+        .route(
+            "/web/lists/{id}/archive/threads/{year}/{month}",
+            get(archive::threads_month),
+        )
+        .route(
+            "/web/lists/{id}/archive/thread/{thread}",
+            get(archive::thread_page),
+        )
+        .route(
+            "/web/lists/{id}/archive/senders/{digest}",
+            get(archive::sender),
+        )
+        .route("/web/lists/{id}/archive/feed.atom", get(archive::feed_atom))
+        .route("/web/lists/{id}/archive/feed.rss", get(archive::feed_rss))
         .route(
             "/web/lists/{id}/archive/attachments/{hash}/{position}",
             get(archive::attachment),

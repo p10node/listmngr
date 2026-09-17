@@ -692,6 +692,32 @@ with sync_playwright() as p:
     expect(page.locator('article')).to_have_count(1)
     page.get_by_role('link', name='View thread').click()
     expect(page.locator('article')).to_have_count(1)
+    # P5-UI: the overview, the thread list and the sender page hang off
+    # every archive page; the sender link never carries the address.
+    page.get_by_role('link', name='Overview').click()
+    expect(page.get_by_role('heading', name='Archive overview: public.example.com')).to_be_visible()
+    expect(page.locator('.figures dd').first).to_have_text('1')
+    expect(page.locator('main')).to_contain_text('Recent activity')
+    page.get_by_role('link', name='Threads', exact=True).click()
+    expect(page.get_by_role('heading', name='Latest threads')).to_be_visible()
+    expect(page.locator('table.threads tbody tr')).to_have_count(1)
+    page.locator('table.threads tbody tr a').first.click()
+    expect(page).to_have_url(re.compile(r'/web/lists/public\.example\.com/archive/thread/[A-Za-z0-9-]+$'))
+    expect(page.locator('article')).to_have_count(1)
+    axe_scan(page, '/web/lists/public.example.com/archive/thread/<hash>')
+    sender_href = page.locator('article a.sender-name').get_attribute('href')
+    assert '@' not in sender_href and '/archive/senders/' in sender_href, sender_href
+    page.locator('article a.sender-name').click()
+    expect(page.get_by_role('heading', name=re.compile('^Posts by '))).to_be_visible()
+    expect(page.locator('article')).to_have_count(1)
+    axe_scan(page, '/web/lists/public.example.com/archive/senders/<digest>')
+    atom = context.request.get(base + '/web/lists/public.example.com/archive/feed.atom')
+    assert atom.status == 200 and atom.headers['content-type'].startswith('application/atom+xml'), atom.headers
+    assert '<entry>' in atom.text()
+    page.go_back()
+    page.go_back()
+    page.go_back()
+    page.go_back()
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'archive mobile overflow'
     page.screenshot(path=str(out / '08-mobile-archive.png'), full_page=True)
     page.get_by_role('link', name='Permanent link').click()
@@ -787,6 +813,10 @@ with sync_playwright() as p:
             '/web/login',
             '/web/lists/public.example.com',
             '/web/lists/public.example.com/archive',
+            # P5-UI: the archive's browsing pages.
+            '/web/lists/public.example.com/archive/overview',
+            '/web/lists/public.example.com/archive/threads',
+            '/web/lists/public.example.com/archive?q=Archived',
         ]:
             page.goto(base + path)
             axe_scan(page, path)

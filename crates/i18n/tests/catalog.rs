@@ -85,6 +85,8 @@ const ARGUMENTS: &[(&str, &str)] = &[
     ("done", "1"),
     ("skipped", "0"),
     ("role", "x"),
+    ("month", "2024-01"),
+    ("query", "x"),
 ];
 
 #[test]

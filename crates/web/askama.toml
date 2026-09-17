@@ -3,4 +3,4 @@
 # compile-time auto-escaping.
 [[escaper]]
 path = "crate::HtmlEscaper"
-extensions = ["html"]
+extensions = ["html", "xml"]

@@ -1,0 +1,7 @@
+C|archive_thread_views|list_id|text|required|-
+C|archive_thread_views|thread|text|required|-
+C|archive_thread_views|user_id|text|required|-
+C|archive_thread_views|viewed_at|integer|required|-
+F|archive_thread_views|list_id|mailing_lists|list_id|cascade
+F|archive_thread_views|user_id|users|id|cascade
+U|archive_thread_views|user_id,list_id,thread
