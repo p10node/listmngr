@@ -1,5 +1,41 @@
 # listmngr
 
+## Archive browsing (`P5-UI`) — bounded local acceptance verified
+
+Every archive page now carries links to the others: an overview, the thread
+lists, the recent-posts page, and the Atom and RSS feeds, all under
+`/web/lists/<id>/archive/…` and all behind the list's archive policy
+(public, private to verified members, or not there at all).
+
+- `…/overview`: posts, threads and participants counted; the months with
+  posts (each a link to that month's threads); the ten threads with the
+  latest posts; the ten most active threads and the ten senders who posted
+  most in the last thirty days.
+- `…/threads` and `…/threads/<year>/<month>`: threads twenty a page — the
+  root's subject linking to the thread page, posts, participants, the last
+  post's date and sender. A signed-in reader sees a `new` badge on every
+  thread with posts newer than their last visit to it; opening the thread
+  page records the visit. A visitor sees no badges.
+- `…/thread/<hash>`: one thread as a tree at a canonical address (absent
+  threads are 404; `?thread=` still works).
+- `…/senders/<digest>`: one sender's posts, twenty a page, with a count.
+  Each post's sender name links here. The digest is SHA-256 of the
+  lowercased address, so a link never carries the address; the page shows
+  it as the reader may see it (obfuscated for a visitor).
+- The search page, when the index answers, says how many posts match ("N
+  results for …") and marks every matched word in the subject and the body
+  with `<mark>`. Marking runs over the already-safe HTML and never touches
+  a tag or a character reference.
+- `…/feed.atom` and `…/feed.rss`: the twenty latest posts with subject,
+  sender name (never an address), a 500-character text summary with
+  addresses obfuscated, and absolute links built from `site.base_url`. A
+  private list's feed needs the browser session, so a feed reader gets 403.
+
+Limits: the months are bucketed in Rust from the post dates (capped at
+200 000 posts per overview); "unread" is per list and per thread, not per
+post; the feeds carry no full body; there are no votes, tags, categories or
+favourites yet (`P5-INTERACTIONS`).
+
 ## Archive search (`P5-SEARCH`) — bounded local acceptance verified
 
 The archive now has a search index (tantivy 0.26) under `[archive]
@@ -25,9 +61,8 @@ indexes 100 000 synthetic posts and asserts p95 < 100 ms over 200 queries
 (the numbers of the local run are in the ledger).
 
 Limits: no facets (the index carries thread and date filters, offered to
-callers of `search::Query`, not yet on the page); no highlighting or "N
-results" on the page (`P5-UI`); the REST archive resource keeps its substring
-search; a post removed from the archive is not removed from the index until a
+callers of `search::Query`, not yet on the page); the REST archive resource
+keeps its substring search; a post removed from the archive is not removed from the index until a
 reindex (no removal path exists yet).
 
 ## Archive rendering (`P5-RENDER`) — bounded local acceptance verified

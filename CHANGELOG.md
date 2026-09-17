@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- Archive browsing (`P5-UI`): an overview with figures, months, recent and active threads and top posters; thread lists by latest activity and by month with a signed-in reader's unread marks cleared by the thread page; sender pages keyed by an address digest; the search page's result count and `<mark>` highlights; and Atom and RSS feeds.
 - Archive search (`P5-SEARCH`): a tantivy index under `[archive] index_path` kept current by the archive runner in batches, ranked every-word search on the archive page with policy-checked hits and a database fallback, and `listmngr archive reindex`.
 - Archive rendering (`P5-RENDER`): sender, date and parent indexed per post, threads as trees, attachments stored and served from their own path, text and safe-subset Markdown rendering with quote folding and address obfuscation, owner reattachment, and an opt-in proxied Gravatar.
 - Phase 4 acceptance (`P4-ACCEPTANCE`): a phone-viewport Chromium journey (signup → verify → login → create list → subscribe and confirm → held post accepted → setting saved → logout) with axe-core on every stop, Lighthouse accessibility ≥ 95 on four pages and database assertions, plus a CI `browser` job running it and the slice harness with pinned tools.
