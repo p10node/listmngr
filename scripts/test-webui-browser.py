@@ -507,6 +507,25 @@ with sync_playwright() as p:
     page.get_by_role('button', name='Save account', exact=True).click()
     page.screenshot(path=str(out / '23-account-admin.png'), full_page=True)
     print('Domains/owners/deletion/accounts search and edit: PASS', flush=True)
+    # P4-SYSTEM: versions, the redacted configuration, the queues, the MTA
+    # map status and the audit log with a filter.
+    page.goto(base + '/web/admin')
+    page.get_by_role('link', name='System', exact=True).click()
+    expect(page.get_by_role('heading', name='System', exact=True)).to_be_visible()
+    expect(page.locator('main')).to_contain_text('[REDACTED]')
+    expect(page.locator('main')).to_contain_text('No incoming MTA is configured')
+    expect(page.locator('main table').first).to_contain_text('pipeline')
+    axe_scan(page, '/web/admin/system')
+    page.screenshot(path=str(out / '24-system.png'), full_page=True)
+    page.get_by_role('link', name='Audit log', exact=True).click()
+    expect(page.get_by_role('heading', name='Audit log', exact=True)).to_be_visible()
+    page.get_by_label('Action', exact=True).fill('list.create')
+    page.get_by_role('button', name='Filter', exact=True).click()
+    expect(page.locator('main table')).to_contain_text('browser-made.example.com')
+    expect(page.locator('main table')).not_to_contain_text('member.create')
+    axe_scan(page, '/web/admin/system/audit')
+    page.screenshot(path=str(out / '25-audit.png'), full_page=True)
+    print('System page and audit log: PASS', flush=True)
     page.goto(base + '/web/account')
     private_subscription = page.locator('section').filter(has=page.get_by_role('heading', name='private.example.com', exact=True))
     private_subscription.get_by_role('link', name='Leave list', exact=True).click()
@@ -753,6 +772,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials. Settings groups previewed/refused inline/saved, a header rule added, tested and removed, a ban added and lifted, a template previewed, saved and removed, and the delete confirmation refused a wrong id. Member rosters per role, an htmx search swap, mass subscription with outcomes, a member\'s options and bounce reset, a CSV export, and removals by button and by pasted address. Held queue with a rendered preview, the sender moderated from the post, two posts discarded in bulk, one accepted by keyboard, and a subscription request accepted. A list created from the administration index, a taken id refused inline, the directory searched and filtered by domain with the owner badge, and the new list\'s summary with its addresses. A domain added, an owner seated and removed, a mistyped deletion refused, the empty domain deleted, an account searched, opened and renamed.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials. Settings groups previewed/refused inline/saved, a header rule added, tested and removed, a ban added and lifted, a template previewed, saved and removed, and the delete confirmation refused a wrong id. Member rosters per role, an htmx search swap, mass subscription with outcomes, a member\'s options and bounce reset, a CSV export, and removals by button and by pasted address. Held queue with a rendered preview, the sender moderated from the post, two posts discarded in bulk, one accepted by keyboard, and a subscription request accepted. A list created from the administration index, a taken id refused inline, the directory searched and filtered by domain with the owner badge, and the new list\'s summary with its addresses. A domain added, an owner seated and removed, a mistyped deletion refused, the empty domain deleted, an account searched, opened and renamed. The system page with redacted configuration and queues, and the audit log filtered by action.')
     context.close()
     browser.close()
