@@ -2,6 +2,8 @@
 mod addresses;
 #[path = "webui/admin_pagination.rs"]
 mod admin_pagination;
+#[path = "webui/archive_render.rs"]
+mod archive_render;
 #[path = "webui/delete_account.rs"]
 mod delete_account;
 #[path = "webui/domains_users.rs"]
@@ -178,21 +180,21 @@ async fn public_archive_browser_is_searchable_bounded_escaped_and_policy_gated()
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["cache-control"], "no-store");
     let html = text(response).await;
-    assert_eq!(html.matches("<article>").count(), 20);
+    assert_eq!(html.matches("<article ").count(), 20);
     assert!(html.contains("&lt;script&gt;"));
     assert!(!html.contains("<script>"));
     assert!(html.contains("Next"));
     let html = text(call(&app, "GET", &format!("{url}?page=2"), "", "").await).await;
-    assert_eq!(html.matches("<article>").count(), 5);
+    assert_eq!(html.matches("<article ").count(), 5);
     assert!(html.contains("message-24"));
     assert!(!html.contains("message-00"));
     let html = text(call(&app, "GET", &format!("{url}?q=message-24"), "", "").await).await;
-    assert_eq!(html.matches("<article>").count(), 1);
+    assert_eq!(html.matches("<article ").count(), 1);
     assert!(html.contains("message-24"));
     let html = text(call(&app, "GET", &format!("{url}?thread=first%26thread"), "", "").await).await;
-    assert_eq!(html.matches("<article>").count(), 2);
+    assert_eq!(html.matches("<article ").count(), 2);
     let html = text(call(&app, "GET", &format!("{url}?q=absent"), "", "").await).await;
-    assert_eq!(html.matches("<article>").count(), 0);
+    assert_eq!(html.matches("<article ").count(), 0);
     assert!(html.contains("No messages"));
     for query in [
         "page=0".to_owned(),
@@ -272,7 +274,7 @@ async fn verify_archive_permalink(db: Database, app: axum::Router) {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["cache-control"], "no-store");
     let html = text(response).await;
-    assert_eq!(html.matches("<article>").count(), 1);
+    assert_eq!(html.matches("<article ").count(), 1);
     assert!(html.contains("Archived text &lt;script&gt;unsafe&lt;/script&gt;"));
     assert!(html.contains("Permanent link"));
     assert!(!html.contains("<script>"));
@@ -463,7 +465,7 @@ async fn verify_archive_attachments(db: Database, app: axum::Router) {
     );
     assert_eq!(
         response.headers()["content-disposition"],
-        "attachment; filename=attachment-0.bin"
+        "attachment; filename=\"attachment-0.bin\""
     );
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
     assert!(

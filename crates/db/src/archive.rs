@@ -14,14 +14,41 @@ enum Selection<'a> {
 #[cfg(test)]
 #[path = "archive_tests.rs"]
 mod tests;
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct ArchiveMessage {
     pub hash: String,
     pub thread: String,
     pub subject: String,
     pub body: String,
+    /// The sender as the cooked copy shows it (an anonymous list shows none).
+    pub sender_name: String,
+    pub sender_email: String,
+    /// The `Date` header in milliseconds, when it parsed.
+    pub date_ms: Option<i64>,
+    /// The post replied to, when the headers named one; it may be absent
+    /// from the archive.
+    pub parent: Option<String>,
+    /// Stored attachments, metadata only.
+    pub attachments: Vec<StoredAttachment>,
     #[serde(skip)]
     pub raw: Vec<u8>,
+}
+
+/// One attachment stored with an archived post.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct StoredAttachment {
+    pub position: i64,
+    pub filename: String,
+    pub content_type: String,
+    pub size: i64,
+}
+
+/// One attachment's bytes, for a download.
+#[derive(Debug, Clone)]
+pub struct AttachmentContent {
+    pub filename: String,
+    pub content_type: String,
+    pub content: Vec<u8>,
 }
 #[derive(Debug)]
 pub struct ArchiveRepo<'a> {
@@ -60,10 +87,29 @@ fn render_rows(
                 thread: r.try_get("thread").map_err(db_error)?,
                 subject: parsed.subject().unwrap_or("").into(),
                 body: parsed.body_text(0).unwrap_or_default().into_owned(),
+                sender_name: r.try_get("sender_name").map_err(db_error)?,
+                sender_email: r.try_get("sender_email").map_err(db_error)?,
+                date_ms: r.try_get("message_date").map_err(db_error)?,
+                parent: r.try_get("parent_hash").map_err(db_error)?,
+                attachments: Vec::new(),
                 raw,
             })
         })
         .collect()
+}
+
+/// The first `From` mailbox of the cooked copy: name and address.
+fn sender(parsed: &mail_parser::Message<'_>) -> (String, String) {
+    parsed
+        .from()
+        .and_then(|from| from.first())
+        .map(|addr| {
+            (
+                addr.name().unwrap_or("").chars().take(256).collect(),
+                addr.address().unwrap_or("").chars().take(320).collect(),
+            )
+        })
+        .unwrap_or_default()
 }
 
 /// The archive copy: the posting pipeline up to `to-archive`. `context` is
@@ -170,6 +216,10 @@ impl<'a> ArchiveRepo<'a> {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ArchiveMessage>> {
+        // A caller's page is 100 posts at most; only the thread tree reads more.
+        if !(1..=100).contains(&limit) {
+            return Err(Error::Validation("archive query bounds".into()));
+        }
         self.authorize(list, auth).await?;
         self.read_snapshot(list, auth, thread, query, limit, offset)
             .await
@@ -218,7 +268,7 @@ impl<'a> ArchiveRepo<'a> {
             Selection::Thread(thread) => (thread.unwrap_or(""), ""),
             Selection::Message(hash) => ("", hash),
         };
-        if !(1..=100).contains(&limit) || !(0..=100_000).contains(&offset) || query.len() > 200 {
+        if !(1..=500).contains(&limit) || !(0..=100_000).contains(&offset) || query.len() > 200 {
             return Err(Error::Validation("archive query bounds".into()));
         }
         let pattern = format!(
@@ -229,7 +279,7 @@ impl<'a> ArchiveRepo<'a> {
                 .replace('_', "!_")
         );
         let settings = self.db.lists().get(list).await?;
-        let rows = sqlx::query("SELECT hash,thread,subject,body,raw_b64,(SELECT anonymous_list FROM mailing_lists WHERE list_id=$1) AS anonymous_list,(SELECT subject_prefix FROM mailing_lists WHERE list_id=$1) AS subject_prefix FROM archive_messages WHERE list_id=$1 AND ($2='' OR thread=$2) AND ($11='' OR hash=$11) AND (LOWER(subject) LIKE LOWER($3) ESCAPE '!' OR LOWER(body) LIKE LOWER($3) ESCAPE '!') AND EXISTS(SELECT 1 FROM mailing_lists l JOIN domains d ON d.mail_host=l.mail_host WHERE l.list_id=$1 AND (l.archive_policy='public' OR (l.archive_policy='private' AND ($6=1 OR ($7=1 AND ($8='' OR $8=l.list_id) AND ($9='' OR $9=d.id) AND EXISTS(SELECT 1 FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=l.list_id AND m.role='member' AND a.user_id=$10 AND a.verified_on IS NOT NULL)))))) ORDER BY created_at,hash LIMIT $4 OFFSET $5")
+        let rows = sqlx::query("SELECT hash,thread,subject,body,raw_b64,sender_name,sender_email,message_date,parent_hash,(SELECT anonymous_list FROM mailing_lists WHERE list_id=$1) AS anonymous_list,(SELECT subject_prefix FROM mailing_lists WHERE list_id=$1) AS subject_prefix FROM archive_messages WHERE list_id=$1 AND ($2='' OR thread=$2) AND ($11='' OR hash=$11) AND (LOWER(subject) LIKE LOWER($3) ESCAPE '!' OR LOWER(body) LIKE LOWER($3) ESCAPE '!') AND EXISTS(SELECT 1 FROM mailing_lists l JOIN domains d ON d.mail_host=l.mail_host WHERE l.list_id=$1 AND (l.archive_policy='public' OR (l.archive_policy='private' AND ($6=1 OR ($7=1 AND ($8='' OR $8=l.list_id) AND ($9='' OR $9=d.id) AND EXISTS(SELECT 1 FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=l.list_id AND m.role='member' AND a.user_id=$10 AND a.verified_on IS NOT NULL)))))) ORDER BY created_at,hash LIMIT $4 OFFSET $5")
    .bind(list.as_str()).bind(thread).bind(pattern).bind(limit).bind(offset)
    .bind(i64::from(auth.is_some_and(|a| a.scopes.contains("admin") && a.list_id.is_none() && a.domain_id.is_none())))
    .bind(i64::from(auth.is_some_and(|a| a.has_scope("members:read"))))
@@ -238,7 +288,85 @@ impl<'a> ArchiveRepo<'a> {
    .bind(auth.map_or_else(String::new, |a| a.user_id.to_string()))
    .bind(hash)
    .fetch_all(self.db.pool()).await.map_err(db_error)?;
-        render_rows(settings, &rows, self.db.base_url())
+        let mut messages = render_rows(settings, &rows, self.db.base_url())?;
+        self.attach_metadata(list, &mut messages).await?;
+        Ok(messages)
+    }
+    /// The stored attachments' metadata for each message on a page.
+    pub(crate) async fn attach_metadata(
+        &self,
+        list: &ListId,
+        messages: &mut [ArchiveMessage],
+    ) -> Result<()> {
+        for message in messages.iter_mut() {
+            let rows = sqlx::query("SELECT position, filename, content_type, size FROM archive_attachments WHERE list_id=$1 AND hash=$2 ORDER BY position")
+                .bind(list.as_str())
+                .bind(&message.hash)
+                .fetch_all(self.db.pool())
+                .await
+                .map_err(db_error)?;
+            message.attachments = rows
+                .iter()
+                .map(|row| {
+                    Ok(StoredAttachment {
+                        position: row.try_get("position").map_err(db_error)?,
+                        filename: row.try_get("filename").map_err(db_error)?,
+                        content_type: row.try_get("content_type").map_err(db_error)?,
+                        size: row.try_get("size").map_err(db_error)?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+        }
+        Ok(())
+    }
+    /// One whole thread (500 posts at most), for the tree view.
+    /// # Errors
+    /// Returns access, validation or database errors.
+    pub async fn read_thread(
+        &self,
+        list: &ListId,
+        auth: Option<&TokenAuth>,
+        thread: &str,
+    ) -> Result<Vec<ArchiveMessage>> {
+        if thread.is_empty() || thread.len() > 200 {
+            return Err(Error::Validation("archive thread bounds".into()));
+        }
+        self.authorize(list, auth).await?;
+        self.read_snapshot(list, auth, Some(thread), "", 500, 0)
+            .await
+    }
+    /// One stored attachment, after the message itself was authorized.
+    /// # Errors
+    /// Returns access, missing or database errors.
+    pub async fn read_attachment(
+        &self,
+        list: &ListId,
+        auth: Option<&TokenAuth>,
+        hash: &str,
+        position: i64,
+    ) -> Result<AttachmentContent> {
+        self.read_message(list, auth, hash).await?;
+        self.attachment_row(list, hash, position).await
+    }
+    pub(crate) async fn attachment_row(
+        &self,
+        list: &ListId,
+        hash: &str,
+        position: i64,
+    ) -> Result<AttachmentContent> {
+        let row = sqlx::query("SELECT filename, content_type, content FROM archive_attachments WHERE list_id=$1 AND hash=$2 AND position=$3")
+            .bind(list.as_str())
+            .bind(hash)
+            .bind(position)
+            .fetch_optional(self.db.pool())
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| Error::NotFound("archive attachment".into()))?;
+        Ok(AttachmentContent {
+            filename: row.try_get("filename").map_err(db_error)?,
+            content_type: row.try_get("content_type").map_err(db_error)?,
+            content: row.try_get("content").map_err(db_error)?,
+        })
     }
     /// Atomically index and ack an archive lease; replay is idempotent per list/hash.
     /// # Errors
@@ -284,8 +412,28 @@ impl<'a> ArchiveRepo<'a> {
             .await
             .map_err(db_error)?;
             let thread = thread.as_deref().unwrap_or(&item.thread);
-            sqlx::query("INSERT INTO archive_messages(list_id,hash,thread,subject,body,raw_b64,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(list_id,hash) DO NOTHING")
-    .bind(list.as_str()).bind(&item.hash).bind(thread).bind(parsed.subject().unwrap_or("")).bind(parsed.body_text(0).unwrap_or_default().as_ref()).bind(base64::engine::general_purpose::STANDARD.encode(&raw)).bind(message.created_at).execute(&mut *tx).await.map_err(db_error)?;
+            let (sender_name, sender_email) = sender(&parsed);
+            let date_ms = parsed
+                .date()
+                .map(|date| date.to_timestamp().saturating_mul(1000));
+            let inserted = sqlx::query("INSERT INTO archive_messages(list_id,hash,thread,subject,body,raw_b64,created_at,sender_name,sender_email,message_date,parent_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(list_id,hash) DO NOTHING")
+    .bind(list.as_str()).bind(&item.hash).bind(thread).bind(parsed.subject().unwrap_or("")).bind(parsed.body_text(0).unwrap_or_default().as_ref()).bind(base64::engine::general_purpose::STANDARD.encode(&raw)).bind(message.created_at)
+    .bind(sender_name).bind(sender_email).bind(date_ms).bind(item.parent.as_deref())
+    .execute(&mut *tx).await.map_err(db_error)?.rows_affected();
+            if inserted > 0 {
+                // A malformed or oversized MIME structure stores no attachment
+                // and never blocks indexing; the page then says so.
+                for (position, stored) in listmngr_mail::attachments::stored(&raw)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .enumerate()
+                {
+                    sqlx::query("INSERT INTO archive_attachments(list_id,hash,position,filename,content_type,size,content) VALUES($1,$2,$3,$4,$5,$6,$7)")
+                        .bind(list.as_str()).bind(&item.hash).bind(i64::try_from(position).unwrap_or(i64::MAX))
+                        .bind(&stored.filename).bind(&stored.content_type).bind(i64::try_from(stored.content.len()).unwrap_or(i64::MAX)).bind(&stored.content)
+                        .execute(&mut *tx).await.map_err(db_error)?;
+                }
+            }
             // A parent arriving after its replies unifies their provisional root.
             sqlx::query("UPDATE archive_messages SET thread=$1 WHERE list_id=$2 AND thread=$3")
                 .bind(thread)

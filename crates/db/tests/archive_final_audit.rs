@@ -74,6 +74,7 @@ async fn complete(db: &Database, lease: &Lease, clock: &Clock) -> listmngr_core:
                 subject: String::new(),
                 body: String::new(),
                 raw: vec![],
+                ..ArchiveMessage::default()
             },
             101,
         )

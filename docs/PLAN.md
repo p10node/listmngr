@@ -57,7 +57,7 @@ trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
 
 Chưa có: bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE), toàn bộ
 Phase 4–7 trừ các lát nêu trên (P4-SHELL, toàn bộ P4-ACCOUNT-*, P4-TOTP,
-P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS, P4-GDPR, P4-ACCEPTANCE đã đóng — Phase 4 hoàn tất theo ledger; kế tiếp là Phase 5, bắt đầu P5-RENDER). Chi tiết và thứ tự ở §7.
+P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS, P4-GDPR, P4-ACCEPTANCE đã đóng — Phase 4 hoàn tất theo ledger; Phase 5: P5-RENDER đã đóng; kế tiếp là P5-SEARCH). Chi tiết và thứ tự ở §7.
 
 ## 0. Tóm tắt 1 phút
 
@@ -935,12 +935,13 @@ Work packages, theo thứ tự; mỗi ID một nhánh:
 Trạng thái: `crates/archive` có parse, threading root ids, Message-ID-Hash tương
 thích HyperKitty, `Archived-At`, archive đọc SSR cơ bản
 (`/web/lists/{id}/archive`, export mbox ≤ 20 message) — P2-ARCHIVE-AUTHORITY,
-P2-DSN-INSPECTION. Chưa có index/search, UI đầy đủ, votes/tags, import mbox,
-remote archivers. UI theo cùng kiến trúc Phase 4 (askama + htmx).
+P2-DSN-INSPECTION; P5-RENDER đã thêm sender/date/parent, cây thread, attachments
+lưu riêng, render text/markdown an toàn, obfuscate, reattach, gravatar proxy.
+Chưa có index/search, UI đầy đủ, votes/tags, import mbox, remote archivers. UI theo cùng kiến trúc Phase 4 (askama + htmx).
 
 | ID                  | Effort | Phạm vi                                                                                                                                                                                                                                            | Acceptance riêng                                  |
 |---------------------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|
-| P5-RENDER           | M      | sender + threading hoàn chỉnh (In-Reply-To/References, reattach thủ công), attachments store + serve an toàn (nosniff, download disposition, path riêng), text/markdown render + sanitize, quote folding, email obfuscate, gravatar opt-in proxied | snapshot threading vs HyperKitty import cùng mbox |
+| ~~P5-RENDER~~ (xong) | M | sender/date/parent indexed; thread tree (`threading::order`, 500 post); attachments lưu ở `archive_attachments`, serve path riêng + nosniff + attachment disposition + deny-list type; text (quote folding, linkify) và markdown subset an toàn (`pulldown-cmark` events → writer riêng); obfuscate cho khách; reattach của owner (audit); gravatar opt-in proxied + cache | ĐẠT: `crates/archive/tests/render_threading.rs` (snapshot mbox theo thuật toán HyperKitty, không phải import HyperKitty thật) + `crates/api/tests/webui/archive_render.rs` + contract PostgreSQL |
 | P5-SEARCH           | M      | tantivy index (list, subject, body, sender, date, thread; facets), commit batching, `listmngr archive reindex`                                                                                                                                     | search p95 < 100ms trên 100k msg                  |
 | P5-UI               | L      | overview (recent activity, active/popular threads, top posters), thread lists (latest, năm/tháng, unread/last-view), thread page, sender/user pages, search UI với highlight, RSS/Atom                                                             | axe/CSP như Phase 4                               |
 | P5-INTERACTIONS     | S      | votes ±1, tags, categories, favorites, last-view                                                                                                                                                                                                   |                                                   |

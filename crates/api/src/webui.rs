@@ -243,6 +243,12 @@ pub fn routes() -> Router<AppState> {
         .route("/web/logout", post(logout))
         .route("/web/lists/{id}", get(lists::list_page))
         .route("/web/lists/{id}/archive", get(archive::browse))
+        .route(
+            "/web/lists/{id}/archive/attachments/{hash}/{position}",
+            get(archive::attachment),
+        )
+        .route("/web/lists/{id}/archive/reattach", post(archive::reattach))
+        .route("/web/gravatar/{hash}", get(archive::gravatar))
         .route("/web/lists/{id}/request", post(subscription_request))
         .merge(moderation::routes())
         .route("/web/lists/{id}/confirm", get(confirm_form).post(confirm))

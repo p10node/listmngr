@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- Archive rendering (`P5-RENDER`): sender, date and parent indexed per post, threads as trees, attachments stored and served from their own path, text and safe-subset Markdown rendering with quote folding and address obfuscation, owner reattachment, and an opt-in proxied Gravatar.
 - Phase 4 acceptance (`P4-ACCEPTANCE`): a phone-viewport Chromium journey (signup → verify → login → create list → subscribe and confirm → held post accepted → setting saved → logout) with axe-core on every stop, Lighthouse accessibility ≥ 95 on four pages and database assertions, plus a CI `browser` job running it and the slice harness with pinned tools.
 - Data export and erasure (`P4-GDPR`): a reader's own JSON export from the account page, a server owner's export and typed-back erasure of any account (last owner excepted), and `listmngr user export` / `user erase` on the command line.
 - Cross-list moderation (`P4-MODERATION-CROSS`): `/web/moderation` carries every held post and subscription request across the reader's lists with the list queue's forms, each naming its list, and decisions made there return there.
