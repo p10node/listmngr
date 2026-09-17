@@ -1408,6 +1408,8 @@ pub struct OwnerRow {
 pub struct AdminUsers {
     /// Document shell.
     pub shell: Shell,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
     /// The search text as submitted.
     pub query: String,
     /// The accounts on this page.
@@ -1437,6 +1439,14 @@ pub struct AdminUserRow {
 pub struct AdminUser {
     /// Document shell.
     pub shell: Shell,
+    /// The JSON export.
+    pub export_href: String,
+    /// The erase form target.
+    pub erase_action: String,
+    /// The address to type back.
+    pub erase_hint: String,
+    /// A refusal of the erasure.
+    pub erase_error: Option<String>,
     /// Session CSRF token.
     pub csrf: String,
     /// The edit form target.

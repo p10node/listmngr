@@ -57,7 +57,7 @@ trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
 
 Chưa có: bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE), toàn bộ
 Phase 4–7 trừ các lát nêu trên (P4-SHELL, toàn bộ P4-ACCOUNT-*, P4-TOTP,
-P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS đã đóng; kế tiếp là P4-GDPR). Chi tiết và thứ tự ở §7.
+P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS, P4-GDPR đã đóng; kế tiếp là P4-ACCEPTANCE). Chi tiết và thứ tự ở §7.
 
 ## 0. Tóm tắt 1 phút
 
@@ -925,7 +925,7 @@ Work packages, theo thứ tự; mỗi ID một nhánh:
 | ~~P4-DOMAINS-USERS~~ (xong) | M | domains index/add/delete (gõ lại host, chỉ khi rỗng) + owners add/remove + templates scope domain (cùng editor) + DKIM DNS record từ key đã cấu hình (không sinh key); users admin: search, display name + server owner (chặn hạ cấp owner cuối), force verify/unverify address, memberships | ĐẠT: `crates/api/tests/webui/domains_users.rs` + contract PostgreSQL; Chromium: thêm domain, owner add/remove, xoá từ chối rồi xoá, tìm và sửa tài khoản |
 | ~~P4-SYSTEM~~ (xong) | S | versions + DB backend; config masked (`redacted_json`, dotted keys); queue depth theo state + oldest ready + runner giữ lease; MTA maps status (kind/directory/target/generation `current`); audit log viewer lọc action prefix + target, phân trang | ĐẠT: `crates/api/tests/webui/system.rs` + contract PostgreSQL; Chromium: system page, audit filter |
 | ~~P4-MODERATION-CROSS~~ (xong) | S | `/moderation` tổng hợp cross-list: mọi held post + request của các list mình kiểm duyệt (macro dùng chung với queue từng list, cap 50/loại), quyết định quay về trang tổng hợp (`back=moderation`); không bulk cross-list | ĐẠT: `crates/api/tests/webui/moderation_cross.rs` + contract PostgreSQL; Chromium: trang tổng hợp 3 held + 1 request |
-| P4-GDPR              | S      | export (JSON) / erase user data qua UI + CLI                                                                                                                                                                                                                                                      |                                                                                                 |
+| ~~P4-GDPR~~ (xong)   | S      | export JSON (account, preferences, addresses, memberships, token metadata, domains owned, sessions count, audit events) cho chính mình và cho admin; erase qua trang admin (gõ lại địa chỉ, chặn owner cuối) và CLI `user export/erase`; không anonymise archive | ĐẠT: `crates/api/tests/webui/gdpr.rs` + contract PostgreSQL + `crates/cli/tests/gdpr.rs`; Chromium: export JSON, erase owner cuối bị từ chối |
 | P4-ACCEPTANCE        | M      | Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe, CSP, Lighthouse a11y ≥ 95, mobile viewport, gate trong CI                                                                                                                                                    |                                                                                                 |
 
 - Acceptance: Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe a11y không lỗi critical, CSP không violation, Lighthouse a11y ≥ 95, mobile viewport pass.

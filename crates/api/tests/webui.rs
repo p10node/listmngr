@@ -8,6 +8,8 @@ mod delete_account;
 mod domains_users;
 #[path = "webui/emergency.rs"]
 mod emergency;
+#[path = "webui/gdpr.rs"]
+mod gdpr;
 #[path = "webui/goodbye.rs"]
 mod goodbye;
 #[path = "webui/held_queue.rs"]

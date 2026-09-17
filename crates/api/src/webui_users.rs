@@ -21,6 +21,8 @@ pub(super) struct SearchQuery {
     page: u32,
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    saved: String,
 }
 
 pub(super) async fn index(
@@ -45,6 +47,7 @@ pub(super) async fn index(
     };
     Ok(html(&listmngr_web::AdminUsers {
         shell: Shell::new(language, "web-title-users", Nav::Account),
+        notice: (f.saved == "erased").then(|| t(language, "web-users-erased")),
         query: f.q.clone(),
         rows: rows
             .into_iter()
@@ -72,6 +75,16 @@ pub(super) async fn index(
 pub(super) struct Notice {
     #[serde(default)]
     saved: String,
+    #[serde(default)]
+    erase: String,
+}
+
+fn notice_text(language: &str, saved: &str) -> Option<String> {
+    match saved {
+        "1" => Some(t(language, "web-users-saved")),
+        "address" => Some(t(language, "web-users-address-changed")),
+        _ => None,
+    }
 }
 
 fn role_label(language: &str, role: MemberRole) -> String {
@@ -86,6 +99,7 @@ fn role_label(language: &str, role: MemberRole) -> String {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render(
     language: &str,
     csrf: &str,
@@ -94,9 +108,18 @@ fn render(
     server_owner: bool,
     error: Option<String>,
     notice: Option<String>,
+    erase_error: Option<String>,
 ) -> Response {
     let id = detail.user.id;
     html(&listmngr_web::AdminUser {
+        export_href: format!("/web/admin/users/{id}/export.json"),
+        erase_action: format!("/web/admin/users/{id}/erase"),
+        erase_hint: detail
+            .addresses
+            .first()
+            .map(|address| address.email.clone())
+            .unwrap_or_default(),
+        erase_error,
         shell: Shell::titled(language, detail.user.display_name.clone(), Nav::Account),
         csrf: csrf.to_owned(),
         action: format!("/web/admin/users/{id}"),
@@ -157,9 +180,10 @@ pub(super) async fn user(
     privileged(&s, &session).await?;
     let language = reader_language(&s, &h, &session).await?;
     let detail = s.db.browser_user(&session, id).await?;
-    let notice = match q.saved.as_str() {
-        "1" => Some(t(language, "web-users-saved")),
-        "address" => Some(t(language, "web-users-address-changed")),
+    let notice = notice_text(language, &q.saved);
+    let erase_error = match q.erase.as_str() {
+        "mismatch" => Some(t(language, "web-users-erase-mismatch")),
+        "last-owner" => Some(t(language, "web-users-last-owner")),
         _ => None,
     };
     Ok(render(
@@ -170,6 +194,7 @@ pub(super) async fn user(
         detail.user.is_server_owner,
         None,
         notice,
+        erase_error,
     ))
 }
 
@@ -216,6 +241,7 @@ pub(super) async fn save(
         &form.display_name,
         server_owner,
         Some(t(language, refusal)),
+        None,
         None,
     )))
 }
