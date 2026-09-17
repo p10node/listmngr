@@ -33,6 +33,7 @@ pub mod site_notices;
 pub mod web_addresses;
 pub mod web_delete;
 pub mod web_domains;
+pub mod web_gdpr;
 pub mod web_list_settings;
 pub mod web_lists;
 pub mod web_members;

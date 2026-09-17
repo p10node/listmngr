@@ -19,6 +19,8 @@ mod admin;
 mod archive;
 #[path = "webui_domains.rs"]
 mod domains;
+#[path = "webui_gdpr.rs"]
+mod gdpr;
 #[path = "webui_list_settings.rs"]
 mod list_settings;
 #[path = "webui_lists.rs"]
@@ -276,6 +278,8 @@ fn site_admin_routes() -> Router<AppState> {
         .route("/web/admin/system", get(system::index))
         .route("/web/admin/system/audit", get(system::audit))
         .route("/web/admin/users", get(users::index))
+        .route("/web/admin/users/{id}/export.json", get(gdpr::admin_export))
+        .route("/web/admin/users/{id}/erase", post(gdpr::erase))
         .route("/web/admin/users/{id}", get(users::user).post(users::save))
         .route(
             "/web/admin/users/{id}/addresses/{address}/verify",
@@ -337,6 +341,7 @@ fn account_routes() -> Router<AppState> {
             get(account_delete::form).post(account_delete::delete),
         )
         .route("/web/account/sessions", get(account_sessions::index))
+        .route("/web/account/export.json", get(gdpr::own_export))
         .route(
             "/web/account/sessions/revoke-others",
             post(account_sessions::revoke_others),
