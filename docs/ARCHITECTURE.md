@@ -1,5 +1,24 @@
 # Architecture
 
+## Phase 4 acceptance — bounded local acceptance verified
+
+`chromium_acceptance_journey` in `crates/api/tests/webui.rs` starts the
+router on a loopback port with a disposable in-memory database, launches
+`scripts/test-webui-journey.py` under the Playwright venv, and runs a bridge
+loop beside it: every token the site mails (the `Token:` line of a list
+confirmation, the token after "enter this token:" of a verification mail)
+is written once to `.journey/token-<n>` in the evidence directory; the
+journey account is seated as a domain owner once its address is verified
+(`owner-granted`); a nonmember post is held on the new list once the friend's
+subscription is confirmed (`post-held`, through the shared `held_on` seed).
+The script waits for those files, never for time. After the browser exits
+the harness asserts the database state. Lighthouse runs as a subprocess of
+the script with `CHROME_PATH` set to Playwright's Chromium and the session
+cookie passed as an extra header for the signed-in page; the JSON report is
+rewritten to the score alone so no cookie reaches the evidence folder. The
+CI `browser` job pins Playwright, Chromium, axe-core (by SHA-256) and
+Lighthouse and runs both harness tests.
+
 ## Data export and erasure — bounded local acceptance verified
 
 `crates/db/src/web_gdpr.rs`: `export_user` reads the account, its

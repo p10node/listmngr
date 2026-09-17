@@ -1,5 +1,33 @@
 # listmngr
 
+## Phase 4 acceptance (`P4-ACCEPTANCE`) — bounded local acceptance verified
+
+Two Chromium runs gate the browser interface in CI (`browser` job):
+
+- `scripts/test-webui-browser.py`, the slice-by-slice harness that every
+  Phase 4 package extended, with axe-core on every scanned page and the CSP
+  and origin checks.
+- `scripts/test-webui-journey.py`, the acceptance journey at a phone
+  viewport (390×844): one person signs up, verifies the mailbox with the
+  token the harness reads from the mail, signs in, creates a list (seated as
+  a domain owner by the harness once verified), subscribes an address through
+  the public list page and confirms it, sees the first post held (the harness
+  holds it as the mail path would), accepts it from the moderation page,
+  changes a setting and signs out. Every stop is checked for horizontal
+  overflow and scanned with axe-core; Lighthouse audits the directory, the
+  login page, the list page and a signed-in settings page for an
+  accessibility score of at least 95; the harness then checks the database
+  for what the browser claimed.
+
+Run locally as `README` describes under "Other browser verification", with
+`WEBUI_JOURNEY_SCRIPT`, and `WEBUI_LIGHTHOUSE` pointing at a
+`lighthouse@13.4.1` executable (`npm install --prefix <dir> lighthouse@13.4.1`).
+
+Limits: "post" is a held message the harness inserts, not a message through
+LMTP (the mail path has its own end-to-end harness in
+`crates/cli/tests/mailpath_e2e.rs`); Lighthouse scores the four pages named,
+not every page; the journey runs on Chromium only.
+
 ## Data export and erasure (`P4-GDPR`) — bounded local acceptance verified
 
 A signed-in reader downloads everything stored about them from
@@ -2226,6 +2254,14 @@ WEBUI_BROWSER_SCRIPT="$PWD/scripts/test-webui-browser.py" \
 WEBUI_BROWSER_OUTPUT=/tmp/listmngr-webui-browser-evidence \
 WEBUI_AXE_SCRIPT=/tmp/axe.min.js \
   cargo test --locked -p listmngr-api --test webui chromium_browser_acceptance -- --ignored --nocapture
+# The phone-viewport acceptance journey, with Lighthouse accessibility:
+npm install --no-audit --no-fund --prefix /tmp/listmngr-lighthouse lighthouse@13.4.1
+WEBUI_BROWSER_PYTHON=/tmp/listmngr-webui-browser-venv/bin/python \
+WEBUI_JOURNEY_SCRIPT="$PWD/scripts/test-webui-journey.py" \
+WEBUI_BROWSER_OUTPUT=/tmp/listmngr-webui-journey-evidence \
+WEBUI_AXE_SCRIPT=/tmp/axe.min.js \
+WEBUI_LIGHTHOUSE=/tmp/listmngr-lighthouse/node_modules/.bin/lighthouse \
+  cargo test --locked -p listmngr-api --test webui chromium_acceptance_journey -- --ignored --nocapture
 ```
 
 Alternatively set `WEBUI_CHROMIUM_EXECUTABLE` to an installed Chromium/Chrome
