@@ -62,6 +62,42 @@ jobs:
       # removed when SQLx drops the lock-only edge or an rsa fix is published.
       - run: cargo audit --ignore RUSTSEC-2023-0071
 
+  browser:
+    # P4-ACCEPTANCE: the Chromium harness (every browser slice) and the
+    # phone-viewport journey, with axe-core and Lighthouse accessibility.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, pinned 2026-09-04
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Pinned Playwright, Chromium, axe-core and Lighthouse
+        run: |
+          python3 -m venv "$RUNNER_TEMP/browser"
+          "$RUNNER_TEMP/browser/bin/pip" install playwright==1.55.0
+          "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium
+          curl -sSfo "$RUNNER_TEMP/axe.min.js" https://cdn.jsdelivr.net/npm/axe-core@4.13.0/axe.min.js
+          echo "c24f097bd2f451d4f933e8bc7d8d539f8672a2ebcb5cc9f9f3eec8ca9470a0c1  $RUNNER_TEMP/axe.min.js" | sha256sum -c
+          npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/lighthouse" lighthouse@13.4.1
+      - name: Chromium harness with axe-core
+        env:
+          WEBUI_BROWSER_SCRIPT: ${{ github.workspace }}/scripts/test-webui-browser.py
+        run: |
+          WEBUI_BROWSER_PYTHON="$RUNNER_TEMP/browser/bin/python" \
+          WEBUI_BROWSER_OUTPUT="$RUNNER_TEMP/browser-evidence" \
+          WEBUI_AXE_SCRIPT="$RUNNER_TEMP/axe.min.js" \
+            cargo test --locked -p listmngr-api --test webui chromium_browser_acceptance -- --ignored --nocapture
+      - name: Acceptance journey at a phone viewport with axe-core and Lighthouse
+        env:
+          WEBUI_JOURNEY_SCRIPT: ${{ github.workspace }}/scripts/test-webui-journey.py
+        run: |
+          WEBUI_BROWSER_PYTHON="$RUNNER_TEMP/browser/bin/python" \
+          WEBUI_BROWSER_OUTPUT="$RUNNER_TEMP/journey-evidence" \
+          WEBUI_AXE_SCRIPT="$RUNNER_TEMP/axe.min.js" \
+          WEBUI_LIGHTHOUSE="$RUNNER_TEMP/lighthouse/node_modules/.bin/lighthouse" \
+            cargo test --locked -p listmngr-api --test webui chromium_acceptance_journey -- --ignored --nocapture
+
   container:
     runs-on: ubuntu-24.04
     steps:
