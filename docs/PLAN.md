@@ -57,7 +57,7 @@ trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
 
 Chưa có: bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE), toàn bộ
 Phase 4–7 trừ các lát nêu trên (P4-SHELL, toàn bộ P4-ACCOUNT-*, P4-TOTP,
-P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS, P4-GDPR đã đóng; kế tiếp là P4-ACCEPTANCE). Chi tiết và thứ tự ở §7.
+P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS, P4-GDPR, P4-ACCEPTANCE đã đóng — Phase 4 hoàn tất theo ledger; kế tiếp là Phase 5, bắt đầu P5-RENDER). Chi tiết và thứ tự ở §7.
 
 ## 0. Tóm tắt 1 phút
 
@@ -926,9 +926,9 @@ Work packages, theo thứ tự; mỗi ID một nhánh:
 | ~~P4-SYSTEM~~ (xong) | S | versions + DB backend; config masked (`redacted_json`, dotted keys); queue depth theo state + oldest ready + runner giữ lease; MTA maps status (kind/directory/target/generation `current`); audit log viewer lọc action prefix + target, phân trang | ĐẠT: `crates/api/tests/webui/system.rs` + contract PostgreSQL; Chromium: system page, audit filter |
 | ~~P4-MODERATION-CROSS~~ (xong) | S | `/moderation` tổng hợp cross-list: mọi held post + request của các list mình kiểm duyệt (macro dùng chung với queue từng list, cap 50/loại), quyết định quay về trang tổng hợp (`back=moderation`); không bulk cross-list | ĐẠT: `crates/api/tests/webui/moderation_cross.rs` + contract PostgreSQL; Chromium: trang tổng hợp 3 held + 1 request |
 | ~~P4-GDPR~~ (xong)   | S      | export JSON (account, preferences, addresses, memberships, token metadata, domains owned, sessions count, audit events) cho chính mình và cho admin; erase qua trang admin (gõ lại địa chỉ, chặn owner cuối) và CLI `user export/erase`; không anonymise archive | ĐẠT: `crates/api/tests/webui/gdpr.rs` + contract PostgreSQL + `crates/cli/tests/gdpr.rs`; Chromium: export JSON, erase owner cuối bị từ chối |
-| P4-ACCEPTANCE        | M      | Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe, CSP, Lighthouse a11y ≥ 95, mobile viewport, gate trong CI                                                                                                                                                    |                                                                                                 |
+| ~~P4-ACCEPTANCE~~ (xong) | M | journey Playwright ở viewport 390×844 (signup → verify → login → create list → subscribe+confirm → post held → accept → settings → logout) với bridge token/owner/post từ harness Rust; axe mỗi stop; Lighthouse a11y ≥ 95 trên 4 trang; CSP (harness cũ); job CI `browser` chạy cả hai harness với tool pin | ĐẠT: `chromium_acceptance_journey` + `scripts/test-webui-journey.py`; `.github/workflows/ci.yml` job `browser` |
 
-- Acceptance: Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe a11y không lỗi critical, CSP không violation, Lighthouse a11y ≥ 95, mobile viewport pass.
+- Acceptance: Playwright e2e (signup → create list → subscribe → post → moderate → settings), axe a11y không lỗi critical, CSP không violation, Lighthouse a11y ≥ 95, mobile viewport pass — **đạt** qua P4-ACCEPTANCE (ledger); "post" là held message do harness chèn, mail path có e2e riêng.
 
 ### Phase 5 — Archive, HyperKitty parity (L)
 
