@@ -1,0 +1,13 @@
+C|archive_attachments|content|text|required|-
+C|archive_attachments|content_type|text|required|-
+C|archive_attachments|filename|text|required|-
+C|archive_attachments|hash|text|required|-
+C|archive_attachments|list_id|text|required|-
+C|archive_attachments|position|integer|required|-
+C|archive_attachments|size|integer|required|-
+C|archive_messages|message_date|integer|optional|-
+C|archive_messages|parent_hash|text|optional|-
+C|archive_messages|sender_email|text|required|-
+C|archive_messages|sender_name|text|required|-
+F|archive_attachments|list_id|mailing_lists|list_id|cascade
+U|archive_attachments|list_id,hash,position

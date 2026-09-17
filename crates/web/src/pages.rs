@@ -569,25 +569,58 @@ pub struct Archive {
     pub all_href: String,
     /// mbox export of this selection.
     pub download_href: String,
+    /// Whether the messages are one thread laid out as a tree.
+    pub tree: bool,
     /// Messages on this page.
     pub messages: Vec<ArchiveMessage>,
     /// Previous page link.
     pub previous: Option<String>,
     /// Next page link.
     pub next: Option<String>,
+    /// The owner's reattach form on a single-message page.
+    pub reattach: Option<ReattachForm>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+}
+
+/// The owner's form to move a post under another post.
+#[derive(Debug)]
+pub struct ReattachForm {
+    /// Form target.
+    pub action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// The post being moved.
+    pub message: String,
+    /// Its current parent, possibly empty.
+    pub parent: String,
 }
 
 /// One archived message.
 #[derive(Debug)]
 pub struct ArchiveMessage {
+    /// Message-ID-Hash.
+    pub hash: String,
     /// Subject.
     pub subject: String,
     /// Thread view link.
     pub thread_href: String,
     /// Stable permalink.
     pub permalink: String,
-    /// Rendered body text.
-    pub body: String,
+    /// The sender's display name, possibly empty.
+    pub sender: String,
+    /// The sender's address as the reader may see it.
+    pub sender_email: String,
+    /// The avatar proxy path, when avatars are on.
+    pub avatar: Option<String>,
+    /// The post's date, formatted; empty when unknown.
+    pub date: String,
+    /// Permalink of the post replied to, when known.
+    pub in_reply_to: Option<String>,
+    /// Depth in the thread tree (0 for a root), capped.
+    pub depth: usize,
+    /// The body as safe HTML produced by the archive renderer.
+    pub body_html: String,
     /// Downloadable attachments.
     pub attachments: Vec<ArchiveAttachment>,
     /// Whether the attachment list could not be produced.

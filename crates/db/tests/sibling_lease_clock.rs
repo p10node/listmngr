@@ -54,6 +54,7 @@ async fn complete(db: &Database, list: &ListId, lease: &Lease, clock: &Clock) ->
                     subject: String::new(),
                     body: String::new(),
                     raw: vec![],
+                    ..ArchiveMessage::default()
                 },
                 101,
             )

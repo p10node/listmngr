@@ -1501,7 +1501,11 @@ config_struct!(AntispamConfig {
 config_struct!(ArchiveConfig {
     enabled: bool = true,
     index_path: String = "data/index".into(),
-    default_policy: ArchivePolicy = ArchivePolicy::Public
+    default_policy: ArchivePolicy = ArchivePolicy::Public,
+    // Opt-in avatars: the archive shows a Gravatar for each sender, fetched
+    // through this server (`/web/gravatar/<sha256>`), never by the browser.
+    gravatar: bool = false,
+    gravatar_url: String = "https://www.gravatar.com/avatar/".into()
 });
 config_struct!(RunnerConfig {
     lock_timeout: String = "10m".into()

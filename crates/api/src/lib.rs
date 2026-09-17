@@ -679,6 +679,9 @@ pub struct AppState {
     /// The queue-depth part of `/metrics`, refreshed at most every few
     /// seconds so an unauthenticated scrape cannot hammer the database.
     queue_metrics: Arc<std::sync::Mutex<Option<(Instant, String)>>>,
+    /// `[archive] gravatar`: avatars fetched through this server, cached
+    /// for an hour by the sender's hash.
+    avatars: Arc<DashMap<String, (Instant, String, bytes::Bytes)>>,
 }
 
 const QUEUE_METRICS_TTL: Duration = Duration::from_secs(5);
@@ -912,6 +915,7 @@ pub fn router(db: Database, config: Config) -> Router {
         oidc,
         mta_maps,
         queue_metrics: Arc::new(std::sync::Mutex::new(None)),
+        avatars: Arc::new(DashMap::new()),
     };
     let mut compat_state = state.clone();
     compat_state.flavor = ApiFlavor::Compat31;

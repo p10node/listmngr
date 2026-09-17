@@ -9,7 +9,7 @@ async fn dmarc_delivery_policy_does_not_rewrite_archive_authorship() {
     settings.dmarc.unconditional = true;
     let raw = base64::engine::general_purpose::STANDARD
         .encode(b"From: author@elsewhere.invalid\r\nMessage-ID: <p@elsewhere.invalid>\r\n\r\nbody");
-    let rows = sqlx::query("SELECT 'hash' AS hash,'hash' AS thread,0 AS anonymous_list,'' AS subject_prefix,'munge_from' AS dmarc_mitigate_action,1 AS dmarc_mitigate_unconditionally,$1 AS raw_b64").bind(raw).fetch_all(db.pool()).await.unwrap();
+    let rows = sqlx::query("SELECT 'hash' AS hash,'hash' AS thread,0 AS anonymous_list,'' AS subject_prefix,'munge_from' AS dmarc_mitigate_action,1 AS dmarc_mitigate_unconditionally,$1 AS raw_b64,'' AS sender_name,'' AS sender_email,NULL AS message_date,NULL AS parent_hash").bind(raw).fetch_all(db.pool()).await.unwrap();
     let rendered = render_rows(settings, &rows, None).unwrap();
     let parsed = mail_parser::MessageParser::default()
         .parse(&rendered[0].raw)
