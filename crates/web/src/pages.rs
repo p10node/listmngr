@@ -141,6 +141,8 @@ pub struct AdminIndex {
     pub shell: Shell,
     /// The create-list form, when this reader may create one.
     pub create_href: Option<String>,
+    /// Whether the reader is a server owner, with the site-wide pages.
+    pub site_admin: bool,
     /// Administered lists on this page.
     pub rows: Vec<AdminRow>,
     /// Listing paging.
@@ -1286,4 +1288,165 @@ pub struct Flag {
     pub help: String,
     /// Whether it is checked.
     pub checked: bool,
+}
+
+/// The server owner's domains with the form to add one.
+#[derive(Debug, Template)]
+#[template(path = "domains.html")]
+pub struct Domains {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Every domain.
+    pub rows: Vec<DomainRow>,
+    /// The add form's fields with their refusals.
+    pub fields: Vec<SettingField>,
+    /// A refusal that belongs to no one field.
+    pub error: Option<String>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+}
+
+/// One domain in the index.
+#[derive(Debug)]
+pub struct DomainRow {
+    /// The domain page.
+    pub href: String,
+    /// Mail host.
+    pub mail_host: String,
+    /// Description.
+    pub description: String,
+    /// Alias domain, empty when none.
+    pub alias: String,
+    /// The owners, one line.
+    pub owners: String,
+    /// How many lists it carries.
+    pub lists: i64,
+}
+
+/// One domain: facts, owners, template overrides, DKIM record, deletion.
+#[derive(Debug, Template)]
+#[template(path = "domain.html")]
+pub struct DomainPage {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// Mail host.
+    pub mail_host: String,
+    /// The domain's facts.
+    pub facts: Vec<Fact>,
+    /// The owners.
+    pub owners: Vec<OwnerRow>,
+    /// The add-owner form target.
+    pub owner_action: String,
+    /// A refusal of the add-owner form.
+    pub owner_error: Option<String>,
+    /// The submitted owner address, kept on refusal.
+    pub owner_email: String,
+    /// Every template name with the languages the domain overrides.
+    pub templates: Vec<TemplateRow>,
+    /// DKIM DNS records from the configuration: name and TXT value.
+    pub dkim: Vec<Fact>,
+    /// The deletion form target.
+    pub delete_action: String,
+    /// A refusal of the deletion.
+    pub delete_error: Option<String>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+    /// Where the domain's lists are.
+    pub lists_href: String,
+}
+
+/// One owner of a domain.
+#[derive(Debug)]
+pub struct OwnerRow {
+    /// Display name.
+    pub display_name: String,
+    /// First address.
+    pub email: String,
+    /// The account's administration page.
+    pub href: String,
+    /// The remove form target.
+    pub remove_action: String,
+}
+
+/// The server owner's account search.
+#[derive(Debug, Template)]
+#[template(path = "admin_users.html")]
+pub struct AdminUsers {
+    /// Document shell.
+    pub shell: Shell,
+    /// The search text as submitted.
+    pub query: String,
+    /// The accounts on this page.
+    pub rows: Vec<AdminUserRow>,
+    /// Paging, carrying the search.
+    pub pagination: Pagination,
+}
+
+/// One account in the search.
+#[derive(Debug)]
+pub struct AdminUserRow {
+    /// The account page.
+    pub href: String,
+    /// Display name.
+    pub display_name: String,
+    /// First address.
+    pub email: String,
+    /// Whether a server owner.
+    pub server_owner: bool,
+    /// When created.
+    pub created: String,
+}
+
+/// One account as the administrator sees it.
+#[derive(Debug, Template)]
+#[template(path = "admin_user.html")]
+pub struct AdminUser {
+    /// Document shell.
+    pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// The edit form target.
+    pub action: String,
+    /// Display name as stored or submitted.
+    pub display_name: String,
+    /// Server-owner choices.
+    pub server_owner: Vec<Choice>,
+    /// A refusal of the edit form.
+    pub error: Option<String>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+    /// The account's facts.
+    pub facts: Vec<Fact>,
+    /// The addresses.
+    pub addresses: Vec<AdminAddressRow>,
+    /// The memberships.
+    pub memberships: Vec<MembershipRow>,
+}
+
+/// One address of an administered account.
+#[derive(Debug)]
+pub struct AdminAddressRow {
+    /// Normalized address.
+    pub email: String,
+    /// Whether verified.
+    pub verified: bool,
+    /// The verify/unverify form target.
+    pub action: String,
+}
+
+/// One membership of an administered account.
+#[derive(Debug)]
+pub struct MembershipRow {
+    /// List id.
+    pub list_id: String,
+    /// Translated role.
+    pub role: String,
+    /// The subscribed address.
+    pub email: String,
+    /// The member's options page.
+    pub href: String,
 }

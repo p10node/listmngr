@@ -383,6 +383,24 @@ pub(crate) async fn resolve_tx(
     resolve_candidates(tx, name, candidates(list, language), language).await
 }
 
+/// Resolution as a list on `host` without its own override would see it:
+/// the domain scope, then the site, then the built-in.
+pub(crate) async fn resolve_domain_tx(
+    tx: &mut Transaction<'_, Any>,
+    name: &str,
+    host: &str,
+    language: &str,
+) -> Result<Resolved> {
+    let candidates = scoped_candidates(
+        vec![
+            Scope::Domain(host.to_owned()).column_values(),
+            Scope::Site.column_values(),
+        ],
+        language,
+    );
+    resolve_candidates(tx, name, candidates, language).await
+}
+
 /// Resolution for mail the site sends outside any list: the site scope, then
 /// the built-in.
 pub(crate) async fn resolve_site_tx(

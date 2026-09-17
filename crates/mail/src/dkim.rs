@@ -39,6 +39,38 @@ fn dns_name(value: &str) -> bool {
         })
 }
 
+/// A private key file: a regular file readable by nobody else, 64 KiB at most.
+fn read_key_file(path: &std::path::Path) -> Result<Vec<u8>> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Do not block opening a FIFO before the descriptor type check.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path).map_err(|_| invalid())?;
+    let metadata = file.metadata().map_err(|_| invalid())?;
+    if !metadata.is_file() {
+        return Err(invalid());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(invalid());
+        }
+    }
+    let mut bytes = Vec::new();
+    file.take(65_537)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid())?;
+    if bytes.len() > 65_536 {
+        return Err(invalid());
+    }
+    Ok(bytes)
+}
+
 impl SigningKeys {
     /// Load operator key files once at runtime startup, never during config display.
     /// # Errors
@@ -57,36 +89,7 @@ impl SigningKeys {
             }
         }
         for entry in config {
-            let mut options = std::fs::OpenOptions::new();
-            options.read(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                // Do not block opening a FIFO before the descriptor type check.
-                options.custom_flags(libc::O_NONBLOCK);
-            }
-            let file = options
-                .open(&entry.private_key_file)
-                .map_err(|_| invalid())?;
-            let metadata = file.metadata().map_err(|_| invalid())?;
-            if !metadata.is_file() {
-                return Err(invalid());
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if metadata.permissions().mode() & 0o077 != 0 {
-                    return Err(invalid());
-                }
-            }
-
-            let mut bytes = Vec::new();
-            file.take(65_537)
-                .read_to_end(&mut bytes)
-                .map_err(|_| invalid())?;
-            if bytes.len() > 65_536 {
-                return Err(invalid());
-            }
+            let bytes = read_key_file(&entry.private_key_file)?;
             let der = PrivateKeyDer::from_pem_slice(&bytes).map_err(|_| invalid())?;
             let key = RsaKey::<Sha256>::from_key_der(der).map_err(|_| invalid())?;
             keys.insert(
@@ -125,6 +128,41 @@ impl SigningKeys {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// The DNS TXT record that publishes the public half of one configured
+    /// key: `(<selector>._domainkey.<domain>, "v=DKIM1; k=rsa; p=…")`. Reads
+    /// the private key file with the same checks as [`Self::load`] and never
+    /// returns private material.
+    /// # Errors
+    /// Returns a redacted error for an unreadable or unsupported RSA key.
+    pub fn dns_record(entry: &DkimSigningConfig) -> Result<(String, String)> {
+        use base64::Engine as _;
+        use rsa::pkcs8::{DecodePrivateKey as _, EncodePublicKey as _};
+        if !dns_name(&entry.domain) || !dns_name(&entry.selector) {
+            return Err(invalid());
+        }
+        let bytes = read_key_file(&entry.private_key_file)?;
+        let der = PrivateKeyDer::from_pem_slice(&bytes).map_err(|_| invalid())?;
+        let private = match der {
+            PrivateKeyDer::Pkcs8(der) => {
+                rsa::RsaPrivateKey::from_pkcs8_der(der.secret_pkcs8_der()).map_err(|_| invalid())
+            }
+            PrivateKeyDer::Pkcs1(der) => {
+                use rsa::pkcs1::DecodeRsaPrivateKey as _;
+                rsa::RsaPrivateKey::from_pkcs1_der(der.secret_pkcs1_der()).map_err(|_| invalid())
+            }
+            _ => Err(invalid()),
+        }?;
+        let public = private
+            .to_public_key()
+            .to_public_key_der()
+            .map_err(|_| invalid())?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(public.as_bytes());
+        Ok((
+            format!("{}._domainkey.{}", entry.selector, entry.domain),
+            format!("v=DKIM1; k=rsa; p={encoded}"),
+        ))
     }
 
     /// Sign final cooked bytes using an authoritative stored list mail host.
