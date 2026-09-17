@@ -24,6 +24,8 @@ mod member_admin;
 mod member_search;
 #[path = "webui/members_admin.rs"]
 mod members_admin;
+#[path = "webui/moderation_cross.rs"]
+mod moderation_cross;
 #[path = "webui/notices.rs"]
 mod notices;
 #[path = "webui/oidc.rs"]

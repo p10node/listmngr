@@ -402,12 +402,28 @@ pub struct Confirmed {
 #[derive(Debug, Template)]
 #[template(path = "moderation.html")]
 pub struct Moderation {
-    /// Document shell.
+    /// Document shell, loading the shortcuts script.
     pub shell: Shell,
+    /// Session CSRF token.
+    pub csrf: String,
     /// Moderated lists on this page.
     pub rows: Vec<ModerationRow>,
     /// Listing paging.
     pub pagination: Pagination,
+    /// Held posts across the lists on this page, bounded.
+    pub held: Vec<HeldItem>,
+    /// Undecided requests across the lists on this page, bounded.
+    pub requests: Vec<RequestItem>,
+    /// Held decisions.
+    pub decisions: Vec<Choice>,
+    /// Request decisions.
+    pub request_decisions: Vec<Choice>,
+    /// No bulk form on this page.
+    pub bulk: bool,
+    /// Decisions come back here.
+    pub back: String,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
 }
 
 /// One moderated list.
@@ -447,6 +463,10 @@ pub struct Held {
     pub error: Option<String>,
     /// Queue paging.
     pub pagination: Pagination,
+    /// The bulk form is on this page.
+    pub bulk: bool,
+    /// Decisions return to the list queue.
+    pub back: String,
 }
 
 /// One held message awaiting a decision.
@@ -454,6 +474,10 @@ pub struct Held {
 pub struct HeldItem {
     /// Held id, for the bulk selection and the shortcuts.
     pub id: String,
+    /// The list the post was held on.
+    pub list_id: String,
+    /// That list's held queue.
+    pub list_href: String,
     /// Subject as held.
     pub subject: String,
     /// Envelope sender.
@@ -506,11 +530,17 @@ pub struct Requests {
     pub decisions: Vec<Choice>,
     /// A notice after a redirect.
     pub notice: Option<String>,
+    /// Decisions return to the list queue.
+    pub back: String,
 }
 
 /// One undecided subscription request.
 #[derive(Debug)]
 pub struct RequestItem {
+    /// The list the request is for.
+    pub list_id: String,
+    /// That list's requests queue.
+    pub list_href: String,
     /// The address as written.
     pub email: String,
     /// Display name, possibly empty.
