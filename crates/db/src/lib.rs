@@ -32,6 +32,7 @@ pub use web_profile::Profile;
 pub mod site_notices;
 pub mod web_addresses;
 pub mod web_delete;
+pub mod web_domains;
 pub mod web_list_settings;
 pub mod web_lists;
 pub mod web_members;
@@ -40,6 +41,7 @@ pub mod web_oidc;
 pub mod web_passkeys;
 pub mod web_tokens;
 pub mod web_totp;
+pub mod web_users;
 pub use web_addresses::OwnAddress;
 pub use web_list_settings::{HeaderMatchChange, TemplateView, header_match_outcomes};
 pub use web_members::{ExportRow, MassFlags, MassOutcome, MemberDetail, MemberOptions, RosterRow};
@@ -520,6 +522,50 @@ impl DomainRepo<'_> {
         )
         .await?;
         tx.commit().await.map_err(db_error)
+    }
+
+    /// Removes a domain owner attributed to the supplied audit context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the domain is missing, the user is not an owner, or the database/audit transaction fails.
+    pub async fn remove_owner_with_context(
+        &self,
+        host: &str,
+        user: UserId,
+        context: &AuditContext,
+    ) -> Result<()> {
+        let domain = self.get(host).await?;
+        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        Self::remove_owner_tx(&mut tx, &domain, user, context).await?;
+        tx.commit().await.map_err(db_error)
+    }
+
+    pub(crate) async fn remove_owner_tx(
+        tx: &mut Transaction<'_, Any>,
+        domain: &Domain,
+        user: UserId,
+        context: &AuditContext,
+    ) -> Result<()> {
+        let changed = sqlx::query("DELETE FROM domain_owners WHERE domain_id=$1 AND user_id=$2")
+            .bind(domain.id.to_string())
+            .bind(user.to_string())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?
+            .rows_affected();
+        if changed == 0 {
+            return Err(Error::NotFound("domain owner".into()));
+        }
+        Database::record_tx_with_context(
+            tx,
+            context,
+            "domain.owner.remove",
+            "domain",
+            &domain.mail_host,
+            serde_json::json!({"user_id":user}),
+        )
+        .await
     }
 
     /// # Errors
