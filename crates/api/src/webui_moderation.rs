@@ -78,11 +78,27 @@ fn review_action(value: &str) -> ApiResult<ReviewAction> {
 }
 
 /// `GET /web/moderation`: the lists the reader moderates, with counts.
+/// The cross-list page's query string: a page and a notice.
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ModerationQuery {
+    #[serde(default)]
+    page: u32,
+    #[serde(default)]
+    done: Option<usize>,
+    #[serde(default)]
+    saved: String,
+}
+
+/// Held posts and requests shown across lists on one page, at most.
+const CROSS_ITEMS: usize = 50;
+
 pub(super) async fn index(
     State(s): State<AppState>,
-    Query(paging): Query<BrowserPage>,
+    Query(q): Query<ModerationQuery>,
     h: HeaderMap,
 ) -> ApiResult<Response> {
+    let paging = BrowserPage { page: q.page };
     let session = load(&s, &h).await?;
     let language = reader_language(&s, &h, &session).await?;
     privileged(&s, &session).await?;
@@ -90,9 +106,39 @@ pub(super) async fn index(
         s.db.browser_moderated_lists(&session, paging.offset()?)
             .await?;
     let more = lists.len() > 20;
+    let lists: Vec<_> = lists.into_iter().take(20).collect();
+    let mut held = Vec::new();
+    let mut requests = Vec::new();
+    for list in &lists {
+        let id: ListId = list.id.parse()?;
+        if held.len() < CROSS_ITEMS && list.held > 0 {
+            for preview in s.db.browser_held_queue(&session, &id, 0).await? {
+                if held.len() >= CROSS_ITEMS {
+                    break;
+                }
+                held.push(item(language, &id, preview));
+            }
+        }
+        if requests.len() < CROSS_ITEMS && list.requests > 0 {
+            for request in s.db.browser_requests(&session, &id).await? {
+                if requests.len() >= CROSS_ITEMS {
+                    break;
+                }
+                requests.push(request_item(language, &id, request));
+            }
+        }
+    }
+    let notice = match (q.done, q.saved.as_str()) {
+        (Some(done), _) => Some(listmngr_i18n::message(
+            language,
+            "web-held-done",
+            &[("done", &done.to_string()), ("skipped", "0")],
+        )),
+        (None, "1") => Some(listmngr_i18n::message(language, "web-requests-done", &[])),
+        _ => None,
+    };
     let rows = lists
         .into_iter()
-        .take(20)
         .map(|list| listmngr_web::ModerationRow {
             href: format!("/web/lists/{}/held", list.id),
             requests_href: format!("/web/lists/{}/requests", list.id),
@@ -111,11 +157,20 @@ pub(super) async fn index(
             ),
         })
         .collect();
-    Ok(html(&listmngr_web::Moderation {
-        shell: Shell::new(language, "web-title-moderation", Nav::Moderation),
+    Ok(scripted(html(&listmngr_web::Moderation {
+        shell: Shell::new(language, "web-title-moderation", Nav::Moderation)
+            .with_script("/web/moderation.js"),
+        csrf: session.csrf.clone(),
         rows,
         pagination: paging.pagination("/web/moderation", more),
-    }))
+        held,
+        requests,
+        decisions: choices(language, DECISIONS, None),
+        request_decisions: choices(language, REQUEST_DECISIONS, None),
+        bulk: false,
+        back: "moderation".into(),
+        notice,
+    })))
 }
 
 #[derive(Deserialize)]
@@ -153,6 +208,8 @@ fn item(language: &str, list: &ListId, preview: HeldPreview) -> HeldItem {
     );
     let sender = preview.held.sender.trim().to_owned();
     HeldItem {
+        list_id: list.to_string(),
+        list_href: base.clone(),
         rule_href: format!(
             "/web/lists/{}/settings/header-matches?{}",
             list.as_str(),
@@ -235,6 +292,8 @@ async fn render_queue(
         notice,
         error,
         pagination: BrowserPage { page }.pagination(&held_base(list), more),
+        bulk: true,
+        back: String::new(),
     })))
 }
 
@@ -278,6 +337,19 @@ pub(super) struct Review {
     comment: String,
     #[serde(default)]
     forward_to: String,
+    /// `moderation` when the form came from the cross-list page.
+    #[serde(default)]
+    back: String,
+}
+
+/// Where a decision returns: the cross-list page when the form came from
+/// there, the list's queue otherwise.
+fn back_to(back: &str, list_page: &str, query: &str) -> String {
+    if back == "moderation" {
+        format!("/web/moderation?{query}")
+    } else {
+        format!("{list_page}?{query}")
+    }
 }
 
 fn forward(value: &str) -> Option<&str> {
@@ -312,7 +384,7 @@ pub(super) async fn review(
         )
         .await
     {
-        Ok(()) => Ok(Redirect::to(&format!("{}?done=1", held_base(&list))).into_response()),
+        Ok(()) => Ok(Redirect::to(&back_to(&f.back, &held_base(&list), "done=1")).into_response()),
         Err(Error::Validation(message)) if message.contains("forward") => {
             let text = listmngr_i18n::message(language, "web-held-forward-refused", &[]);
             Ok(inline_refusal(
@@ -461,28 +533,7 @@ pub(super) async fn requests(
         s.db.browser_requests(&session, &list)
             .await?
             .into_iter()
-            .map(|request| RequestItem {
-                decide_action: format!("{}/{}", requests_base(&list), request.id),
-                action: listmngr_i18n::message(
-                    language,
-                    match request.action {
-                        SubscriptionAction::Join => "web-requests-join",
-                        SubscriptionAction::Leave => "web-requests-leave",
-                    },
-                    &[],
-                ),
-                waiting: listmngr_i18n::message(
-                    language,
-                    match request.token_owner {
-                        TokenOwner::Subscriber => "web-requests-waiting-address",
-                        TokenOwner::Moderator => "web-requests-waiting-moderator",
-                    },
-                    &[],
-                ),
-                requested_at: stamp(request.requested_at),
-                email: request.email,
-                display_name: request.display_name,
-            })
+            .map(|request| request_item(language, &list, request))
             .collect();
     let notice =
         (q.saved == "1").then(|| listmngr_i18n::message(language, "web-requests-done", &[]));
@@ -493,7 +544,40 @@ pub(super) async fn requests(
         items,
         decisions: choices(language, REQUEST_DECISIONS, None),
         notice,
+        back: String::new(),
     }))
+}
+
+/// One request as a queue shows it.
+fn request_item(
+    language: &str,
+    list: &ListId,
+    request: listmngr_db::workflows::PendingRequest,
+) -> RequestItem {
+    RequestItem {
+        list_id: list.to_string(),
+        list_href: requests_base(list),
+        decide_action: format!("{}/{}", requests_base(list), request.id),
+        action: listmngr_i18n::message(
+            language,
+            match request.action {
+                SubscriptionAction::Join => "web-requests-join",
+                SubscriptionAction::Leave => "web-requests-leave",
+            },
+            &[],
+        ),
+        waiting: listmngr_i18n::message(
+            language,
+            match request.token_owner {
+                TokenOwner::Subscriber => "web-requests-waiting-address",
+                TokenOwner::Moderator => "web-requests-waiting-moderator",
+            },
+            &[],
+        ),
+        requested_at: stamp(request.requested_at),
+        email: request.email,
+        display_name: request.display_name,
+    }
 }
 
 #[derive(Deserialize)]
@@ -504,6 +588,8 @@ pub(super) struct DecideForm {
     decision: String,
     #[serde(default)]
     reason: String,
+    #[serde(default)]
+    back: String,
 }
 
 /// `POST /web/lists/{id}/requests/{request}`.
@@ -527,5 +613,5 @@ pub(super) async fn decide(
     };
     s.db.browser_decide_request(&session, &list, &request, decision, &f.reason)
         .await?;
-    Ok(Redirect::to(&format!("{}?saved=1", requests_base(&list))).into_response())
+    Ok(Redirect::to(&back_to(&f.back, &requests_base(&list), "saved=1")).into_response())
 }

@@ -1,5 +1,18 @@
 # Architecture
 
+## Cross-list moderation — bounded local acceptance verified
+
+No new persistence: `webui_moderation::index` walks the moderated lists of
+the page (`browser_moderated_lists`) and, for each with something waiting,
+reads its first held page (`browser_held_queue`) and its requests
+(`browser_requests`), capped at fifty of each, so authority is the list's on
+every read as on every write. The held and request articles are Askama
+macros (`held_article`, `request_article` in `macros.html`) shared by the
+list queues and the cross page; the macros take the CSRF token, the
+decisions, whether a bulk form exists and a `back` marker. The decision
+handlers accept `back=moderation` and redirect to `/web/moderation` instead
+of the list's queue; nothing else about them changed.
+
 ## System page and audit log — bounded local acceptance verified
 
 `crates/db/src/web_system.rs` holds two read projections under

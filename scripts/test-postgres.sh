@@ -98,6 +98,8 @@ cargo test --locked -p listmngr-api --test webui \
   domains_users::postgres_domains_users_contract -- --ignored --exact
 cargo test --locked -p listmngr-api --test webui \
   system::postgres_system_contract -- --ignored --exact
+cargo test --locked -p listmngr-api --test webui \
+  moderation_cross::postgres_moderation_cross_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::dsn_issuance_tests::dsn_issuance_postgres -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \

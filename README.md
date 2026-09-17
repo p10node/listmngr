@@ -1,5 +1,21 @@
 # listmngr
 
+## Cross-list moderation (`P4-MODERATION-CROSS`) — bounded local acceptance verified
+
+`/web/moderation` is now one queue. Under the per-list counts it carries every
+held post across the lists the reader moderates (oldest first per list, up to
+fifty) with the same preview and decision form as the list queue — decision,
+comment, forward, the sender's posting policy, ban, header-rule shortcut —
+and every undecided subscription request with its decision form, each naming
+its list with a link to that list's queue. A decision made here returns here
+(`?done=1`, `?saved=1`); the same forms on a list's queue still return to that
+queue. The keyboard shortcuts work on this page too.
+
+Limits: no bulk decision across lists (the list queue keeps its bulk form);
+the page shows the first page of each list's queue, capped at fifty posts
+and fifty requests; sender and ban actions from a post return to that list's
+queue.
+
 ## System page and audit log (`P4-SYSTEM`) — bounded local acceptance verified
 
 `/web/admin/system`, for server owners, shows the software and REST API
