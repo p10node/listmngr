@@ -64,3 +64,42 @@ pub fn content(raw: &[u8], index: usize) -> Result<Option<Vec<u8>>> {
     .ok_or(Error::CorruptMessage)?;
     Ok(Some(decoded))
 }
+
+/// One attachment as the archive stores it: its name, declared type and
+/// decoded bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stored {
+    pub filename: String,
+    pub content_type: String,
+    pub content: Vec<u8>,
+}
+
+/// Every attachment of a message, decoded once, for the archive to store.
+/// # Errors
+/// Rejects malformed or oversized messages and excessive attachment counts.
+pub fn stored(raw: &[u8]) -> Result<Vec<Stored>> {
+    let names = names(raw)?;
+    let message = parse(raw)?;
+    let mut out = Vec::with_capacity(names.len());
+    for (index, (part, filename)) in message.attachments().zip(names).enumerate() {
+        let content_type = part
+            .content_type()
+            .map_or_else(
+                || "application/octet-stream".to_owned(),
+                |ct| {
+                    ct.subtype().map_or_else(
+                        || ct.ctype().to_string(),
+                        |subtype| format!("{}/{subtype}", ct.ctype()),
+                    )
+                },
+            )
+            .to_ascii_lowercase();
+        let content = content(raw, index)?.ok_or(Error::CorruptMessage)?;
+        out.push(Stored {
+            filename,
+            content_type,
+            content,
+        });
+    }
+    Ok(out)
+}

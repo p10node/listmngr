@@ -42,3 +42,11 @@ article:focus{outline:3px solid var(--focus);outline-offset:3px}
 input[type="checkbox"]{display:inline-block;width:auto;margin:0 .4rem 0 0;vertical-align:middle}
 .badge{display:inline-block;background:var(--code);border:1px solid var(--line);border-radius:var(--radius);padding:0 .5rem;font-size:.85em}
 .list-id{color:var(--muted);margin:0 0 .5rem}
+.post .sender{color:var(--muted);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.post .avatar{border-radius:50%;width:40px;height:40px}
+.post .body pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.post .body details.quote{margin:.5rem 0;color:var(--muted)}
+.post .body details.quote summary{cursor:pointer}
+.post .body blockquote{border-left:.25rem solid var(--line);margin:.5rem 0;padding:0 .75rem;color:var(--muted)}
+.depth-1{margin-left:1rem}.depth-2{margin-left:2rem}.depth-3{margin-left:3rem}.depth-4{margin-left:4rem}.depth-5{margin-left:5rem}.depth-6{margin-left:6rem}.depth-7{margin-left:7rem}.depth-8{margin-left:8rem}
+@media (max-width:40rem){.depth-1,.depth-2,.depth-3,.depth-4,.depth-5,.depth-6,.depth-7,.depth-8{margin-left:.75rem}}
