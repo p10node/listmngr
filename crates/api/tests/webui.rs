@@ -1508,9 +1508,13 @@ async fn own_preferences_are_persisted_and_other_members_are_forbidden() {
 }
 
 async fn held(db: &Database) -> listmngr_db::moderation::HeldId {
+    held_on(db, "public.example.com").await
+}
+/// A nonmember post held on `list`.
+async fn held_on(db: &Database, list: &str) -> listmngr_db::moderation::HeldId {
     use listmngr_db::mail_queue::{NewMessage, Queue};
-    let id = "public.example.com".parse().unwrap();
-    db.mail_queue().enqueue(NewMessage{raw:b"From: sender@example.com\r\nSubject: <script>held</script>\r\n\r\nUntrusted <b>body</b>".to_vec(),external_id:uuid::Uuid::now_v7().to_string(),context:serde_json::json!({"version":1,"list_id":"public.example.com","envelope_sender":"sender@example.com"}).to_string(),queue:Queue::In,max_attempts:5},1000).await.unwrap();
+    let id: listmngr_core::ListId = list.parse().unwrap();
+    db.mail_queue().enqueue(NewMessage{raw:b"From: sender@example.com\r\nSubject: <script>held</script>\r\n\r\nUntrusted <b>body</b>".to_vec(),external_id:uuid::Uuid::now_v7().to_string(),context:serde_json::json!({"version":1,"list_id":list,"envelope_sender":"sender@example.com"}).to_string(),queue:Queue::In,max_attempts:5},1000).await.unwrap();
     let lease = db
         .mail_queue()
         .claim(Queue::In, "test-web", 1000, 10000)
@@ -2737,4 +2741,188 @@ async fn verify_pg_effects(
         "PG AUTHORITY MATRIX PASS review={review} change={change}: HTTP {}, business/audit/Out/log verified",
         response.status()
     );
+}
+
+/// The Phase 4 acceptance journey at a phone viewport: one person signs up,
+/// verifies, signs in, creates a list, subscribes an address with mailbox
+/// confirmation, sees the first post held, accepts it from the moderation
+/// page, changes a setting and signs out. The harness bridges the mails'
+/// tokens, seats the new account as a domain owner and holds the post; it
+/// then checks the database for what the browser claimed.
+#[tokio::test]
+#[ignore = "requires WEBUI_BROWSER_PYTHON, WEBUI_JOURNEY_SCRIPT and WEBUI_BROWSER_OUTPUT"]
+async fn chromium_acceptance_journey() {
+    let python = std::env::var("WEBUI_BROWSER_PYTHON").expect("browser Python");
+    let script = std::env::var("WEBUI_JOURNEY_SCRIPT").expect("journey script");
+    let output =
+        std::env::var("WEBUI_BROWSER_OUTPUT").expect("outside-repository evidence directory");
+    private_browser_evidence_directory(&output);
+    let bridge = std::path::Path::new(&output).join(".journey");
+    let _ = std::fs::remove_dir_all(&bridge);
+    std::fs::create_dir_all(&bridge).unwrap();
+    let (db, _) = fixture().await;
+    user(&db, "browser@example.com", true).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let public = format!("http://localhost:{}", address.port());
+    let mut config = Config::default();
+    config.site.base_url = public.clone();
+    let app = listmngr_api::router(db.clone(), config);
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let child_bridge = bridge.clone();
+    let mut child = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(python)
+            .arg(script)
+            .env("WEBUI_URL", public)
+            .env("WEBUI_OUTPUT", output)
+            .env("WEBUI_BRIDGE_DIR", child_bridge)
+            .env("WEBUI_TEST_PASSWORD", "walrus-corridor-lantern-92")
+            .status()
+            .expect("launch browser")
+    });
+    let bridge_db = db.clone();
+    let bridge_dir = bridge.clone();
+    let bridge_task = async move {
+        let mut tokens: Vec<String> = Vec::new();
+        let mut granted = false;
+        let mut held = false;
+        loop {
+            journey_tokens(&bridge_db, &bridge_dir, &mut tokens).await;
+            if !granted {
+                granted = journey_grant(&bridge_db, &bridge_dir).await;
+            }
+            if !held {
+                held = journey_hold(&bridge_db, &bridge_dir).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    };
+    let result = tokio::time::timeout(std::time::Duration::from_secs(420), async {
+        tokio::select! { result = &mut child => result, () = bridge_task => child.await }
+    })
+    .await
+    .expect("journey deadline");
+    let _ = std::fs::remove_dir_all(&bridge);
+    server.abort();
+    assert!(result.unwrap().success(), "journey assertions failed");
+    journey_database_state(&db).await;
+}
+
+/// What the browser claimed, checked in the database after the journey.
+async fn journey_database_state(db: &Database) {
+    let journey = db
+        .users()
+        .get_by_email("journey@example.com")
+        .await
+        .unwrap();
+    assert!(
+        db.addresses()
+            .get("journey@example.com")
+            .await
+            .unwrap()
+            .verified_on
+            .is_some()
+    );
+    let list: listmngr_core::ListId = "journey.example.com".parse().unwrap();
+    let stored = db.lists().get(&list).await.unwrap();
+    assert_eq!(stored.display_name, "Journey list");
+    assert_eq!(stored.description, "Set during the journey");
+    let owners = db
+        .members()
+        .roster(&list, listmngr_core::MemberRole::Owner)
+        .await
+        .unwrap();
+    assert_eq!(owners.len(), 1);
+    assert_eq!(owners[0].user_id, Some(journey.id));
+    let members = db
+        .members()
+        .roster(&list, listmngr_core::MemberRole::Member)
+        .await
+        .unwrap();
+    assert_eq!(members.len(), 1, "the confirmed subscription");
+    let accepted: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM held_messages WHERE list_id='journey.example.com' AND disposition='accepted'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        accepted, 1,
+        "the held post accepted from the moderation page"
+    );
+    let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM web_sessions WHERE user_id=$1")
+        .bind(journey.id.to_string())
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(sessions, 0, "logout ended the session");
+    println!(
+        "JOURNEY DB PASS: account verified; list created with its creator as owner; one confirmed member; the held post accepted; the description saved; no session left."
+    );
+}
+
+/// Every token the site has mailed so far, each written once as
+/// `token-<n>` in the order the mails appeared.
+async fn journey_tokens(db: &Database, bridge: &std::path::Path, seen: &mut Vec<String>) {
+    let raws: Vec<Vec<u8>> = sqlx::query_scalar("SELECT raw FROM message_blobs")
+        .fetch_all(db.pool())
+        .await
+        .unwrap_or_default();
+    for raw in raws {
+        let Ok(text) = std::str::from_utf8(&raw) else {
+            continue;
+        };
+        let text = text.replace("\r\n", "\n");
+        let found = text
+            .split("Token: ")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .or_else(|| {
+                text.split("enter this token:")
+                    .nth(1)
+                    .and_then(|rest| rest.split_whitespace().next())
+            });
+        if let Some(token) = found
+            && !seen.iter().any(|known| known == token)
+        {
+            seen.push(token.to_owned());
+            std::fs::write(bridge.join(format!("token-{}", seen.len())), token).unwrap();
+        }
+    }
+}
+
+/// Once the journey account has a verified address, seat it as an owner of
+/// the fixture domain so it may create a list.
+async fn journey_grant(db: &Database, bridge: &std::path::Path) -> bool {
+    let Ok(address) = db.addresses().get("journey@example.com").await else {
+        return false;
+    };
+    let (Some(user), Some(_)) = (address.user_id, address.verified_on) else {
+        return false;
+    };
+    db.domains().add_owner("example.com", user).await.unwrap();
+    std::fs::write(bridge.join("owner-granted"), "granted").unwrap();
+    true
+}
+
+/// Once the friend's subscription is confirmed, hold a nonmember post on
+/// the new list, as the mail path would.
+async fn journey_hold(db: &Database, bridge: &std::path::Path) -> bool {
+    let list: listmngr_core::ListId = match "journey.example.com".parse() {
+        Ok(list) => list,
+        Err(_) => return false,
+    };
+    let Ok(members) = db
+        .members()
+        .roster(&list, listmngr_core::MemberRole::Member)
+        .await
+    else {
+        return false;
+    };
+    if members.is_empty() {
+        return false;
+    }
+    held_on(db, "journey.example.com").await;
+    std::fs::write(bridge.join("post-held"), "held").unwrap();
+    true
 }
