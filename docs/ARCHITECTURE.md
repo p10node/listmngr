@@ -1,5 +1,47 @@
 # Architecture
 
+## Archive browsing — bounded local acceptance verified
+
+`ArchiveRepo::browse` (`crates/db/src/archive_browse.rs`, migration
+`0049_archive_views.sql`) owns the reading views behind the archive's
+browsing pages. `browser_authorize` applies the list's policy once per
+request (public to anyone; private to a verified member checked inside a
+`browser_write_tx` against the live session; `never` is not found).
+`browser_overview` counts posts, threads and distinct senders, buckets the
+post dates into months in Rust (portable across SQLite and PostgreSQL;
+capped at 200 000 dates), and lists the latest threads, the threads with
+most posts in the last thirty days, and the senders with most posts in that
+window. `browser_threads` pages one bounded query grouped by thread
+(`ThreadSelection::{Latest, Between, Active}`, twenty-one rows so the page
+knows whether a next one exists), joining the reader's rows of
+`archive_thread_views` to mark threads with posts newer than their last
+visit; `browser_mark_viewed` records the visit (a per-reader bookmark, not a
+business write, so it carries no audit event). `browser_senders` and
+`browser_sender_posts` back the sender page, whose address is found by
+comparing SHA-256 digests in the handler so the address never appears in a
+URL; `browser_latest_posts` feeds the feeds. Every post these views return
+passes through `read_browser_message`, so rendering and attachment metadata
+are the same as on any page.
+
+In the API (`crates/api/src/webui_archive.rs`) the browse handler is split
+into `browse_with` (shared by `?thread=` and the canonical
+`/archive/thread/{hash}` page, which also refuses absent threads), a
+`Viewer` (language, address visibility, rendering mode, ownership, CSRF)
+built once per request, and the new handlers `overview`, `threads`,
+`threads_month`, `sender`, `feed_atom` and `feed_rss`. The search page
+passes the index's `Results::total` to the template and marks the query's
+words through `listmngr_archive::render::highlight`, a scanner over the
+renderer's own safe HTML that copies tags and character references
+verbatim and wraps whole-word matches in text nodes with `<mark>`. Feeds render
+through the askama templates `feed_atom.xml` and `feed_rss.xml` (the
+crate's escaper now also covers `.xml`), with absolute links from
+`site.base_url`, sender names only and obfuscated 500-character summaries,
+and are served with `nosniff`; no handler builds markup by hand, as
+`webui_shell.rs` enforces. Templates `archive_overview.html`,
+`archive_threads.html`, `archive_sender.html` and the shared
+`archive_macros.html` (the sub-navigation and the thread table) live in
+`crates/web/templates`.
+
 ## Archive search — bounded local acceptance verified
 
 `listmngr_archive::search` owns the tantivy index: a fixed schema (`key`

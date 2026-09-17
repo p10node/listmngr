@@ -6,6 +6,8 @@ mod admin_pagination;
 mod archive_render;
 #[path = "webui/archive_search.rs"]
 mod archive_search;
+#[path = "webui/archive_ui.rs"]
+mod archive_ui;
 #[path = "webui/delete_account.rs"]
 mod delete_account;
 #[path = "webui/domains_users.rs"]
@@ -1986,7 +1988,7 @@ async fn seed_browser_archive(db: &Database) {
         .await
         .unwrap();
     let raw = b"From: sender@example.com\r\nSubject: Browser archive fixture\r\nContent-Type: text/plain\r\n\r\nArchived text <script>unsafe</script>";
-    sqlx::query("INSERT INTO archive_messages(list_id,hash,thread,subject,body,raw_b64,created_at) VALUES('public.example.com','browser-archive','browser-thread','Browser archive fixture','Archived text',$1,1)")
+    sqlx::query("INSERT INTO archive_messages(list_id,hash,thread,subject,body,raw_b64,created_at,sender_name,sender_email) VALUES('public.example.com','browser-archive','browser-thread','Browser archive fixture','Archived text',$1,1,'Sender','sender@example.com')")
         .bind(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, raw))
         .execute(db.pool()).await.unwrap();
 }

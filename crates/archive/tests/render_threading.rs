@@ -140,3 +140,18 @@ fn markdown_renders_the_safe_subset_only() {
     );
     assert!(!html.contains("<div"), "{html}");
 }
+
+#[test]
+fn highlights_whole_words_and_leaves_tags_and_entities_alone() {
+    use listmngr_archive::render::{highlight, terms};
+    let terms = terms("Release, lt b-PLAN");
+    assert_eq!(terms, ["release", "lt", "b", "plan"]);
+    let html = "<p class=\"b\">Release &lt;b&gt; plan &amp; release-notes; releases</p>";
+    assert_eq!(
+        highlight(html, &terms),
+        "<p class=\"b\"><mark>Release</mark> &lt;<mark>b</mark>&gt; <mark>plan</mark> &amp; <mark>release</mark>-notes; releases</p>"
+    );
+    assert_eq!(highlight("plain", &[]), "plain");
+    assert_eq!(highlight("a & b", &terms), "a & <mark>b</mark>");
+    assert_eq!(highlight("<unterminated", &terms), "<unterminated");
+}

@@ -42,6 +42,13 @@ article:focus{outline:3px solid var(--focus);outline-offset:3px}
 input[type="checkbox"]{display:inline-block;width:auto;margin:0 .4rem 0 0;vertical-align:middle}
 .badge{display:inline-block;background:var(--code);border:1px solid var(--line);border-radius:var(--radius);padding:0 .5rem;font-size:.85em}
 .list-id{color:var(--muted);margin:0 0 .5rem}
+.badge.new{background:var(--accent);color:#ffffff;border-color:var(--accent)}
+.subnav{margin:0 0 1rem;color:var(--muted)}
+.figures{display:flex;flex-wrap:wrap;gap:1rem;margin:0 0 1rem}.figures div{border:1px solid var(--line);border-radius:var(--radius);padding:.5rem .9rem;min-width:7rem}.figures dt{color:var(--muted);font-size:.85em}.figures dd{margin:0;font-size:1.4em;font-weight:600}
+.months{columns:2;list-style:none;padding:0}
+.muted{color:var(--muted)}
+mark{background:#fde68a;color:#172b3a;padding:0 .1em}
+.post .sender a{color:inherit}
 .post .sender{color:var(--muted);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .post .avatar{border-radius:50%;width:40px;height:40px}
 .post .body pre{white-space:pre-wrap;overflow-wrap:anywhere}

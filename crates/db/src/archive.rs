@@ -5,6 +5,8 @@ use base64::Engine;
 use listmngr_core::{Error, ListId, Result};
 use serde::Serialize;
 use sqlx::Row;
+#[path = "archive_browse.rs"]
+pub mod browse;
 #[path = "browser_archive.rs"]
 mod browser;
 enum Selection<'a> {

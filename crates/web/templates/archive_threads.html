@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% import "archive_macros.html" as archive %}
+{% block content %}{% call archive::links(shell, links) %}{% endcall %}<h2>{{ heading }}</h2>{% call archive::threads(shell, threads) %}{% endcall %}{% if let Some(href) = previous %}<a href="{{ href }}">{{ shell.t("web-archive-previous") }}</a> {% endif %}{% if let Some(href) = next %}<a href="{{ href }}">{{ shell.t("web-archive-next") }}</a>{% endif %}{% endblock %}
