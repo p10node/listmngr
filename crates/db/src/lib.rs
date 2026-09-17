@@ -33,6 +33,7 @@ pub mod site_notices;
 pub mod web_addresses;
 pub mod web_delete;
 pub mod web_list_settings;
+pub mod web_lists;
 pub mod web_members;
 pub mod web_moderation;
 pub mod web_oidc;
@@ -1193,18 +1194,43 @@ impl ListRepo<'_> {
         new: NewList,
         context: &AuditContext,
     ) -> Result<MailingList> {
-        self.db.domains().get(new.list_id.mail_host()).await?;
+        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let list = Self::create_tx(&mut tx, new, context).await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(list)
+    }
+    /// Creates a list inside `tx`: the domain must exist, the style must be
+    /// built in, and the `list.create` event is recorded in the same
+    /// transaction. The caller commits.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a missing domain, an unknown style, a conflicting
+    /// id, or database/audit failure.
+    pub(crate) async fn create_tx(
+        tx: &mut Transaction<'_, Any>,
+        new: NewList,
+        context: &AuditContext,
+    ) -> Result<MailingList> {
+        let domain: Option<String> =
+            sqlx::query_scalar("SELECT mail_host FROM domains WHERE mail_host=$1")
+                .bind(new.list_id.mail_host())
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(db_error)?;
+        if domain.is_none() {
+            return Err(Error::NotFound(new.list_id.mail_host().to_owned()));
+        }
         let mut list = MailingList::new(new.list_id, new.display_name);
         let style = builtin_styles()
             .into_iter()
             .find(|s| s.name() == new.style)
             .ok_or_else(|| Error::Validation(format!("unknown style: {}", new.style)))?;
         style.apply(&mut list);
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
         sqlx::query("INSERT INTO mailing_lists(delivery_incarnation,list_id,list_name,mail_host,display_name,description,info,subject_prefix,advertised,preferred_language,anonymous_list,created_at,post_id,volume,next_digest_number,digest_last_sent_at,emergency,archive_policy,archive_rendering_mode,style_name,default_member_action,default_nonmember_action) VALUES($22,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)")
-            .bind(list.id.to_string()).bind(list.id.list_name()).bind(list.id.mail_host()).bind(&list.display_name).bind(&list.description).bind(&list.info).bind(&list.subject_prefix).bind(i64::from(list.advertised)).bind(&list.preferred_language).bind(i64::from(list.anonymous_list)).bind(list.created_at.to_rfc3339()).bind(list.post_id).bind(list.volume).bind(list.next_digest_number).bind(list.digest_last_sent_at.map(|value| value.to_rfc3339())).bind(i64::from(list.emergency)).bind(list.archive_policy.to_string()).bind(list.archive_rendering_mode.to_string()).bind(&list.style_name).bind(list.default_member_action.map(|value| value.to_string())).bind(list.default_nonmember_action.map(|value| value.to_string())).bind(Uuid::now_v7().to_string()).execute(&mut *tx).await.map_err(db_error)?;
+            .bind(list.id.to_string()).bind(list.id.list_name()).bind(list.id.mail_host()).bind(&list.display_name).bind(&list.description).bind(&list.info).bind(&list.subject_prefix).bind(i64::from(list.advertised)).bind(&list.preferred_language).bind(i64::from(list.anonymous_list)).bind(list.created_at.to_rfc3339()).bind(list.post_id).bind(list.volume).bind(list.next_digest_number).bind(list.digest_last_sent_at.map(|value| value.to_rfc3339())).bind(i64::from(list.emergency)).bind(list.archive_policy.to_string()).bind(list.archive_rendering_mode.to_string()).bind(&list.style_name).bind(list.default_member_action.map(|value| value.to_string())).bind(list.default_nonmember_action.map(|value| value.to_string())).bind(Uuid::now_v7().to_string()).execute(&mut **tx).await.map_err(db_error)?;
         Database::record_tx_with_context(
-            &mut tx,
+            tx,
             context,
             "list.create",
             "list",
@@ -1212,7 +1238,6 @@ impl ListRepo<'_> {
             serde_json::json!({"style":list.style_name}),
         )
         .await?;
-        tx.commit().await.map_err(db_error)?;
         Ok(list)
     }
     /// # Errors

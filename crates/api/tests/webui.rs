@@ -10,6 +10,8 @@ mod emergency;
 mod goodbye;
 #[path = "webui/held_queue.rs"]
 mod held_queue;
+#[path = "webui/list_create_index.rs"]
+mod list_create_index;
 #[path = "webui/list_settings.rs"]
 mod list_settings;
 #[path = "webui/list_settings_groups.rs"]
@@ -2122,9 +2124,24 @@ async fn chromium_browser_acceptance() {
     let recipients: Vec<String> = sqlx::query_scalar("SELECT email FROM delivery_recipients WHERE job_id IN (SELECT id FROM queue_jobs WHERE message_id=$1)")
         .bind(db.moderation().get(held_id).await.unwrap().message_id.0.to_string()).fetch_all(db.pool()).await.unwrap();
     assert_eq!(recipients, vec!["browser-joined@example.com"]);
+    let made: listmngr_core::ListId = "browser-made.example.com".parse().unwrap();
+    let made_list = db.lists().get(&made).await.unwrap();
+    assert_eq!(made_list.display_name, "Browser made");
+    assert_eq!(made_list.style_name, "legacy-announce");
+    assert!(made_list.advertised);
+    let made_owners = db
+        .members()
+        .roster(&made, listmngr_core::MemberRole::Owner)
+        .await
+        .unwrap();
+    assert_eq!(made_owners.len(), 1, "the creator seated as owner");
+    assert_eq!(
+        db.addresses().get("browser@example.com").await.unwrap().id,
+        made_owners[0].address_id
+    );
     browser_left_the_database_consistent(&db).await;
     println!(
-        "BROWSER DB PASS: paused preference persisted; confirmed member created; held accepted, two more discarded in bulk, the sender moderated, a subscription request accepted; exact enabled recipient queued; logout revoked persistent session; signup left an unverified account with one live token; the reset request left one live reset token."
+        "BROWSER DB PASS: paused preference persisted; confirmed member created; held accepted, two more discarded in bulk, the sender moderated, a subscription request accepted; a list created with its creator as owner; exact enabled recipient queued; logout revoked persistent session; signup left an unverified account with one live token; the reset request left one live reset token."
     );
 }
 
