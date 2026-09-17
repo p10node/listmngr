@@ -92,6 +92,8 @@ cargo test --locked -p listmngr-api --test webui \
   members_admin::postgres_members_admin_contract -- --ignored --exact
 cargo test --locked -p listmngr-api --test webui \
   held_queue::postgres_held_queue_contract -- --ignored --exact
+cargo test --locked -p listmngr-api --test webui \
+  list_create_index::postgres_list_create_index_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::dsn_issuance_tests::dsn_issuance_postgres -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \

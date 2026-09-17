@@ -56,7 +56,9 @@ pub use pages::{
     ActionForm, Bans, DeleteList, DiffRow, Fact, GroupLink, HeaderRuleDraft, HeaderRuleRow,
     HeaderRules, SettingField, SettingsGroup, TemplateCatalogue, TemplateEditor, TemplateRow,
 };
-pub use pages::{Flag, MassSubscribe, MemberOptionsPage, RequestItem, Requests, Roster};
+pub use pages::{
+    CreateList, Flag, MassSubscribe, MemberOptionsPage, RequestItem, Requests, Roster,
+};
 pub use pages::{
     LoginTotp, Oidc, PasskeyRow, Passkeys, ProviderLink, ProviderRow, TotpCodes, TotpPage,
 };
@@ -147,11 +149,23 @@ impl Pagination {
     /// The usual numbered pagination over `path`, which carries no query string.
     #[must_use]
     pub fn numbered(path: &str, page: u32, more: bool, limit: u32) -> Self {
+        Self::filtered(path, "", page, more, limit)
+    }
+
+    /// Numbered pagination over `path` that keeps `query` — the already
+    /// encoded filters, without `page` — on every link.
+    #[must_use]
+    pub fn filtered(path: &str, query: &str, page: u32, more: bool, limit: u32) -> Self {
+        let prefix = if query.is_empty() {
+            format!("{path}?page=")
+        } else {
+            format!("{path}?{query}&page=")
+        };
         Self {
             previous: page
                 .checked_sub(1)
-                .map(|previous| format!("{path}?page={previous}")),
-            next: (more && page < limit).then(|| format!("{path}?page={}", page + 1)),
+                .map(|previous| format!("{prefix}{previous}")),
+            next: (more && page < limit).then(|| format!("{prefix}{}", page + 1)),
         }
     }
 }
