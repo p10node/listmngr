@@ -41,3 +41,4 @@ pre.preview{max-height:20rem;background:var(--surface);border:1px solid var(--li
 article:focus{outline:3px solid var(--focus);outline-offset:3px}
 input[type="checkbox"]{display:inline-block;width:auto;margin:0 .4rem 0 0;vertical-align:middle}
 .badge{display:inline-block;background:var(--code);border:1px solid var(--line);border-radius:var(--radius);padding:0 .5rem;font-size:.85em}
+.list-id{color:var(--muted);margin:0 0 .5rem}
