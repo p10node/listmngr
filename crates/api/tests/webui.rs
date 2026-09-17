@@ -4,6 +4,8 @@ mod addresses;
 mod admin_pagination;
 #[path = "webui/delete_account.rs"]
 mod delete_account;
+#[path = "webui/domains_users.rs"]
+mod domains_users;
 #[path = "webui/emergency.rs"]
 mod emergency;
 #[path = "webui/goodbye.rs"]
