@@ -45,7 +45,7 @@ impl Database {
         tx.commit().await.map_err(db_error)
     }
 
-    async fn server_owner_tx(
+    pub(crate) async fn server_owner_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
         session: &WebSession,
     ) -> Result<UserId> {

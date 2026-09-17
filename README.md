@@ -1,5 +1,33 @@
 # listmngr
 
+## Domains and accounts (`P4-DOMAINS-USERS`) — bounded local acceptance verified
+
+Two site-wide pages for server owners, linked from the administration index.
+
+**Domains** (`/web/admin/domains`) lists every domain with its description,
+alias domain, owners and list count, and adds one from a form (mail host,
+description, optional alias; a bad host or a taken one is refused inline with
+the other values kept). A domain's page (`/web/admin/domains/<host>`) shows
+its facts, seats an owner by an address that belongs to an account and removes
+one, lists every template name with the languages the domain overrides and
+opens the same editor as a list's (preview, save, remove; a domain body
+applies to every list on the domain that stores none of its own), shows the
+DKIM DNS TXT record of each signing key configured for the host (derived from
+the private key file, never the private half), and deletes the domain once
+the host is typed back and no list remains.
+
+**Accounts** (`/web/admin/users`) searches accounts by display name or any
+address and pages with the search. An account's page
+(`/web/admin/users/<id>`) saves the display name and the server-owner flag in
+one audited write (the last server owner with a verified address cannot be
+demoted), marks any of its addresses verified or unverified without a mailbox
+proof, and lists its memberships with a link to each member's options.
+
+Limits: no domain edit after creation (description and alias are fixed, as on
+REST); DKIM keys are configuration, so the page shows their records and
+generates none; the account page does not delete or merge accounts
+(`P4-GDPR`), reset passwords or manage second factors.
+
 ## List creation and the directory (`P4-LIST-CREATE-INDEX`) — bounded local acceptance verified
 
 The directory at `/web` now searches (`?q=`, a case-insensitive substring of

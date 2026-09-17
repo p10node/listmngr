@@ -17,6 +17,8 @@ mod account_tokens;
 mod admin;
 #[path = "webui_archive.rs"]
 mod archive;
+#[path = "webui_domains.rs"]
+mod domains;
 #[path = "webui_list_settings.rs"]
 mod list_settings;
 #[path = "webui_lists.rs"]
@@ -43,6 +45,8 @@ mod settings;
 mod signup;
 #[path = "webui_totp.rs"]
 mod totp;
+#[path = "webui_users.rs"]
+mod users;
 use crate::{ApiError, ApiResult, AppState};
 use askama::Template;
 use axum::{
@@ -192,6 +196,33 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/web/account", get(account))
         .route("/web/admin", get(admin::index))
+        .route(
+            "/web/admin/domains",
+            get(domains::index).post(domains::create),
+        )
+        .route("/web/admin/domains/{host}", get(domains::domain))
+        .route("/web/admin/domains/{host}/owners", post(domains::owner_add))
+        .route(
+            "/web/admin/domains/{host}/owners/{user}/remove",
+            post(domains::owner_remove),
+        )
+        .route("/web/admin/domains/{host}/delete", post(domains::delete))
+        .route(
+            "/web/admin/domains/{host}/templates/{name}",
+            get(domains::template_editor)
+                .post(domains::template_save)
+                .layer(DefaultBodyLimit::max(131_072)),
+        )
+        .route(
+            "/web/admin/domains/{host}/templates/{name}/remove",
+            post(domains::template_remove),
+        )
+        .route("/web/admin/users", get(users::index))
+        .route("/web/admin/users/{id}", get(users::user).post(users::save))
+        .route(
+            "/web/admin/users/{id}/addresses/{address}/verify",
+            post(users::verify),
+        )
         .route(
             "/web/lists/{id}/settings",
             get(settings::form).post(settings::save),

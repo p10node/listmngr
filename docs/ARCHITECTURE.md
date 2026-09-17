@@ -1,5 +1,25 @@
 # Architecture
 
+## Domains and accounts — bounded local acceptance verified
+
+`crates/db/src/web_domains.rs` and `web_users.rs` hold the server owner's
+site-wide operations. `server_owner_tx` (from `web_list_settings.rs`, now
+crate-visible) is the one authority check. Reads run on the pool after the
+check commits; writes that a repository already owns — domain create and
+delete, owner add and the new `DomainRepo::remove_owner_with_context` — check
+authority first and let the repository commit the business row with its
+audit event; the rest (`browser_user_update`, `browser_user_address_verify`,
+the domain template set and delete through `TemplateRepo::set_body_tx` and
+`delete_tx`) are one browser write transaction each. Domain template
+resolution for the editor is `templates::resolve_domain_tx` (domain scope,
+then site, then built-in), a sibling of the list and site resolvers.
+`listmngr_mail::dkim::SigningKeys::dns_record` derives the public key of a
+configured signing key (`rsa` PKCS#8 or PKCS#1 DER after the same file
+checks as `load`) and returns the `<selector>._domainkey.<domain>` name with
+its `v=DKIM1; k=rsa; p=…` value. `crates/api/src/webui_domains.rs` and
+`webui_users.rs` are the handlers; the domain editor reuses the
+`TemplateEditor` view with a two-link group navigation.
+
 ## List creation and the directory — bounded local acceptance verified
 
 `crates/db/src/web_lists.rs` holds the directory read, the reader's standing
