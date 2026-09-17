@@ -60,6 +60,10 @@ pub use pages::{
     AdminAddressRow, AdminUser, AdminUserRow, AdminUsers, DomainPage, DomainRow, Domains,
     MembershipRow, OwnerRow,
 };
+pub use pages::{
+    ArchiveLinks, ArchiveOverview, ArchiveSender, ArchiveThreads, MonthRow, PosterRow, ThreadRow,
+};
+pub use pages::{AtomFeed, FeedEntry, RssFeed};
 pub use pages::{AuditPage, AuditRow, QueueRow, ReattachForm, SystemPage};
 pub use pages::{
     CreateList, Flag, MassSubscribe, MemberOptionsPage, RequestItem, Requests, Roster,

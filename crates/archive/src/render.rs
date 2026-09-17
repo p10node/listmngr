@@ -340,3 +340,73 @@ pub fn body_html(
         Mode::Markdown => markdown_html(&body),
     }
 }
+
+/// The words a search page marks: the reader's query split into
+/// alphanumeric runs, lowercased, at most twenty.
+#[must_use]
+pub fn terms(query: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for word in query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .take(20)
+    {
+        let word = word.to_lowercase();
+        if !out.contains(&word) {
+            out.push(word);
+        }
+    }
+    out
+}
+
+/// Wrap every whole word of `html`'s text that is one of `terms` in
+/// `<mark>`. Tags and character references pass through untouched, so
+/// the output is exactly as safe as the input.
+#[must_use]
+pub fn highlight(html: &str, terms: &[String]) -> String {
+    if terms.is_empty() {
+        return html.to_owned();
+    }
+    let mut out = String::with_capacity(html.len() + 64);
+    let mut rest = html;
+    while !rest.is_empty() {
+        let next = rest.find(['<', '&']).unwrap_or(rest.len());
+        mark_words(&rest[..next], terms, &mut out);
+        rest = &rest[next..];
+        let Some(first) = rest.chars().next() else {
+            break;
+        };
+        let end = if first == '<' {
+            rest.find('>').map_or(rest.len(), |i| i + 1)
+        } else {
+            match rest.find(';') {
+                Some(i) if i <= 12 => i + 1,
+                _ => 1,
+            }
+        };
+        out.push_str(&rest[..end]);
+        rest = &rest[end..];
+    }
+    out
+}
+
+fn mark_words(text: &str, terms: &[String], out: &mut String) {
+    let mut rest = text;
+    while !rest.is_empty() {
+        let start = rest.find(char::is_alphanumeric).unwrap_or(rest.len());
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let end = rest
+            .find(|c: char| !c.is_alphanumeric())
+            .unwrap_or(rest.len());
+        let word = &rest[..end];
+        if !word.is_empty() && terms.iter().any(|t| *t == word.to_lowercase()) {
+            out.push_str("<mark>");
+            out.push_str(word);
+            out.push_str("</mark>");
+        } else {
+            out.push_str(word);
+        }
+        rest = &rest[end..];
+    }
+}

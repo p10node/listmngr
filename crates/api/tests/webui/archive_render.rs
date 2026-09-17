@@ -143,7 +143,11 @@ async fn matrix(db: Database) {
 async fn senders_and_bodies(app: &axum::Router, reader: &str) {
     let path = format!("/web/lists/{LIST}/archive");
     let html = page(app, &path, "").await;
-    has(&html, "<span class=\"sender-name\">Alice</span>");
+    has(
+        &html,
+        "class=\"sender-name\" href=\"/web/lists/public.example.com/archive/senders/",
+    );
+    has(&html, ">Alice</a>");
     has(&html, "alice at example.org");
     lacks(&html, "alice@example.org");
     has(&html, "<time>2024-01-01 10:00 UTC</time>");

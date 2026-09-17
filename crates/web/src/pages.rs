@@ -581,6 +581,176 @@ pub struct Archive {
     pub reattach: Option<ReattachForm>,
     /// A notice after a redirect.
     pub notice: Option<String>,
+    /// The archive's other pages.
+    pub links: ArchiveLinks,
+    /// The index's count of matching posts, translated, on a search page.
+    pub results: Option<String>,
+}
+
+/// Links every archive page carries to the others.
+#[derive(Debug, Clone)]
+pub struct ArchiveLinks {
+    /// The overview.
+    pub overview_href: String,
+    /// The latest threads.
+    pub threads_href: String,
+    /// The recent-posts page.
+    pub posts_href: String,
+    /// The Atom feed.
+    pub atom_href: String,
+    /// The RSS feed.
+    pub rss_href: String,
+}
+
+/// The archive's overview: figures, months, recent and active threads,
+/// top posters.
+#[derive(Debug, Template)]
+#[template(path = "archive_overview.html")]
+pub struct ArchiveOverview {
+    /// Document shell.
+    pub shell: Shell,
+    /// The list.
+    pub list: String,
+    /// Links to the other pages.
+    pub links: ArchiveLinks,
+    /// Posts in all.
+    pub posts: i64,
+    /// Threads in all.
+    pub threads: i64,
+    /// Distinct senders.
+    pub participants: i64,
+    /// Months with posts, newest first.
+    pub months: Vec<MonthRow>,
+    /// The threads with the latest posts.
+    pub recent: Vec<ThreadRow>,
+    /// The threads with most posts in the last thirty days.
+    pub active: Vec<ThreadRow>,
+    /// The senders with most posts in the last thirty days.
+    pub top_posters: Vec<PosterRow>,
+}
+
+/// One month link.
+#[derive(Debug)]
+pub struct MonthRow {
+    /// `YYYY-MM`.
+    pub label: String,
+    /// The month's thread list.
+    pub href: String,
+    /// Posts in the month.
+    pub posts: i64,
+}
+
+/// One thread in a list.
+#[derive(Debug)]
+pub struct ThreadRow {
+    /// The thread page.
+    pub href: String,
+    /// The root's subject.
+    pub subject: String,
+    /// Posts in the thread.
+    pub posts: i64,
+    /// Distinct senders in the thread.
+    pub participants: i64,
+    /// The latest post's date, formatted.
+    pub last: String,
+    /// The latest post's sender.
+    pub last_sender: String,
+    /// Whether the signed-in reader has newer posts to see.
+    pub unread: bool,
+}
+
+/// One sender in the overview.
+#[derive(Debug)]
+pub struct PosterRow {
+    /// The sender page.
+    pub href: String,
+    /// The sender's name, or the address as the reader may see it.
+    pub name: String,
+    /// Posts counted.
+    pub posts: i64,
+}
+
+/// A page of threads: the latest, or one month's.
+#[derive(Debug, Template)]
+#[template(path = "archive_threads.html")]
+pub struct ArchiveThreads {
+    /// Document shell.
+    pub shell: Shell,
+    /// The page's heading.
+    pub heading: String,
+    /// Links to the other pages.
+    pub links: ArchiveLinks,
+    /// The threads.
+    pub threads: Vec<ThreadRow>,
+    /// Previous page link.
+    pub previous: Option<String>,
+    /// Next page link.
+    pub next: Option<String>,
+}
+
+/// One sender's posts.
+#[derive(Debug, Template)]
+#[template(path = "archive_sender.html")]
+pub struct ArchiveSender {
+    /// Document shell.
+    pub shell: Shell,
+    /// The page's heading.
+    pub heading: String,
+    /// The address as the reader may see it.
+    pub email: String,
+    /// The count line.
+    pub count: String,
+    /// Links to the other pages.
+    pub links: ArchiveLinks,
+    /// The posts on this page.
+    pub messages: Vec<ArchiveMessage>,
+    /// Previous page link.
+    pub previous: Option<String>,
+    /// Next page link.
+    pub next: Option<String>,
+}
+
+/// The archive's Atom feed: the latest posts.
+#[derive(Debug, Template)]
+#[template(path = "feed_atom.xml")]
+pub struct AtomFeed {
+    /// The feed's title.
+    pub title: String,
+    /// The archive's absolute address.
+    pub site: String,
+    /// The latest post's date, RFC 3339.
+    pub updated: String,
+    /// The posts, newest first.
+    pub entries: Vec<FeedEntry>,
+}
+
+/// The archive's RSS 2.0 feed: the latest posts.
+#[derive(Debug, Template)]
+#[template(path = "feed_rss.xml")]
+pub struct RssFeed {
+    /// The feed's title.
+    pub title: String,
+    /// The archive's absolute address.
+    pub site: String,
+    /// The latest post's date, RFC 2822.
+    pub updated: String,
+    /// The posts, newest first.
+    pub entries: Vec<FeedEntry>,
+}
+
+/// One post in a feed.
+#[derive(Debug)]
+pub struct FeedEntry {
+    /// The subject.
+    pub title: String,
+    /// The absolute permalink, also the entry's id.
+    pub link: String,
+    /// The post's date in the feed's format.
+    pub date: String,
+    /// The sender's name, or the obfuscated address.
+    pub author: String,
+    /// The first 500 characters of the body, addresses obfuscated.
+    pub summary: String,
 }
 
 /// The owner's form to move a post under another post.
@@ -603,8 +773,12 @@ pub struct ArchiveMessage {
     pub hash: String,
     /// Subject.
     pub subject: String,
+    /// The subject as HTML: escaped, with search words marked.
+    pub subject_html: String,
     /// Thread view link.
     pub thread_href: String,
+    /// The sender's page.
+    pub sender_href: String,
     /// Stable permalink.
     pub permalink: String,
     /// The sender's display name, possibly empty.

@@ -145,7 +145,7 @@ async fn ranked(app: &axum::Router) {
         1,
         "every word required: {html}"
     );
-    has(&html, "Re: Release plan");
+    has(&html, "Re: <mark>Release</mark> plan");
     for (query, articles) in [("installer", 2), ("mirrors", 0), ("poster", 3)] {
         let html = page(app, &format!("{BASE}?q={query}"), "").await;
         assert_eq!(html.matches("<article ").count(), articles, "{query}");
@@ -155,7 +155,10 @@ async fn ranked(app: &axum::Router) {
         "No messages found",
     );
     let html = page(app, &format!("{BASE}?q=sandwiches"), "").await;
-    has(&html, "Sandwiches at noon &lt;b&gt;bold&lt;/b&gt;");
+    has(
+        &html,
+        "<mark>Sandwiches</mark> at noon &lt;b&gt;bold&lt;/b&gt;",
+    );
     lacks(&html, "<b>bold</b>");
     assert_eq!(
         call(app, "GET", &format!("{BASE}?q={}", "x".repeat(201)), "", "")
