@@ -44,6 +44,8 @@ mod signup;
 mod subject_prefix;
 #[path = "webui/subject_prefix_controls.rs"]
 mod subject_prefix_controls;
+#[path = "webui/system.rs"]
+mod system;
 #[path = "webui/tokens.rs"]
 mod tokens;
 #[path = "webui/totp.rs"]
