@@ -1,5 +1,32 @@
 # Architecture
 
+## List creation and the directory — bounded local acceptance verified
+
+`crates/db/src/web_lists.rs` holds the directory read, the reader's standing
+and list creation. `browser_directory` is one bounded query per scope: a
+visitor's advertised-only listing, a signed-in reader's advertised listing
+with their roles joined afterwards, or — with `show_all` — a listing that
+also admits lists the reader has a verified-address role on (every list for
+a verified server owner); the search is a `LIKE … ESCAPE '!'` pattern over
+the id and the lowercased display name and description, the domain filter is
+an exact `mail_host`. `browser_standing` and `browser_list_summary` decide
+whether an unadvertised list is a page for this reader. `browser_creatable_domains`
+runs under the browser write transaction and live session authority: every
+domain for a server owner, otherwise the `domain_owners` rows of the reader.
+`browser_create_list` is one transaction: domain existence (`NotFound`),
+authority (`Forbidden`), a free id (`Conflict`), `ListRepo::create_tx` (new:
+the former `create_with_context` body inside a caller's transaction, the
+domain checked there), `ListRepo::update_tx` for `advertised` and
+`description` so the REST validator applies, the first owner row (the address
+created when unknown, as `subscribe_with_context` would) and the three audit
+events, then the session re-checked before commit.
+`crates/api/src/webui_lists.rs` holds the directory, summary and create
+handlers; the directory issues no cookie, the summary checks visibility
+before it issues one, and the create handler maps `Conflict`/`NotFound`/
+`Validation` to inline refusals and `Forbidden` to a 403. `Pagination::filtered`
+keeps an encoded query string on page links. The create form renders through
+a `control` macro shared with no other page yet.
+
 ## Moderator queues — bounded local acceptance verified
 
 `crates/db/src/web_moderation.rs` holds the moderator's reads and writes.

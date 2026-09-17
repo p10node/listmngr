@@ -19,6 +19,8 @@ mod admin;
 mod archive;
 #[path = "webui_list_settings.rs"]
 mod list_settings;
+#[path = "webui_lists.rs"]
+mod lists;
 #[path = "webui_members.rs"]
 mod members;
 #[path = "webui_membership.rs"]
@@ -165,7 +167,11 @@ fn assets() -> Router<AppState> {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/web", get(directory))
+        .route("/web", get(lists::directory))
+        .route(
+            "/web/lists/new",
+            get(lists::create_form).post(lists::create),
+        )
         .merge(assets())
         .route("/web/login", get(login_form).post(login))
         .route("/web/login/totp", get(totp::login_form).post(totp::login))
@@ -226,7 +232,7 @@ pub fn routes() -> Router<AppState> {
             get(recovery::preview).post(recovery::recover),
         )
         .route("/web/logout", post(logout))
-        .route("/web/lists/{id}", get(list_page))
+        .route("/web/lists/{id}", get(lists::list_page))
         .route("/web/lists/{id}/archive", get(archive::browse))
         .route("/web/lists/{id}/request", post(subscription_request))
         .merge(moderation::routes())
@@ -297,39 +303,6 @@ fn account_routes() -> Router<AppState> {
             "/web/account/sessions/{id}/revoke",
             post(account_sessions::revoke),
         )
-}
-
-async fn directory(
-    State(s): State<AppState>,
-    Query(paging): Query<BrowserPage>,
-    headers: HeaderMap,
-) -> ApiResult<Response> {
-    let ids: Vec<String> = sqlx::query_scalar(
-        "SELECT list_id FROM mailing_lists WHERE advertised=1 ORDER BY list_id LIMIT 21 OFFSET $1",
-    )
-    .bind(paging.offset()?)
-    .fetch_all(s.db.pool())
-    .await
-    .map_err(|error| database_error(&error))?;
-    let more = ids.len() > 20;
-    let mut entries = Vec::new();
-    for id in ids.into_iter().take(20) {
-        let list = s.db.lists().get(&id.parse()?).await?;
-        if !list.advertised {
-            continue;
-        }
-        entries.push(listmngr_web::DirectoryEntry {
-            href: format!("/web/lists/{}", list.id.as_str()),
-            name: list.display_name,
-            id: list.id.to_string(),
-            description: list.description,
-        });
-    }
-    Ok(html(&listmngr_web::Directory {
-        shell: Shell::new(language(&s, &headers), "web-title-directory", Nav::Lists),
-        entries,
-        pagination: paging.pagination("/web", more),
-    }))
 }
 
 /// Marks a 400 response whose body is the form itself, refusals inline, so
@@ -682,30 +655,6 @@ async fn logout(
 use axum::extract::{Path, Query};
 use listmngr_core::ListId;
 use listmngr_db::workflows::SubscriptionAction;
-async fn list_page(
-    State(s): State<AppState>,
-    Path(id): Path<ListId>,
-    h: HeaderMap,
-) -> ApiResult<Response> {
-    let list = s.db.lists().get(&id).await?;
-    if !list.advertised {
-        return Err(Error::NotFound("list".into()).into());
-    }
-    let session = anonymous(&s, &h).await?;
-    let language = reader_language(&s, &h, &session).await?;
-    let mut r = html(&listmngr_web::ListPage {
-        shell: Shell::titled(language, list.display_name.clone(), Nav::Lists),
-        description: list.description.clone(),
-        info: list.info.clone(),
-        archive_href: (list.archive_policy == listmngr_core::ArchivePolicy::Public)
-            .then(|| format!("/web/lists/{}/archive", id.as_str())),
-        action: format!("/web/lists/{}/request", id.as_str()),
-        csrf: session.csrf.clone(),
-        confirm_href: format!("/web/lists/{}/confirm", id.as_str()),
-    });
-    set_cookie(&s, &session, &mut r)?;
-    Ok(r)
-}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SubscriptionRequest {

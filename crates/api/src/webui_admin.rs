@@ -13,6 +13,8 @@ pub(super) async fn index(
     let session = load(&s, &headers).await?;
     privileged(&s, &session).await?;
     let rows = s.db.browser_admin_lists(&session, paging.offset()?).await?;
+    let create_href = (!s.db.browser_creatable_domains(&session).await?.is_empty())
+        .then(|| "/web/lists/new".to_owned());
     let more = rows.len() > 20;
     let rows = rows
         .into_iter()
@@ -30,6 +32,7 @@ pub(super) async fn index(
             "web-title-admin",
             Nav::Account,
         ),
+        create_href,
         rows,
         pagination: paging.pagination("/web/admin", more),
     }))
