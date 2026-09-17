@@ -1,5 +1,41 @@
 # listmngr
 
+## Archive rendering (`P5-RENDER`) — bounded local acceptance verified
+
+The archive now indexes, for each post, the sender's name and address and
+the post's date as the cooked copy shows them, the post it replies to
+(`In-Reply-To`, else the last `References` entry), and its attachments,
+stored once at indexing time.
+
+- **Threads** (`/web/lists/<id>/archive?thread=<hash>`) lay out as a tree:
+  replies under their parents, siblings by date, a reply whose parent never
+  arrived at the top of its thread, up to 500 posts. Each post links its
+  parent ("In reply to").
+- **Bodies** render through the archive's own writer: text posts as
+  escaped paragraphs with URLs linked and runs of quoted lines folded away
+  ("N quoted lines"); lists with `archive_rendering_mode = markdown` get a
+  fixed safe subset of Markdown (headings, emphasis, code, lists, quotes,
+  tables, `http(s)`/`mailto` links) — raw HTML is shown as text, other link
+  schemes drop, images never load.
+- **Addresses** in the sender line and the body are obfuscated for visitors
+  (`local at domain`) and shown to signed-in readers.
+- **Attachments** download from `/web/lists/<id>/archive/attachments/<hash>/<n>`
+  with their stored name and type, `nosniff` and an attachment disposition;
+  HTML, SVG, XML and script types are served as bytes.
+- **Reattach**: a list owner moves a post, with its replies, under another
+  post or makes it a thread root from the post's page; a post cannot become
+  its own ancestor.
+- **Avatars** are off by default; with `[archive] gravatar = true` the page
+  shows each sender's Gravatar fetched through `/web/gravatar/<sha256>` by
+  this server (cached an hour, `img-src 'self'` only on archive pages), never
+  by the browser from gravatar.com.
+
+Limits: posts indexed before this change show no sender or date and keep
+the MIME-projected attachment links; the thread tree is bounded to 500
+posts and has no paging; quoted-run folding is by `>` prefix only, with no
+signature folding; the threading snapshot compares against the HyperKitty
+algorithm as documented, not against a HyperKitty run.
+
 ## Phase 4 acceptance (`P4-ACCEPTANCE`) — bounded local acceptance verified
 
 Two Chromium runs gate the browser interface in CI (`browser` job):

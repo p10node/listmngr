@@ -1,5 +1,9 @@
 #![forbid(unsafe_code)]
-//! MIME parsing with reviewed mail-parser 0.11.8. Rendered bodies are always text.
+//! MIME parsing with reviewed mail-parser 0.11.8. Indexing derives the
+//! thread and the parent from the reference headers; rendering (`render`)
+//! and thread order (`threading`) are pure functions the browser uses.
+pub mod render;
+pub mod threading;
 use listmngr_core::{Error, Result};
 use listmngr_db::{Database, archive::ArchiveMessage, mail_queue::Lease};
 /// Process one durable archive lease. No HTML or attachment is rendered inline.
@@ -33,30 +37,83 @@ pub async fn process_with_clock(
     let message = mail_parser::MessageParser::default()
         .parse(&stored.raw)
         .ok_or_else(|| Error::Validation("invalid MIME".into()))?;
-    let hash = listmngr_mail::message_id_hash(&stored.external_id)
-        .map_err(|e| Error::Validation(e.to_string()))?;
-    // Optional conversation hints must not reject an otherwise valid message.
-    let thread = reference_hash(message.references())
-        .or_else(|| reference_hash(message.in_reply_to()))
-        .unwrap_or_else(|| hash.clone());
+    let Identity {
+        hash,
+        thread,
+        parent,
+        ..
+    } = identity(&message, &stored.external_id)?;
     let item = ArchiveMessage {
         hash,
         thread,
+        parent,
         // Only opaque thread identity is derived here. The repository cooks
-        // and indexes subject/body from the safe payload under its policy lock.
-        subject: String::new(),
-        body: String::new(),
-        raw: vec![],
+        // and indexes subject/body/sender/attachments from the safe payload
+        // under its policy lock.
+        ..ArchiveMessage::default()
     };
     let repo = db.archive();
     let repo = clock.map_or(repo, |clock| db.archive().with_clock(clock));
     repo.complete(lease, &item, now_ms).await
 }
+/// What the reference headers say about a post's place in its thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    /// The post's own Message-ID-Hash.
+    pub hash: String,
+    /// The provisional thread root: the first reference that hashes, else
+    /// the post itself. The repository resolves it to an indexed root.
+    pub thread: String,
+    /// The post replied to: `In-Reply-To`, else the last `References`
+    /// entry; never the post itself.
+    pub parent: Option<String>,
+    /// The `Date` header in milliseconds, when it parsed.
+    pub date_ms: Option<i64>,
+}
+
+/// The thread identity of a parsed message whose Message-ID is
+/// `message_id` (the stored external id, or the header when importing).
+/// # Errors
+/// Returns validation when the Message-ID cannot be hashed.
+pub fn identity(message: &mail_parser::Message<'_>, message_id: &str) -> Result<Identity> {
+    let hash =
+        listmngr_mail::message_id_hash(message_id).map_err(|e| Error::Validation(e.to_string()))?;
+    // Optional conversation hints must not reject an otherwise valid message.
+    let thread = reference_hash(message.references())
+        .or_else(|| reference_hash(message.in_reply_to()))
+        .unwrap_or_else(|| hash.clone());
+    let parent = reference_hash(message.in_reply_to())
+        .or_else(|| last_reference_hash(message.references()))
+        .filter(|parent| *parent != hash);
+    Ok(Identity {
+        hash,
+        thread,
+        parent,
+        date_ms: message
+            .date()
+            .map(|date| date.to_timestamp().saturating_mul(1000)),
+    })
+}
+
 fn reference_hash(value: &mail_parser::HeaderValue<'_>) -> Option<String> {
     value
         .as_text_list()
         .into_iter()
         .flatten()
+        .find_map(|id| listmngr_mail::message_id_hash(id.as_ref()).ok())
+        .or_else(|| {
+            value
+                .as_text()
+                .and_then(|id| listmngr_mail::message_id_hash(id).ok())
+        })
+}
+
+fn last_reference_hash(value: &mail_parser::HeaderValue<'_>) -> Option<String> {
+    value
+        .as_text_list()
+        .into_iter()
+        .flatten()
+        .rev()
         .find_map(|id| listmngr_mail::message_id_hash(id.as_ref()).ok())
         .or_else(|| {
             value

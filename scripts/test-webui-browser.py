@@ -681,6 +681,9 @@ with sync_playwright() as p:
     expect(page.locator('article')).to_have_count(1)
     expect(page.locator('article')).to_contain_text('Archived text <script>unsafe</script>')
     assert page.locator('script').count() == 0
+    # P5-RENDER: every post carries its sender line and a rendered body.
+    expect(page.locator('article .sender')).to_have_count(1)
+    expect(page.locator('article .body pre')).to_have_count(1)
     page.get_by_label('Search archive').fill('absent')
     page.get_by_role('button', name='Search', exact=True).click()
     expect(page.locator('main')).to_contain_text('No messages found.')

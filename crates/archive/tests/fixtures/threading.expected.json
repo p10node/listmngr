@@ -1,0 +1,8 @@
+[
+  {"id": "<f@example.org>", "depth": 0},
+  {"id": "<a@example.org>", "depth": 0},
+  {"id": "<d@example.org>", "depth": 1},
+  {"id": "<b@example.org>", "depth": 1},
+  {"id": "<c@example.org>", "depth": 2},
+  {"id": "<e@example.org>", "depth": 0}
+]

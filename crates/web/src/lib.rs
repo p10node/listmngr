@@ -60,7 +60,7 @@ pub use pages::{
     AdminAddressRow, AdminUser, AdminUserRow, AdminUsers, DomainPage, DomainRow, Domains,
     MembershipRow, OwnerRow,
 };
-pub use pages::{AuditPage, AuditRow, QueueRow, SystemPage};
+pub use pages::{AuditPage, AuditRow, QueueRow, ReattachForm, SystemPage};
 pub use pages::{
     CreateList, Flag, MassSubscribe, MemberOptionsPage, RequestItem, Requests, Roster,
 };

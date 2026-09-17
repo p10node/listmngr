@@ -1,5 +1,28 @@
 # Architecture
 
+## Archive rendering — bounded local acceptance verified
+
+Migration `0048_archive_render` adds `sender_name`, `sender_email`,
+`message_date` and `parent_hash` to `archive_messages` and the
+`archive_attachments` table (bytes as `BYTEA`, keyed by list, hash and
+position). `listmngr_archive::identity` derives the hash, provisional
+thread, parent and date from the reference headers (the runner used to do
+this inline); `ArchiveRepo::complete` stores the sender and date from the
+cooked copy and the attachments through the new
+`listmngr_mail::attachments::stored` projection, and `render_rows` reads
+the new columns with attachment metadata joined afterwards.
+`listmngr_archive::threading::order` is the pure tree order (roots and
+siblings by date then hash, cycles placed once) the browser applies to
+`read_browser_thread` (500 posts); `listmngr_archive::render` produces every
+byte of a body's HTML — text with folded quotes and linkified URLs, or
+Markdown through `pulldown-cmark` events written into a fixed safe subset —
+and obfuscates addresses for visitors. `browser_reattach` moves a post and
+re-roots its descendants in one audited transaction under the owner's
+authority. `webui_archive.rs` serves attachments from their own path with a
+type deny-list, proxies Gravatar through a bounded, cached `reqwest` fetch
+when `[archive] gravatar` is on, and widens the CSP to `img-src 'self'` for
+those pages only.
+
 ## Phase 4 acceptance — bounded local acceptance verified
 
 `chromium_acceptance_journey` in `crates/api/tests/webui.rs` starts the

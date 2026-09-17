@@ -14,6 +14,7 @@ listmngr-archive = { path = "../archive", version = "0.1.0" }
 axum = { workspace = true, features = ["multipart"] }
 base64.workspace = true
 chrono.workspace = true
+bytes.workspace = true
 dashmap.workspace = true
 http.workspace = true
 ipnet.workspace = true
