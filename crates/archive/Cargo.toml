@@ -17,6 +17,7 @@ listmngr-db = { path = "../db", version = "0.1.0" }
 listmngr-mail = { path = "../mail", version = "0.1.0" }
 mail-parser = "=0.11.8"
 pulldown-cmark = { version = "0.13.4", default-features = false }
+tantivy = "0.26.2"
 serde.workspace = true
 serde_json.workspace = true
 

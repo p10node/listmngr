@@ -43,6 +43,23 @@ pub struct StoredAttachment {
     pub size: i64,
 }
 
+/// One archived post as the search index reads it; no policy applies
+/// because the index holds nothing a search returns without the archive's
+/// own authorization afterwards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexRow {
+    pub list: String,
+    pub hash: String,
+    pub thread: String,
+    pub subject: String,
+    pub body: String,
+    pub sender_name: String,
+    pub sender_email: String,
+    /// The post's date, else its arrival, milliseconds.
+    pub date_ms: i64,
+    pub created_at: i64,
+}
+
 /// One attachment's bytes, for a download.
 #[derive(Debug, Clone)]
 pub struct AttachmentContent {
@@ -96,6 +113,23 @@ fn render_rows(
             })
         })
         .collect()
+}
+
+const INDEX_ROW_SQL: &str = "SELECT list_id, hash, thread, substr(subject,1,1000) AS subject, substr(body,1,200000) AS body, sender_name, sender_email, COALESCE(message_date, created_at) AS date_ms, created_at FROM archive_messages WHERE list_id=$1 AND hash=$2 AND created_at>=$3 AND hash<>$4 LIMIT $5";
+const INDEX_ROWS_SQL: &str = "SELECT list_id, hash, thread, substr(subject,1,1000) AS subject, substr(body,1,200000) AS body, sender_name, sender_email, COALESCE(message_date, created_at) AS date_ms, created_at FROM archive_messages WHERE (created_at>$1 OR (created_at=$1 AND hash>$2)) ORDER BY created_at, hash LIMIT $3";
+
+fn index_row(row: &sqlx::any::AnyRow) -> Result<IndexRow> {
+    Ok(IndexRow {
+        list: row.try_get("list_id").map_err(db_error)?,
+        hash: row.try_get("hash").map_err(db_error)?,
+        thread: row.try_get("thread").map_err(db_error)?,
+        subject: row.try_get("subject").map_err(db_error)?,
+        body: row.try_get("body").map_err(db_error)?,
+        sender_name: row.try_get("sender_name").map_err(db_error)?,
+        sender_email: row.try_get("sender_email").map_err(db_error)?,
+        date_ms: row.try_get("date_ms").map_err(db_error)?,
+        created_at: row.try_get("created_at").map_err(db_error)?,
+    })
 }
 
 /// The first `From` mailbox of the cooked copy: name and address.
@@ -291,6 +325,53 @@ impl<'a> ArchiveRepo<'a> {
         let mut messages = render_rows(settings, &rows, self.db.base_url())?;
         self.attach_metadata(list, &mut messages).await?;
         Ok(messages)
+    }
+    /// The archived post a finished archive job stored, for the search
+    /// index; `None` when the job archived nothing.
+    /// # Errors
+    /// Returns database errors and an unreadable message id.
+    pub async fn index_row_for_message(
+        &self,
+        message_id: crate::mail_queue::MessageId,
+    ) -> Result<Option<IndexRow>> {
+        let message = self.db.mail_queue().message(message_id).await?;
+        let context: serde_json::Value =
+            serde_json::from_str(&message.context).map_err(db_error)?;
+        let Some(list) = context["list_id"].as_str() else {
+            return Ok(None);
+        };
+        let Ok(hash) = listmngr_mail::message_id_hash(&message.external_id) else {
+            return Ok(None);
+        };
+        let rows = sqlx::query(INDEX_ROW_SQL)
+            .bind(list)
+            .bind(hash)
+            .bind(i64::MIN)
+            .bind("")
+            .bind(1_i64)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(db_error)?;
+        rows.first().map(index_row).transpose()
+    }
+    /// Archived posts after `(created_at, hash)`, oldest first, for a
+    /// rebuild of the search index.
+    /// # Errors
+    /// Returns database errors.
+    pub async fn index_rows_after(
+        &self,
+        after: Option<&(i64, String)>,
+        limit: i64,
+    ) -> Result<Vec<IndexRow>> {
+        let (created, hash) = after.map_or((i64::MIN, ""), |(c, h)| (*c, h.as_str()));
+        let rows = sqlx::query(INDEX_ROWS_SQL)
+            .bind(created)
+            .bind(hash)
+            .bind(limit.clamp(1, 5000))
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(index_row).collect()
     }
     /// The stored attachments' metadata for each message on a page.
     pub(crate) async fn attach_metadata(

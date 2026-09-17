@@ -1,5 +1,35 @@
 # listmngr
 
+## Archive search (`P5-SEARCH`) — bounded local acceptance verified
+
+The archive now has a search index (tantivy 0.26) under `[archive]
+index_path` (default `data/index`), one document per archived post: list,
+hash, thread, subject, body, sender (name and address) and date. A search on
+`/web/lists/<id>/archive?q=` uses the index when it exists — every word must
+match in the subject, body or sender; hits rank by relevance and page twenty
+at a time; each hit is then read back through the archive's own policy, so a
+post the reader may not see is never shown — and falls back to the substring
+search over the database until then.
+
+The archive runner keeps the index current while `serve` runs: every post it
+archives is added, and changes commit in batches (a hundred changes or two
+seconds, whichever first; always on shutdown). `listmngr archive reindex`
+rebuilds the index from every archived post (`--index <dir>` overrides the
+configured path) and prints the count; it needs the index's write lock, so
+run it while `serve` is stopped. The index directory is created on first
+use; when it cannot be opened, `serve` logs a warning and search falls back
+to the database.
+
+Performance: the manual benchmark `search_p95_is_under_100ms_over_100k_posts`
+indexes 100 000 synthetic posts and asserts p95 < 100 ms over 200 queries
+(the numbers of the local run are in the ledger).
+
+Limits: no facets (the index carries thread and date filters, offered to
+callers of `search::Query`, not yet on the page); no highlighting or "N
+results" on the page (`P5-UI`); the REST archive resource keeps its substring
+search; a post removed from the archive is not removed from the index until a
+reindex (no removal path exists yet).
+
 ## Archive rendering (`P5-RENDER`) — bounded local acceptance verified
 
 The archive now indexes, for each post, the sender's name and address and

@@ -1,5 +1,27 @@
 # Architecture
 
+## Archive search — bounded local acceptance verified
+
+`listmngr_archive::search` owns the tantivy index: a fixed schema (`key`
+= list + NUL + hash for replacement, `list`/`hash`/`thread` as raw terms,
+`subject`/`body`/`sender` as tokenised text, `date` as a fast i64),
+`SearchIndex::open` (create or open, refusing another schema), a reader on
+`ReloadPolicy::OnCommitWithDelay`, `search` (a `BooleanQuery` of the list
+term, the lenient conjunctive parse of the reader's words, and optional
+thread and date-range clauses, collected with `TopDocs` and `Count`), and
+`Writer` (add-or-replace by key, remove, remove-list, clear, commit,
+`commit_if_due`). `ArchiveRepo::index_row_for_message` and
+`index_rows_after` read what the index stores without policy;
+`listmngr_archive::index_document` and `reindex` convert them. The archive
+runner (`crates/runners/src/archive.rs`) receives the one `Writer` behind an
+`Arc<Mutex>` from `serve_mail_role`, adds each stored post after its job
+completes (in `spawn_blocking`), commits when the batch is due and on
+shutdown; the API opens a reader lazily (`AppState::search_index`) once
+`meta.json` exists and otherwise searches the database. `listmngr archive
+reindex` (`crates/cli/src/archive.rs`) clears and rebuilds through
+`reindex`. The `ordered-float` transitive dependency is pinned to 5.4.0 in
+`Cargo.lock` for the 1.88 toolchain.
+
 ## Archive rendering — bounded local acceptance verified
 
 Migration `0048_archive_render` adds `sender_name`, `sender_email`,
