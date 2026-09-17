@@ -1,5 +1,26 @@
 # listmngr
 
+## System page and audit log (`P4-SYSTEM`) — bounded local acceptance verified
+
+`/web/admin/system`, for server owners, shows the software and REST API
+versions and the database backend; every runner queue with its jobs by state
+(ready, leased, done, shunted), how long the oldest ready job has waited past
+its due time, and the runners currently holding leases with their job counts;
+the MTA map status (the configured MTA, map directory and LMTP transport, and
+the generation the `current` link names, or a note that none is published, or
+that no incoming MTA is configured); and the configuration as loaded with
+secrets redacted, the same view as `listmngr conf`, as dotted keys.
+
+`/web/admin/system/audit` lists audit events newest first — when, the actor
+(a user id, a token, or the system), the peer address, the action, the target
+and the recorded details — filtered by an action prefix and a target
+substring, twenty per page with the filters kept on the page links.
+
+Limits: the page is a snapshot without refresh; runner status is inferred
+from leased jobs (an idle runner is invisible); no job actions here (the CLI's
+`queue unshunt` and the REST `/queues` remain the tools); the audit viewer
+shows ids, not names, and does not export.
+
 ## Domains and accounts (`P4-DOMAINS-USERS`) — bounded local acceptance verified
 
 Two site-wide pages for server owners, linked from the administration index.

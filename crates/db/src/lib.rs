@@ -39,6 +39,7 @@ pub mod web_members;
 pub mod web_moderation;
 pub mod web_oidc;
 pub mod web_passkeys;
+pub mod web_system;
 pub mod web_tokens;
 pub mod web_totp;
 pub mod web_users;
