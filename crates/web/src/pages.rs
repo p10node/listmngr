@@ -1450,3 +1450,77 @@ pub struct MembershipRow {
     /// The member's options page.
     pub href: String,
 }
+
+/// The server owner's system page.
+#[derive(Debug, Template)]
+#[template(path = "system.html")]
+pub struct SystemPage {
+    /// Document shell.
+    pub shell: Shell,
+    /// Software, API and database facts.
+    pub versions: Vec<Fact>,
+    /// The redacted configuration as dotted keys.
+    pub config: Vec<Fact>,
+    /// One row per runner queue.
+    pub queues: Vec<QueueRow>,
+    /// Jobs parked in the shunt queue.
+    pub shunted: i64,
+    /// Translated sentence about the oldest ready job.
+    pub oldest_ready: String,
+    /// Runners holding leases, with their job counts.
+    pub runners: Vec<Fact>,
+    /// MTA map facts, empty when no writer is configured.
+    pub mta: Vec<Fact>,
+    /// Why there are no MTA facts.
+    pub mta_note: Option<String>,
+    /// The audit log viewer.
+    pub audit_href: String,
+}
+
+/// One runner queue's depth by state.
+#[derive(Debug)]
+pub struct QueueRow {
+    /// Queue name.
+    pub name: String,
+    /// Jobs waiting.
+    pub ready: i64,
+    /// Jobs a runner holds.
+    pub leased: i64,
+    /// Jobs finished and kept.
+    pub done: i64,
+    /// Jobs parked.
+    pub shunted: i64,
+}
+
+/// The audit log viewer.
+#[derive(Debug, Template)]
+#[template(path = "audit.html")]
+pub struct AuditPage {
+    /// Document shell.
+    pub shell: Shell,
+    /// The action prefix filter as submitted.
+    pub action: String,
+    /// The target filter as submitted.
+    pub target: String,
+    /// The events on this page, newest first.
+    pub rows: Vec<AuditRow>,
+    /// Paging, carrying the filters.
+    pub pagination: Pagination,
+}
+
+/// One audit event.
+#[derive(Debug)]
+pub struct AuditRow {
+    /// When, RFC 3339.
+    pub at: String,
+    /// The actor: a user id, a token, or the system.
+    pub actor: String,
+    /// The peer address, empty when none.
+    pub ip: String,
+    /// The action.
+    pub action: String,
+    /// Target type and id.
+    pub target: String,
+    /// The recorded diff, bounded.
+    pub diff: String,
+}

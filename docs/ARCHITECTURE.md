@@ -1,5 +1,17 @@
 # Architecture
 
+## System page and audit log — bounded local acceptance verified
+
+`crates/db/src/web_system.rs` holds two read projections under
+`server_owner_tx`: `browser_runner_status` (the queue statistics `/metrics`
+and `queue stats` use, plus `locked_by` counts of leased jobs) and
+`browser_audit` (a page of `audit_log` rows newest first, `LIKE` on an
+escaped action prefix and target substring). `crates/api/src/webui_system.rs`
+flattens `Config::redacted_json` into dotted keys (the same redaction the CLI
+and REST use, so a secret never reaches a page), reads the MTA map writer's
+`current` link for the published generation, and renders the two pages
+through `SystemPage` and `AuditPage`.
+
 ## Domains and accounts — bounded local acceptance verified
 
 `crates/db/src/web_domains.rs` and `web_users.rs` hold the server owner's
