@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod aliases;
+mod archive;
 mod bounce;
 mod digests;
 mod errors;
@@ -26,6 +27,11 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// The archive's search index: rebuild it from every archived post.
+    Archive {
+        #[command(subcommand)]
+        command: archive::Command,
+    },
     /// Explicit bounce warning/removal maintenance; does not start a scheduler.
     Bounce {
         #[command(subcommand)]
@@ -359,6 +365,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Notify(options) => notify::run(&db, options).await?,
         Command::Digests { command } => digests::run(&db, command).await?,
         Command::Aliases { command } => aliases::run(&db, &config, command).await?,
+        Command::Archive { command } => archive::run(&db, &config, command).await?,
         Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
             bail!("command does not use database")
         }

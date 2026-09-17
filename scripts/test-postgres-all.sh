@@ -4,8 +4,8 @@
 # `scripts/test-postgres.sh` is the mandatory fast gate (a chosen set of
 # contracts). This runs the whole `#[ignore]`d PostgreSQL population: each
 # test creates and drops its own schema on TEST_POSTGRES_URL, so the server
-# only needs to be disposable, never empty. The four ignored tests that
-# need other fixtures (a browser, `postmap`) are skipped by name.
+# only needs to be disposable, never empty. The ignored tests that
+# need other fixtures (a browser, `postmap`, a benchmark) are skipped by name.
 set -eu
 
 : "${TEST_POSTGRES_URL:?TEST_POSTGRES_URL must point to a disposable PostgreSQL server}"
@@ -25,5 +25,6 @@ esac
 exec cargo test --locked --workspace --all-targets -- --ignored \
   --skip chromium_browser_acceptance \
   --skip chromium_acceptance_journey \
+  --skip search_p95_is_under_100ms_over_100k_posts \
   --skip real_postfix_lookup_agrees_with_runtime_recipient_validation \
   --skip real_postmap_compiles_hash_maps_that_answer_exact_lookups
