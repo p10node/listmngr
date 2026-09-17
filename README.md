@@ -1,5 +1,41 @@
 # listmngr
 
+## List creation and the directory (`P4-LIST-CREATE-INDEX`) — bounded local acceptance verified
+
+The directory at `/web` now searches (`?q=`, a case-insensitive substring of
+the id, display name or description) and filters by domain (`?domain=`). A
+visitor sees advertised lists only. A signed-in reader sees their role on each
+list (owner, moderator, member) and can tick **Also show my lists that are not
+in the public directory** (`?show=all`), which adds the unadvertised lists they
+have a role on — every list, for a server owner — each marked *not in the
+public directory*. Paging keeps the filters.
+
+**Creating a list** (`/web/lists/new`, linked from the directory and the
+administration index for readers who may use it) is open to a server owner
+and to the owners of a domain, on exactly the domains they may create on. The
+form asks for the list name (the part before `@`), the domain, a display name,
+the first owner's address (the reader's own is offered), the style
+(`legacy-default`, `legacy-announce`, `private-default`), whether the list is
+shown in the directory, and a description. A refused value comes back inline
+on its field with the other values kept (a bad name, a taken id, an unknown
+style or owner mailbox); a domain the reader does not own is a 403. The list
+row, its `advertised` and `description` through the ordinary settings
+validator, its first owner (the address created when unknown) and the
+`list.create`, `list.update` and `member.create` audit events commit in one
+transaction; the MTA maps are regenerated afterwards; the creator lands on the
+new list's settings.
+
+**The list summary** (`/web/lists/<id>`) names the posting address, the
+owners' address, the domain, the archive policy and the subscription policy
+above the subscribe form, shows the reader's role and a link to the settings
+when they administer the list, and is now a page for the people with a role on
+an unadvertised list (and for server owners) rather than a 404 for everyone.
+
+Limits: no per-list "who may create" policy beyond server and domain owners;
+the owner seated at creation is one address, added unverified as on REST; the
+directory filters are the search, the domain and the scope (no sorting, no
+role filter); the summary shows policies as their configuration words.
+
 ## Moderator queues (`P4-HELD-QUEUE`) — bounded local acceptance verified
 
 `/web/moderation` now says what waits on each list a moderator can act on

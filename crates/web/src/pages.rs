@@ -9,13 +9,23 @@ use askama::Template;
 pub struct Directory {
     /// Document shell.
     pub shell: Shell,
-    /// Advertised lists on this page.
+    /// The lists on this page.
     pub entries: Vec<DirectoryEntry>,
-    /// Directory paging.
+    /// Directory paging, carrying the filters.
     pub pagination: Pagination,
+    /// The search text as submitted.
+    pub query: String,
+    /// The domain filter: any domain first, then each mail host.
+    pub domains: Vec<Choice>,
+    /// Whether the reader asked for their own unadvertised lists too.
+    pub show_all: bool,
+    /// Whether the reader is signed in, so the scope control is offered.
+    pub signed_in: bool,
+    /// The create-list form, when this reader may create one.
+    pub create_href: Option<String>,
 }
 
-/// One advertised list in the directory.
+/// One list in the directory.
 #[derive(Debug)]
 pub struct DirectoryEntry {
     /// Link to the list page.
@@ -26,6 +36,26 @@ pub struct DirectoryEntry {
     pub id: String,
     /// Short description.
     pub description: String,
+    /// The reader's translated role on the list, if any.
+    pub badge: Option<String>,
+    /// Whether the list is kept out of the public directory.
+    pub unadvertised: bool,
+}
+
+/// The create-list form: its fields with their inline refusals.
+#[derive(Debug, Template)]
+#[template(path = "create_list.html")]
+pub struct CreateList {
+    /// Document shell.
+    pub shell: Shell,
+    /// Form action.
+    pub action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// The fields in order, each with its current value and refusal.
+    pub fields: Vec<SettingField>,
+    /// A refusal that belongs to no one field.
+    pub error: Option<String>,
 }
 
 /// Password login form.
@@ -109,6 +139,8 @@ pub struct Preferences {
 pub struct AdminIndex {
     /// Document shell.
     pub shell: Shell,
+    /// The create-list form, when this reader may create one.
+    pub create_href: Option<String>,
     /// Administered lists on this page.
     pub rows: Vec<AdminRow>,
     /// Listing paging.
@@ -314,6 +346,14 @@ pub struct ListPage {
     pub description: String,
     /// Long information text.
     pub info: String,
+    /// The list's addresses and policies.
+    pub facts: Vec<Fact>,
+    /// The reader's translated role on the list, if any.
+    pub badge: Option<String>,
+    /// Whether the list is kept out of the public directory.
+    pub unadvertised: bool,
+    /// The settings link, for a reader who administers the list.
+    pub settings_href: Option<String>,
     /// Public archive link, when the archive is public.
     pub archive_href: Option<String>,
     /// Request form target.
