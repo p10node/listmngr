@@ -3,6 +3,7 @@
 //! thread and the parent from the reference headers; rendering (`render`)
 //! and thread order (`threading`) are pure functions the browser uses.
 pub mod render;
+pub mod search;
 pub mod threading;
 use listmngr_core::{Error, Result};
 use listmngr_db::{Database, archive::ArchiveMessage, mail_queue::Lease};
@@ -146,4 +147,58 @@ pub fn mbox(messages: &[ArchiveMessage]) -> Vec<u8> {
         out.push(b'\n');
     }
     out
+}
+
+/// The archived post behind a finished archive job, as the search index
+/// stores it; `None` when the job archived nothing (a list whose archive
+/// policy is `never`).
+/// # Errors
+/// Returns database errors.
+pub async fn index_document(
+    db: &Database,
+    message_id: listmngr_db::mail_queue::MessageId,
+) -> Result<Option<search::Document>> {
+    Ok(db
+        .archive()
+        .index_row_for_message(message_id)
+        .await?
+        .map(document_from_row))
+}
+
+fn document_from_row(row: listmngr_db::archive::IndexRow) -> search::Document {
+    search::Document {
+        list: row.list,
+        hash: row.hash,
+        thread: row.thread,
+        subject: row.subject,
+        body: row.body,
+        sender_name: row.sender_name,
+        sender_email: row.sender_email,
+        date_ms: row.date_ms,
+    }
+}
+
+/// Rebuild the index from every archived post, in batches of a thousand,
+/// and commit once at the end. Returns how many posts were indexed.
+/// # Errors
+/// Returns database or index errors.
+pub async fn reindex(db: &Database, index: &search::SearchIndex) -> Result<usize> {
+    let mut writer = index.writer()?;
+    writer.clear()?;
+    let mut after: Option<(i64, String)> = None;
+    let mut count = 0;
+    loop {
+        let rows = db.archive().index_rows_after(after.as_ref(), 1000).await?;
+        let Some(last) = rows.last() else {
+            break;
+        };
+        after = Some((last.created_at, last.hash.clone()));
+        for row in rows {
+            writer.add(&document_from_row(row))?;
+            count += 1;
+        }
+    }
+    writer.commit()?;
+    index.reload()?;
+    Ok(count)
 }

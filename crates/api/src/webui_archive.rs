@@ -80,38 +80,7 @@ pub(super) async fn browse(
         && !query.thread.is_empty()
         && query.q.is_empty()
         && query.format == ArchiveFormat::Html;
-    let messages = if let Some(hash) = &query.message {
-        if query.page != 1 || !query.q.is_empty() || !query.thread.is_empty() {
-            return Err(Error::Validation(
-                "message permalink cannot include search, thread or pagination".into(),
-            )
-            .into());
-        }
-        vec![
-            s.db.archive()
-                .read_browser_message(&id, session.as_ref(), hash)
-                .await?,
-        ]
-    } else if tree {
-        s.db.archive()
-            .read_browser_thread(&id, session.as_ref(), &query.thread)
-            .await?
-    } else {
-        s.db.archive()
-            .read_browser(
-                &id,
-                session.as_ref(),
-                Some(&query.thread),
-                &query.q,
-                if query.format == ArchiveFormat::Mbox {
-                    20
-                } else {
-                    21
-                },
-                i64::from(query.page - 1) * 20,
-            )
-            .await?
-    };
+    let messages = select_messages(&s, &id, &query, session.as_ref(), tree).await?;
     if let Some(index) = query.attachment {
         // The legacy MIME projection, kept for links made before attachments
         // were stored; new pages link the stored rows.
@@ -155,6 +124,79 @@ pub(super) async fn browse(
         csrf: session.as_ref().map(|session| session.csrf.clone()),
     };
     render(&view, &messages)
+}
+
+/// The posts a page shows: one by permalink, one thread as a tree, a page
+/// of search hits from the index, or a page from the database.
+async fn select_messages(
+    s: &AppState,
+    id: &ListId,
+    query: &ArchiveQuery,
+    session: Option<&listmngr_db::web_sessions::WebSession>,
+    tree: bool,
+) -> ApiResult<Vec<listmngr_db::archive::ArchiveMessage>> {
+    let messages = if let Some(hash) = &query.message {
+        if query.page != 1 || !query.q.is_empty() || !query.thread.is_empty() {
+            return Err(Error::Validation(
+                "message permalink cannot include search, thread or pagination".into(),
+            )
+            .into());
+        }
+        vec![
+            s.db.archive()
+                .read_browser_message(id, session, hash)
+                .await?,
+        ]
+    } else if tree {
+        s.db.archive()
+            .read_browser_thread(id, session, &query.thread)
+            .await?
+    } else if !query.q.is_empty()
+        && query.format == ArchiveFormat::Html
+        && let Some(index) = s.search_index()
+    {
+        // The index ranks; the archive's own authorization then reads each
+        // hit, so a hit the reader may not see is simply not shown.
+        let results = index.search(&listmngr_archive::search::Query {
+            list: id.as_str(),
+            text: &query.q,
+            thread: (!query.thread.is_empty()).then_some(query.thread.as_str()),
+            since_ms: None,
+            until_ms: None,
+            limit: 21,
+            offset: usize::try_from(query.page - 1).unwrap_or(0) * 20,
+        })?;
+        let mut messages = Vec::with_capacity(results.hits.len());
+        for hit in results.hits {
+            match s
+                .db
+                .archive()
+                .read_browser_message(id, session, &hit.hash)
+                .await
+            {
+                Ok(message) => messages.push(message),
+                Err(Error::NotFound(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        messages
+    } else {
+        s.db.archive()
+            .read_browser(
+                id,
+                session,
+                Some(&query.thread),
+                &query.q,
+                if query.format == ArchiveFormat::Mbox {
+                    20
+                } else {
+                    21
+                },
+                i64::from(query.page - 1) * 20,
+            )
+            .await?
+    };
+    Ok(messages)
 }
 
 /// What one page render needs.

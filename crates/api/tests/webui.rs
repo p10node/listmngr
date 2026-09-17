@@ -4,6 +4,8 @@ mod addresses;
 mod admin_pagination;
 #[path = "webui/archive_render.rs"]
 mod archive_render;
+#[path = "webui/archive_search.rs"]
+mod archive_search;
 #[path = "webui/delete_account.rs"]
 mod delete_account;
 #[path = "webui/domains_users.rs"]

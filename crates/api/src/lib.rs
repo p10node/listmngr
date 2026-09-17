@@ -682,6 +682,42 @@ pub struct AppState {
     /// `[archive] gravatar`: avatars fetched through this server, cached
     /// for an hour by the sender's hash.
     avatars: Arc<DashMap<String, (Instant, String, bytes::Bytes)>>,
+    /// The archive's search index, opened on first use once it exists;
+    /// the archive page searches the database until then.
+    search: Arc<std::sync::Mutex<Option<Arc<listmngr_archive::search::SearchIndex>>>>,
+}
+
+impl AppState {
+    /// The search index when `[archive]` is on and the runner or
+    /// `listmngr archive reindex` has created it.
+    fn search_index(&self) -> Option<Arc<listmngr_archive::search::SearchIndex>> {
+        if !self.config.archive.enabled {
+            return None;
+        }
+        let mut slot = self.search.lock().ok()?;
+        if let Some(index) = slot.as_ref() {
+            let index = index.clone();
+            drop(slot);
+            return Some(index);
+        }
+        let path = std::path::Path::new(&self.config.archive.index_path);
+        if !listmngr_archive::search::SearchIndex::exists(path) {
+            drop(slot);
+            return None;
+        }
+        let opened = listmngr_archive::search::SearchIndex::open(path);
+        let index = match opened {
+            Ok(index) => Arc::new(index),
+            Err(error) => {
+                drop(slot);
+                tracing::warn!(%error, "search index unavailable; searching the database");
+                return None;
+            }
+        };
+        *slot = Some(index.clone());
+        drop(slot);
+        Some(index)
+    }
 }
 
 const QUEUE_METRICS_TTL: Duration = Duration::from_secs(5);
@@ -916,6 +952,7 @@ pub fn router(db: Database, config: Config) -> Router {
         mta_maps,
         queue_metrics: Arc::new(std::sync::Mutex::new(None)),
         avatars: Arc::new(DashMap::new()),
+        search: Arc::new(std::sync::Mutex::new(None)),
     };
     let mut compat_state = state.clone();
     compat_state.flavor = ApiFlavor::Compat31;

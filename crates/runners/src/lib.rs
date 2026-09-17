@@ -11,6 +11,8 @@
 //! process — it does not reimplement or relax any of that hardening.
 
 #[cfg(test)]
+mod archive_index_tests;
+#[cfg(test)]
 mod lifecycle_tests;
 
 mod archive;
@@ -252,6 +254,24 @@ pub async fn serve_mail_role(
     // The `in` processor's future is large (chain, pipeline and templated
     // notices all inline); keep it on the heap rather than in this frame.
     let site_owner = config.site.site_owner.clone();
+    // The search index follows the archive; without it the archive page
+    // falls back to its substring search and `listmngr archive reindex`
+    // repairs the index later.
+    let search_writer = if config.archive.enabled {
+        match listmngr_archive::search::SearchIndex::open(std::path::Path::new(
+            &config.archive.index_path,
+        ))
+        .and_then(|index| index.writer())
+        {
+            Ok(writer) => Some(std::sync::Arc::new(std::sync::Mutex::new(writer))),
+            Err(error) => {
+                tracing::warn!(%error, "search index unavailable; archive search falls back to the database");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let inbound = Box::pin(processor::run(
         db.clone(),
         config,
@@ -289,7 +309,7 @@ pub async fn serve_mail_role(
         digest.await;
         Ok(())
     });
-    let archive = archive::run(db.clone(), shutdown.clone());
+    let archive = archive::run(db.clone(), search_writer, shutdown.clone());
     tasks.spawn(async move {
         archive.await;
         Ok(())
