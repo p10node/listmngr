@@ -89,7 +89,7 @@ impl Database {
     }
 }
 
-async fn remove_everything(
+pub(crate) async fn remove_everything(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     user: UserId,
 ) -> Result<Deleted> {

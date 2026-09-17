@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- Data export and erasure (`P4-GDPR`): a reader's own JSON export from the account page, a server owner's export and typed-back erasure of any account (last owner excepted), and `listmngr user export` / `user erase` on the command line.
 - Cross-list moderation (`P4-MODERATION-CROSS`): `/web/moderation` carries every held post and subscription request across the reader's lists with the list queue's forms, each naming its list, and decisions made there return there.
 - System page and audit log (`P4-SYSTEM`): versions, the redacted configuration, queue depths by state with the oldest ready job's wait and the runners holding leases, MTA map status, and an audit log viewer filtered by action prefix and target.
 - Domains and accounts in the browser (`P4-DOMAINS-USERS`): a domain index with an add form, a domain page with owners, template overrides on the list editor, the DKIM DNS record of each configured signing key and a typed-back deletion; an account search and an account page that saves the display name and server-owner flag, marks addresses verified or not, and lists memberships.

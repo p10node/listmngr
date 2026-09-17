@@ -1,5 +1,29 @@
 # listmngr
 
+## Data export and erasure (`P4-GDPR`) — bounded local acceptance verified
+
+A signed-in reader downloads everything stored about them from
+`/web/account/export.json` (linked from the account page): the account and
+its preferences, every address with its preferences, every membership with
+its member-level preferences, API token metadata (never the secret), the
+domains they own, how many browser sessions are open, and the audit events
+they appear in (the newest thousand). No password hash, token secret or
+session token is ever included.
+
+A server owner downloads the same for any account from the account's page
+(`/web/admin/users/<id>/export.json`) and erases an account there by typing
+one of its addresses back: memberships, addresses, API tokens, credential,
+sessions and domain ownerships go in one audited transaction, as with
+self-service deletion; moderation history keeps its rows without the link;
+the last server owner with a verified address cannot be erased.
+
+The command line has the same two operations: `listmngr user export <id>`
+prints the JSON, `listmngr user erase <id>` erases and reports what went.
+
+Limits: the export is a snapshot of listmngr's own tables (archived posts the
+person wrote stay in the archive, as in Mailman); erasure does not anonymise
+archived posts or bounce events keyed by address; no export of a list.
+
 ## Cross-list moderation (`P4-MODERATION-CROSS`) — bounded local acceptance verified
 
 `/web/moderation` is now one queue. Under the per-list counts it carries every
