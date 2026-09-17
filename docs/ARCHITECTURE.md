@@ -1,5 +1,20 @@
 # Architecture
 
+## Data export and erasure — bounded local acceptance verified
+
+`crates/db/src/web_gdpr.rs`: `export_user` reads the account, its
+preferences rows (through the owner rows' `preferences_id`), addresses,
+memberships, `api_tokens` metadata columns only, `domain_owners`, the
+`web_sessions` count and up to a thousand `audit_log` rows where the
+account is actor or target, as one JSON document with a `format` marker.
+`erase_user` (command line, administrator) and `browser_erase_user`
+(server owner under live session authority) share `erase_tx`: the
+last-server-owner guard, `web_delete::remove_everything` (now
+crate-visible) and one `user.delete` event with `"by": "administrator"`,
+all in the caller's transaction. `crates/api/src/webui_gdpr.rs` serves the
+downloads with `Content-Disposition: attachment` and the erase form; the
+CLI's `user export` and `user erase` call the same two functions.
+
 ## Cross-list moderation — bounded local acceptance verified
 
 No new persistence: `webui_moderation::index` walks the moderated lists of

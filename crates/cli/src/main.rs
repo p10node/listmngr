@@ -167,6 +167,11 @@ enum UserCommand {
         #[command(flatten)]
         password: PasswordInput,
     },
+    /// Everything stored about an account, as JSON; never a secret.
+    Export { id: UserId },
+    /// Erase an account: memberships, addresses, tokens, credential,
+    /// sessions and domain ownerships go with it, audited.
+    Erase { id: UserId },
 }
 #[derive(Debug, Args)]
 struct PasswordInput {
@@ -602,6 +607,21 @@ async fn users(db: &Database, command: UserCommand) -> Result<()> {
             let password = read_password(&password)?;
             db.users().set_password(id, &password).await?;
             println!("password changed");
+        }
+        UserCommand::Export { id } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&db.export_user(id).await?)?
+            );
+        }
+        UserCommand::Erase { id } => {
+            let deleted = db
+                .erase_user(id, &listmngr_db::AuditContext::system())
+                .await?;
+            println!(
+                "erased {id}: {} memberships, {} addresses, {} tokens",
+                deleted.memberships, deleted.addresses, deleted.tokens
+            );
         }
     }
     Ok(())
