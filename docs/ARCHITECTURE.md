@@ -1,5 +1,34 @@
 # Architecture
 
+## Posting from the web — bounded local acceptance verified
+
+`listmngr_mail::web_post::compose` builds the message a web post becomes
+(`mail-builder`: `From` the member's address with the account's display
+name unless it repeats the address, `To` the posting address, `Subject`,
+`Date`, `Message-ID`, `In-Reply-To` and `References` for a reply,
+`User-Agent: listmngr-web`, a `text/plain; charset=utf-8` body). The
+database's `browser_poster` (`crates/db/src/web_post.rs`) picks the
+signed-in reader's posting address: their verified addresses in primary
+order, the first that holds a membership (member, owner or moderator) on
+the list, refused when none or when banned. `webui_archive_post.rs`
+(`form`, `submit`; the route alone carries a 96 KiB body limit inside
+`archive_routes`) checks the archive policy for the session, reads the
+parent for a reply through `read_browser_message` (quoting its body and
+stripping the list's subject prefix), validates inline, composes, and
+enqueues into `Queue::In` through the same `enqueue` as LMTP intake and
+REST injection, with the context `{version, list_id, envelope_sender,
+message_id_hash, web_post: {user_id, address, reply}}`.
+
+In the runners, `policy_facts::WebPost::from_context` reads that object
+and `approve_web_post` sets `SenderChecks::is_approved` — the `approved`
+rule's fact — only when the envelope sender is the recorded address, the
+address is not banned, and the member's effective moderation action
+(their own override, else the list's `default_member_action`) is `defer`
+or `accept`; `processor::admit_post` applies it after `gather_context`,
+so the posting chain, the pipeline, delivery and archiving are otherwise
+unchanged. The `Approved:` header path and its moderator-password check
+are untouched.
+
 ## Archive interactions — bounded local acceptance verified
 
 `ArchiveRepo::interact` (`crates/db/src/archive_interact.rs`, migration

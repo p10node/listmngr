@@ -351,6 +351,24 @@ with sync_playwright() as p:
     page.goto(thread_url)
     page.get_by_role('button', name='Remove tag browser-test').click()
     expect(page.locator('.thread-meta')).not_to_contain_text('browser-test')
+    # P5-WEB-POST: the member replies from the thread and starts a thread
+    # from the sub-navigation; both are refused inline when empty and
+    # accepted into the queue when filled.
+    page.get_by_role('link', name='Reply').first.click()
+    expect(page.get_by_role('heading', name='Reply')).to_be_visible()
+    expect(page.get_by_label('Subject')).to_have_value('Re: Private browser archive')
+    expect(page.get_by_label('Message')).to_have_value(re.compile(r'^> '))
+    axe_scan(page, '/web/lists/private.example.com/archive/post?reply=<hash>')
+    page.get_by_label('Message').fill('   ')
+    expect_refusal()
+    page.get_by_role('button', name='Send to the list').click()
+    expect(page.get_by_role('alert')).to_contain_text('A message body is required.')
+    page.get_by_role('link', name='New thread').click()
+    expect(page.get_by_role('heading', name='New thread')).to_be_visible()
+    page.get_by_label('Subject').fill('Posted from the browser')
+    page.get_by_label('Message').fill('A thread started on the web.')
+    page.get_by_role('button', name='Send to the list').click()
+    expect(page.locator('main')).to_contain_text('Your post is on its way to the list')
     page.goto(base + '/web/lists/private.example.com/archive?message=private-browser-archive')
     expect(page.locator('article')).to_have_count(1)
     with page.expect_download() as attachment_download:

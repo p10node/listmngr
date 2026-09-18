@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% import "archive_macros.html" as archive %}
+{% block content %}{% call archive::links(shell, links) %}{% endcall %}<h2>{{ heading }}</h2>{% if let Some(error) = error %}<p role="alert" class="error">{{ error }}</p>{% endif %}<p>{{ shell.t("web-archive-post-from") }} <strong>{{ sender }}</strong></p><form method="post" action="{{ action }}">{% call ui::csrf(csrf) %}{% endcall %}<input type="hidden" name="reply" value="{{ reply }}"><p><label for="subject">{{ shell.t("web-archive-post-subject") }}</label><input id="subject" name="subject" value="{{ subject }}" maxlength="200" required></p><p><label for="body">{{ shell.t("web-archive-post-body") }}</label><textarea id="body" name="body" rows="12" required>{{ body }}</textarea></p><button>{{ shell.t("web-archive-post-submit") }}</button></form>{% endblock %}

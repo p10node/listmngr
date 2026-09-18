@@ -24,6 +24,8 @@ pub mod templates;
 pub mod test_support;
 pub mod totp;
 pub mod web_admin;
+mod web_post;
+pub use web_post::Poster;
 mod web_session_inventory;
 pub mod web_sessions;
 pub use web_session_inventory::SessionSummary;
