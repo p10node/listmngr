@@ -585,6 +585,8 @@ pub struct Archive {
     pub links: ArchiveLinks,
     /// The index's count of matching posts, translated, on a search page.
     pub results: Option<String>,
+    /// Tags, category and favourite of a thread page.
+    pub meta: Option<ThreadMetaView>,
 }
 
 /// Links every archive page carries to the others.
@@ -600,6 +602,8 @@ pub struct ArchiveLinks {
     pub atom_href: String,
     /// The RSS feed.
     pub rss_href: String,
+    /// The signed-in reader's favourites.
+    pub favorites_href: Option<String>,
 }
 
 /// The archive's overview: figures, months, recent and active threads,
@@ -657,6 +661,10 @@ pub struct ThreadRow {
     pub last_sender: String,
     /// Whether the signed-in reader has newer posts to see.
     pub unread: bool,
+    /// The thread's category, when filed.
+    pub category: Option<TagLink>,
+    /// The thread's tags.
+    pub tags: Vec<TagLink>,
 }
 
 /// One sender in the overview.
@@ -799,6 +807,66 @@ pub struct ArchiveMessage {
     pub attachments: Vec<ArchiveAttachment>,
     /// Whether the attachment list could not be produced.
     pub attachments_unavailable: bool,
+    /// Up votes minus down votes.
+    pub score: i64,
+    /// The reader's own vote: 1, -1 or 0.
+    pub own_vote: i32,
+    /// The signed-in reader's vote form.
+    pub vote: Option<VoteForm>,
+}
+
+/// The vote form of one post.
+#[derive(Debug, Clone)]
+pub struct VoteForm {
+    /// Form target.
+    pub action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+}
+
+/// One tag as a link.
+#[derive(Debug, Clone)]
+pub struct TagLink {
+    /// The tag.
+    pub name: String,
+    /// The tag's thread list.
+    pub href: String,
+    /// Whether the reader may remove it (the tagger or an owner).
+    pub removable: bool,
+    /// The translated label of the remove button.
+    pub remove_label: String,
+}
+
+/// What a thread page shows besides its posts.
+#[derive(Debug)]
+pub struct ThreadMetaView {
+    /// The thread.
+    pub thread: String,
+    /// Session CSRF token, when signed in.
+    pub csrf: Option<String>,
+    /// The tag form's target.
+    pub tag_action: String,
+    /// The category form's target.
+    pub category_action: String,
+    /// The favourite form's target.
+    pub favorite_action: String,
+    /// The thread's tags.
+    pub tags: Vec<TagLink>,
+    /// The category, when filed, with its thread list.
+    pub category: Option<TagLink>,
+    /// The list's categories, offered to an owner only.
+    pub categories: Vec<CategoryOption>,
+    /// Whether the reader keeps this thread as a favourite.
+    pub favorite: bool,
+}
+
+/// One category in the owner's select.
+#[derive(Debug)]
+pub struct CategoryOption {
+    /// The category.
+    pub name: String,
+    /// Whether the thread is filed under it.
+    pub selected: bool,
 }
 
 /// One attachment download.

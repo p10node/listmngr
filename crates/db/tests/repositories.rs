@@ -156,6 +156,7 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/oidc-schema.snapshot").lines())
             .chain(include_str!("fixtures/archive-render-schema.snapshot").lines())
             .chain(include_str!("fixtures/archive-views-schema.snapshot").lines())
+            .chain(include_str!("fixtures/archive-interactions-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )

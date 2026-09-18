@@ -65,6 +65,7 @@ pub use pages::{
 };
 pub use pages::{AtomFeed, FeedEntry, RssFeed};
 pub use pages::{AuditPage, AuditRow, QueueRow, ReattachForm, SystemPage};
+pub use pages::{CategoryOption, TagLink, ThreadMetaView, VoteForm};
 pub use pages::{
     CreateList, Flag, MassSubscribe, MemberOptionsPage, RequestItem, Requests, Roster,
 };

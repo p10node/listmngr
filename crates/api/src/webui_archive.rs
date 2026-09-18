@@ -11,11 +11,12 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use listmngr_archive::render::{Addresses, Mode};
 use listmngr_archive::threading::{Node, order};
-use listmngr_core::{ArchiveRenderingMode, Error, ListId};
+use listmngr_core::{ArchiveRenderingMode, Error, ListId, UserId};
 use listmngr_db::archive::ArchiveMessage;
 use listmngr_db::archive::browse::{Poster, ThreadSelection, ThreadSummary, month_bounds};
+use listmngr_db::archive::interact::{ThreadMeta, VoteSummary};
 use listmngr_db::web_sessions::WebSession;
-use listmngr_web::{ArchiveLinks, Nav, PosterRow, Shell, ThreadRow};
+use listmngr_web::{ArchiveLinks, Nav, PosterRow, Shell, TagLink, ThreadRow};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -60,7 +61,7 @@ impl Default for ArchiveQuery {
         }
     }
 }
-fn links(id: &ListId) -> ArchiveLinks {
+fn links(id: &ListId, signed_in: bool) -> ArchiveLinks {
     let base = format!("/web/lists/{}/archive", id.as_str());
     ArchiveLinks {
         overview_href: format!("{base}/overview"),
@@ -68,10 +69,20 @@ fn links(id: &ListId) -> ArchiveLinks {
         posts_href: base.clone(),
         atom_href: format!("{base}/feed.atom"),
         rss_href: format!("{base}/feed.rss"),
+        favorites_href: signed_in.then(|| format!("{base}/favorites")),
     }
 }
-fn thread_link(id: &ListId, thread: &str) -> String {
+pub(super) fn thread_link(id: &ListId, thread: &str) -> String {
     format!("/web/lists/{}/archive/thread/{thread}", id.as_str())
+}
+/// A tag or a category as a link to its thread list.
+fn label_link(id: &ListId, kind: &str, name: &str) -> TagLink {
+    TagLink {
+        name: name.to_owned(),
+        href: format!("/web/lists/{}/archive/{kind}/{name}", id.as_str()),
+        removable: false,
+        remove_label: String::new(),
+    }
 }
 fn sender_link(id: &ListId, email: &str) -> String {
     format!(
@@ -126,16 +137,25 @@ pub(super) async fn browse(
 pub(super) async fn thread_page(
     State(s): State<AppState>,
     Path((id, thread)): Path<(ListId, String)>,
+    Query(query): Query<SavedQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    if thread.is_empty() || thread.len() > 200 {
+    if thread.is_empty() || thread.len() > 200 || query.saved.len() > 40 {
         return Err(Error::Validation("archive query bounds".into()).into());
     }
     let query = ArchiveQuery {
         thread,
+        saved: query.saved,
         ..ArchiveQuery::default()
     };
     browse_with(&s, &id, &query, &headers, true).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SavedQuery {
+    #[serde(default)]
+    saved: String,
 }
 
 async fn browse_with(
@@ -182,6 +202,8 @@ async fn browse_with(
             .browser_mark_viewed(id, session, &query.thread, super::now())
             .await?;
     }
+    let reader = session.as_ref().and_then(|session| session.user_id);
+    let (votes, meta) = interactions(s, id, query, reader, tree, &messages).await?;
     let viewer = viewer(s, id, headers, session.as_ref()).await?;
     let view = View {
         s,
@@ -194,8 +216,38 @@ async fn browse_with(
         } else {
             Vec::new()
         },
+        reader,
+        votes,
+        meta,
     };
     render(&view, &messages, total)
+}
+
+/// The scores of the page's posts and, on a thread page, the thread's
+/// tags, category and favourite mark; nothing for an mbox download.
+async fn interactions(
+    s: &AppState,
+    id: &ListId,
+    query: &ArchiveQuery,
+    reader: Option<UserId>,
+    tree: bool,
+    messages: &[ArchiveMessage],
+) -> ApiResult<(Vec<VoteSummary>, Option<ThreadMeta>)> {
+    if query.format != ArchiveFormat::Html {
+        return Ok((Vec::new(), None));
+    }
+    let hashes: Vec<String> = messages.iter().map(|m| m.hash.clone()).collect();
+    let votes = s.db.archive().browser_votes(id, reader, &hashes).await?;
+    let meta = if tree {
+        Some(
+            s.db.archive()
+                .browser_thread_meta(id, reader, &query.thread)
+                .await?,
+        )
+    } else {
+        None
+    };
+    Ok((votes, meta))
 }
 
 /// What the reader's session decides for every archive page.
@@ -334,6 +386,12 @@ struct View<'a> {
     tree: bool,
     /// The search words to mark, when the index answered.
     terms: Vec<String>,
+    /// The signed-in reader.
+    reader: Option<UserId>,
+    /// The page's posts' scores.
+    votes: Vec<VoteSummary>,
+    /// A thread page's tags, category and favourite mark.
+    meta: Option<ThreadMeta>,
 }
 
 fn download(content_type: &str, filename: &str, bytes: Vec<u8>) -> Response {
@@ -418,6 +476,7 @@ fn message_view(
         )
     };
     let (attachments, unavailable) = attachments(id, message, language)?;
+    let vote = view.votes.iter().find(|v| v.hash == message.hash);
     let avatar = view
         .s
         .config
@@ -450,7 +509,61 @@ fn message_view(
         body_html: listmngr_archive::render::highlight(&body_html, &view.terms),
         attachments,
         attachments_unavailable: unavailable,
+        score: vote.map_or(0, |v| v.score),
+        own_vote: vote.map_or(0, |v| v.own),
+        vote: view
+            .viewer
+            .csrf
+            .as_ref()
+            .map(|csrf| listmngr_web::VoteForm {
+                action: format!("/web/lists/{}/archive/vote", id.as_str()),
+                csrf: csrf.clone(),
+            }),
     })
+}
+
+/// A thread page's tags, category and favourite mark as the reader may
+/// act on them: the tagger or an owner removes a tag, an owner files the
+/// thread, any signed-in reader keeps it.
+fn meta_view(view: &View<'_>, meta: &ThreadMeta) -> listmngr_web::ThreadMetaView {
+    let (id, language) = (view.id, view.viewer.language);
+    let base = format!("/web/lists/{}/archive", id.as_str());
+    listmngr_web::ThreadMetaView {
+        thread: view.query.thread.clone(),
+        csrf: view.viewer.csrf.clone(),
+        tag_action: format!("{base}/tags"),
+        category_action: format!("{base}/category"),
+        favorite_action: format!("{base}/favorite"),
+        tags: meta
+            .tags
+            .iter()
+            .map(|tag| TagLink {
+                removable: view.viewer.owner || view.reader == Some(tag.user_id),
+                remove_label: listmngr_i18n::message(
+                    language,
+                    "web-archive-remove-tag",
+                    &[("tag", &tag.tag)],
+                ),
+                ..label_link(id, "tags", &tag.tag)
+            })
+            .collect(),
+        category: meta
+            .category
+            .as_deref()
+            .map(|name| label_link(id, "categories", name)),
+        categories: if view.viewer.owner {
+            meta.categories
+                .iter()
+                .map(|name| listmngr_web::CategoryOption {
+                    selected: meta.category.as_deref() == Some(name.as_str()),
+                    name: name.clone(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        },
+        favorite: meta.favorite,
+    }
 }
 
 fn render(
@@ -491,18 +604,18 @@ fn render(
         _ => None,
     };
     let notice = match query.saved.as_str() {
-        "reattached" => Some(listmngr_i18n::message(
-            language,
-            "web-archive-reattached",
-            &[],
-        )),
-        "cycle" => Some(listmngr_i18n::message(
-            language,
-            "web-archive-reattach-refused",
-            &[],
-        )),
+        "reattached" => Some("web-archive-reattached"),
+        "cycle" => Some("web-archive-reattach-refused"),
+        "voted" => Some("web-archive-voted"),
+        "tagged" => Some("web-archive-tagged"),
+        "untagged" => Some("web-archive-untagged"),
+        "tag-refused" => Some("web-archive-tag-refused"),
+        "categorized" => Some("web-archive-categorized"),
+        "favorited" => Some("web-archive-favorited"),
+        "unfavorited" => Some("web-archive-unfavorited"),
         _ => None,
-    };
+    }
+    .map(|id| listmngr_i18n::message(language, id, &[]));
     let paged = !view.tree;
     let page = listmngr_web::Archive {
         shell: Shell::titled(
@@ -528,7 +641,7 @@ fn render(
         },
         reattach,
         notice,
-        links: links(id),
+        links: links(id, view.viewer.csrf.is_some()),
         results: total.map(|total| {
             listmngr_i18n::message(
                 language,
@@ -536,6 +649,7 @@ fn render(
                 &[("count", &total.to_string()), ("query", &query.q)],
             )
         }),
+        meta: view.meta.as_ref().map(|meta| meta_view(view, meta)),
     };
     let response = super::html(&page);
     Ok(if view.s.config.archive.gravatar {
@@ -736,7 +850,7 @@ fn download_link(id: &ListId, query: &ArchiveQuery) -> ApiResult<String> {
     Ok(format!("/web/lists/{}/archive?{encoded}", id.as_str()))
 }
 
-fn message_link(id: &ListId, hash: &str) -> ApiResult<String> {
+pub(super) fn message_link(id: &ListId, hash: &str) -> ApiResult<String> {
     let encoded = serde_urlencoded::to_string([("message", hash)])
         .map_err(|error| Error::Validation(error.to_string()))?;
     Ok(format!("/web/lists/{}/archive?{encoded}", id.as_str()))
@@ -758,6 +872,15 @@ fn thread_row(id: &ListId, summary: &ThreadSummary) -> ThreadRow {
         last: when(Some(summary.last_ms)),
         last_sender: summary.last_sender.clone(),
         unread: summary.unread,
+        category: summary
+            .category
+            .as_deref()
+            .map(|name| label_link(id, "categories", name)),
+        tags: summary
+            .tags
+            .iter()
+            .map(|tag| label_link(id, "tags", tag))
+            .collect(),
     }
 }
 
@@ -802,7 +925,7 @@ pub(super) async fn overview(
             Nav::Lists,
         ),
         list: id.as_str().to_owned(),
-        links: links(&id),
+        links: links(&id, session.as_ref().is_some_and(|s| s.user_id.is_some())),
         posts: overview.posts,
         threads: overview.threads,
         participants: overview.participants,
@@ -838,7 +961,7 @@ pub(super) async fn threads(
     Query(query): Query<PageQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    threads_page(&s, &id, &headers, query.page, None).await
+    threads_page(&s, &id, &headers, query.page, Listing::Latest).await
 }
 
 /// `GET /web/lists/{id}/archive/threads/{year}/{month}`: the threads with
@@ -852,7 +975,52 @@ pub(super) async fn threads_month(
     if !(1970..=9999).contains(&year) {
         return Err(Error::Validation("archive month".into()).into());
     }
-    threads_page(&s, &id, &headers, query.page, Some((year, month))).await
+    threads_page(&s, &id, &headers, query.page, Listing::Month(year, month)).await
+}
+
+/// `GET /web/lists/{id}/archive/favorites`: the signed-in reader's
+/// favourite threads.
+pub(super) async fn favorites(
+    State(s): State<AppState>,
+    Path(id): Path<ListId>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    threads_page(&s, &id, &headers, query.page, Listing::Favorites).await
+}
+
+/// `GET /web/lists/{id}/archive/tags/{tag}`: the threads carrying a tag.
+pub(super) async fn tagged(
+    State(s): State<AppState>,
+    Path((id, tag)): Path<(ListId, String)>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    let tag = listmngr_db::archive::interact::normalize_tag(&tag)?;
+    threads_page(&s, &id, &headers, query.page, Listing::Tagged(tag)).await
+}
+
+/// `GET /web/lists/{id}/archive/categories/{name}`: the threads filed
+/// under one of the list's categories.
+pub(super) async fn in_category(
+    State(s): State<AppState>,
+    Path((id, name)): Path<(ListId, String)>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    if name.is_empty() || name.len() > 60 {
+        return Err(Error::Validation("archive category".into()).into());
+    }
+    threads_page(&s, &id, &headers, query.page, Listing::InCategory(name)).await
+}
+
+/// Which thread list a page shows.
+enum Listing {
+    Latest,
+    Month(i32, u32),
+    Favorites,
+    Tagged(String),
+    InCategory(String),
 }
 
 async fn threads_page(
@@ -860,39 +1028,70 @@ async fn threads_page(
     id: &ListId,
     headers: &HeaderMap,
     page: u32,
-    month: Option<(i32, u32)>,
+    listing: Listing,
 ) -> ApiResult<Response> {
     if !(1..=5001).contains(&page) {
         return Err(Error::Validation("archive query bounds".into()).into());
     }
-    let selection = match month {
-        Some((year, month)) => {
-            let (from_ms, until_ms) = month_bounds(year, month)?;
-            ThreadSelection::Between { from_ms, until_ms }
-        }
-        None => ThreadSelection::Latest,
+    let session = match listing {
+        Listing::Favorites => Some(super::load(s, headers).await?),
+        _ => archive_session(s, headers).await?,
     };
-    let session = archive_session(s, headers).await?;
+    let language = language_for(s, headers, session.as_ref()).await?;
+    let base = format!("/web/lists/{}/archive", id.as_str());
+    let (selection, heading, base) = match listing {
+        Listing::Latest => (
+            ThreadSelection::Latest,
+            listmngr_i18n::message(language, "web-archive-latest-threads", &[]),
+            format!("{base}/threads"),
+        ),
+        Listing::Month(year, month) => {
+            let (from_ms, until_ms) = month_bounds(year, month)?;
+            (
+                ThreadSelection::Between { from_ms, until_ms },
+                listmngr_i18n::message(
+                    language,
+                    "web-archive-month-threads",
+                    &[("month", &format!("{year:04}-{month:02}"))],
+                ),
+                format!("{base}/threads/{year:04}/{month:02}"),
+            )
+        }
+        Listing::Favorites => {
+            let user = session
+                .as_ref()
+                .and_then(|session| session.user_id)
+                .ok_or(Error::Authentication)?;
+            (
+                ThreadSelection::Favorites(user),
+                listmngr_i18n::message(language, "web-archive-favorites-title", &[]),
+                format!("{base}/favorites"),
+            )
+        }
+        Listing::Tagged(tag) => (
+            ThreadSelection::Tagged(tag.clone()),
+            listmngr_i18n::message(language, "web-archive-tag-threads", &[("tag", &tag)]),
+            format!("{base}/tags/{tag}"),
+        ),
+        Listing::InCategory(name) => {
+            if !s.db.archive().categories(id).await?.contains(&name) {
+                return Err(Error::NotFound("archive category".into()).into());
+            }
+            (
+                ThreadSelection::InCategory(name.clone()),
+                listmngr_i18n::message(
+                    language,
+                    "web-archive-category-threads",
+                    &[("category", &name)],
+                ),
+                format!("{base}/categories/{name}"),
+            )
+        }
+    };
     let rows =
         s.db.archive()
             .browser_threads(id, session.as_ref(), selection, i64::from(page - 1) * 20)
             .await?;
-    let language = language_for(s, headers, session.as_ref()).await?;
-    let base = format!("/web/lists/{}/archive/threads", id.as_str());
-    let (heading, base) = match month {
-        Some((year, month)) => (
-            listmngr_i18n::message(
-                language,
-                "web-archive-month-threads",
-                &[("month", &format!("{year:04}-{month:02}"))],
-            ),
-            format!("{base}/{year:04}/{month:02}"),
-        ),
-        None => (
-            listmngr_i18n::message(language, "web-archive-latest-threads", &[]),
-            base,
-        ),
-    };
     let page_view = listmngr_web::ArchiveThreads {
         shell: Shell::titled(
             language,
@@ -904,7 +1103,7 @@ async fn threads_page(
             Nav::Lists,
         ),
         heading,
-        links: links(id),
+        links: links(id, session.as_ref().is_some_and(|s| s.user_id.is_some())),
         threads: rows.iter().take(20).map(|t| thread_row(id, t)).collect(),
         previous: (page > 1).then(|| format!("{base}?page={}", page - 1)),
         next: (rows.len() > 20 && page < 5001).then(|| format!("{base}?page={}", page + 1)),
@@ -956,6 +1155,8 @@ pub(super) async fn sender(
             .await?;
     let viewer = viewer(&s, &id, &headers, session.as_ref()).await?;
     let default_query = ArchiveQuery::default();
+    let reader = session.as_ref().and_then(|session| session.user_id);
+    let (votes, meta) = interactions(&s, &id, &default_query, reader, false, &messages).await?;
     let view = View {
         s: &s,
         id: &id,
@@ -963,6 +1164,9 @@ pub(super) async fn sender(
         viewer: &viewer,
         tree: false,
         terms: Vec::new(),
+        reader,
+        votes,
+        meta,
     };
     let language = viewer.language;
     let shown = listmngr_archive::render::sender_email(&email, viewer.addresses);
@@ -988,7 +1192,7 @@ pub(super) async fn sender(
             "web-archive-sender-posts",
             &[("count", &posts.to_string())],
         ),
-        links: links(&id),
+        links: links(&id, viewer.csrf.is_some()),
         messages: messages
             .iter()
             .take(20)
