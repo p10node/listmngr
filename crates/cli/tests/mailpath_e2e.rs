@@ -1383,3 +1383,179 @@ async fn post_injected_while_stopped_is_delivered_exactly_once_after_start() {
         .count();
     assert_eq!(to_reader, 1, "exactly once");
 }
+
+/// The CSRF token of a rendered browser form.
+fn csrf_of(html: &str) -> String {
+    html.split("name=\"csrf\" value=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("a csrf field")
+        .to_owned()
+}
+
+/// The browser session behind a real web login: the cookie the server set.
+async fn web_login(fixture: &Fixture, email: &str, password: &str) -> String {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let base = format!("http://127.0.0.1:{}", fixture.web_port);
+    let form = client
+        .get(format!("{base}/web/login"))
+        .send()
+        .await
+        .unwrap();
+    let anonymous = form.headers()["set-cookie"].to_str().unwrap().to_owned();
+    let csrf = csrf_of(&form.text().await.unwrap());
+    let login = client
+        .post(format!("{base}/web/login"))
+        .header("origin", "https://lists.e2e.invalid")
+        .header("cookie", &anonymous)
+        .form(&[
+            ("csrf", csrf.as_str()),
+            ("email", email),
+            ("password", password),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login.status(), 303, "login must redirect");
+    login.headers()["set-cookie"].to_str().unwrap().to_owned()
+}
+
+/// The delivered copy of a web post, as the other member received it.
+fn assert_web_post_delivery(data: &[u8]) {
+    assert_eq!(
+        header(data, "From").as_deref(),
+        Some("\"Poster\" <poster@e2e.example.invalid>")
+    );
+    assert_eq!(
+        header(data, "Subject").as_deref(),
+        Some("[dev] Posted from the web")
+    );
+    assert_eq!(header(data, "User-Agent").as_deref(), Some("listmngr-web"));
+    assert!(header(data, "Message-ID-Hash").is_some());
+    assert_eq!(
+        header(data, "List-Post").as_deref(),
+        Some("<mailto:dev@e2e.example.invalid>")
+    );
+    assert!(
+        String::from_utf8_lossy(data).contains("Written in the browser, delivered by the list."),
+        "{}",
+        String::from_utf8_lossy(data)
+    );
+}
+
+/// The archive page once the archive runner has stored the post.
+async fn wait_archived(client: &reqwest::Client, url: &str, cookie: &str, needle: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let page = client
+            .get(url)
+            .header("cookie", cookie)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        if page.contains(needle) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the web post never reached the archive: {page}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// P5-WEB-POST: a member signed in on the web writes a new thread; the
+/// real server composes the message from the verified address, the `in`
+/// runner admits it, the out runner delivers it to the other member over
+/// the real SMTP socket, and the archive runner stores it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn web_post_is_delivered_and_archived() {
+    let fixture = Fixture::start().await;
+    // The account first, so the address is the account's; then the
+    // membership through that address; then its verification.
+    run_cli(
+        fixture.dir.path(),
+        &fixture.env,
+        &[
+            "user",
+            "create",
+            "poster@e2e.example.invalid",
+            "--display-name",
+            "Poster",
+            "--password-stdin",
+        ],
+        Some("E2ePosterPassw0rd!\n"),
+    );
+    fixture.add_member("poster@e2e.example.invalid");
+    fixture.add_member("reader@e2e.example.invalid");
+    let db = listmngr_db::Database::connect(&fixture.db_url(), 2)
+        .await
+        .unwrap();
+    db.addresses()
+        .verify("poster@e2e.example.invalid", true)
+        .await
+        .unwrap();
+    let cookie = web_login(&fixture, "poster@e2e.example.invalid", "E2ePosterPassw0rd!").await;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let base = format!("http://127.0.0.1:{}", fixture.web_port);
+    let form_url = format!("{base}/web/lists/{}/archive/post", fixture.list);
+    let form = client
+        .get(&form_url)
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(form.status(), 200);
+    let html = form.text().await.unwrap();
+    assert!(html.contains("poster@e2e.example.invalid"), "{html}");
+    let csrf = csrf_of(&html);
+    let posted = client
+        .post(&form_url)
+        .header("origin", "https://lists.e2e.invalid")
+        .header("cookie", &cookie)
+        .form(&[
+            ("csrf", csrf.as_str()),
+            ("reply", ""),
+            ("subject", "Posted from the web"),
+            ("body", "Written in the browser, delivered by the list."),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), 303, "{}", posted.text().await.unwrap());
+    assert!(
+        posted.headers()["location"]
+            .to_str()
+            .unwrap()
+            .ends_with("/archive?saved=posted")
+    );
+    fixture
+        .deliveries_when(Duration::from_secs(15), |all| {
+            all.iter()
+                .any(|d| d.rcpt_to.contains(&"reader@e2e.example.invalid".to_owned()))
+        })
+        .await;
+    let delivery = fixture
+        .sink
+        .deliveries()
+        .into_iter()
+        .find(|d| d.rcpt_to.contains(&"reader@e2e.example.invalid".to_owned()))
+        .unwrap();
+    assert_web_post_delivery(&delivery.data);
+    wait_archived(
+        &client,
+        &format!("{base}/web/lists/{}/archive", fixture.list),
+        &cookie,
+        "Posted from the web",
+    )
+    .await;
+}

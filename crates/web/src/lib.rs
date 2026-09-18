@@ -63,9 +63,9 @@ pub use pages::{
 pub use pages::{
     ArchiveLinks, ArchiveOverview, ArchiveSender, ArchiveThreads, MonthRow, PosterRow, ThreadRow,
 };
+pub use pages::{ArchivePost, CategoryOption, TagLink, ThreadMetaView, VoteForm};
 pub use pages::{AtomFeed, FeedEntry, RssFeed};
 pub use pages::{AuditPage, AuditRow, QueueRow, ReattachForm, SystemPage};
-pub use pages::{CategoryOption, TagLink, ThreadMetaView, VoteForm};
 pub use pages::{
     CreateList, Flag, MassSubscribe, MemberOptionsPage, RequestItem, Requests, Roster,
 };

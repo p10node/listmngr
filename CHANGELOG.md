@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- Posting from the web (`P5-WEB-POST`): new threads and replies from the archive by signed-in members with a verified subscribed address, composed by the server and injected into the `in` queue with a web-origin context that the `in` runner admits like an `Approved:` post for unmoderated members.
 - Archive interactions (`P5-INTERACTIONS`): one vote per reader per post with scores on every post, tags on threads with their own thread lists, an owner's category per thread, and a reader's favourite threads with their page; votes, tags and categories audited in the same transaction.
 - Archive browsing (`P5-UI`): an overview with figures, months, recent and active threads and top posters; thread lists by latest activity and by month with a signed-in reader's unread marks cleared by the thread page; sender pages keyed by an address digest; the search page's result count and `<mark>` highlights; and Atom and RSS feeds.
 - Archive search (`P5-SEARCH`): a tantivy index under `[archive] index_path` kept current by the archive runner in batches, ranked every-word search on the archive page with policy-checked hits and a database fallback, and `listmngr archive reindex`.
