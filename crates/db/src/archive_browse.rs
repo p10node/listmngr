@@ -26,6 +26,10 @@ pub struct ThreadSummary {
     /// Whether the signed-in reader has posts here they have not seen
     /// (never set for a visitor).
     pub unread: bool,
+    /// The thread's tags, sorted.
+    pub tags: Vec<String>,
+    /// The thread's category, when an owner filed it.
+    pub category: Option<String>,
 }
 
 /// One sender as the overview and the sender page show them.
@@ -57,17 +61,23 @@ pub struct Overview {
 }
 
 /// Which threads a list asks for.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ThreadSelection {
     /// By latest activity.
     Latest,
     /// Posts dated within `[from_ms, until_ms)`.
     Between { from_ms: i64, until_ms: i64 },
-    /// By posts in the last `days`.
+    /// By posts since `since_ms`, most posts first.
     Active { since_ms: i64 },
+    /// The reader's favourites, by latest activity.
+    Favorites(UserId),
+    /// The threads carrying a tag, by latest activity.
+    Tagged(String),
+    /// The threads filed under a category, by latest activity.
+    InCategory(String),
 }
 
-const THREAD_SQL: &str = "SELECT t.thread, t.posts, t.participants, t.started, t.last, COALESCE((SELECT r.subject FROM archive_messages r WHERE r.list_id=$1 AND r.hash=t.thread), (SELECT e.subject FROM archive_messages e WHERE e.list_id=$1 AND e.thread=t.thread ORDER BY e.created_at, e.hash LIMIT 1), '') AS subject, COALESCE((SELECT CASE WHEN l.sender_name<>'' THEN l.sender_name ELSE l.sender_email END FROM archive_messages l WHERE l.list_id=$1 AND l.thread=t.thread ORDER BY l.created_at DESC, l.hash DESC LIMIT 1), '') AS last_sender FROM (SELECT thread, COUNT(*) AS posts, COUNT(DISTINCT sender_email) AS participants, MIN(COALESCE(message_date, created_at)) AS started, MAX(COALESCE(message_date, created_at)) AS last FROM archive_messages WHERE list_id=$1 AND COALESCE(message_date, created_at)>=$2 AND COALESCE(message_date, created_at)<$3 GROUP BY thread) t ORDER BY ";
+const THREAD_SQL: &str = "SELECT t.thread, t.posts, t.participants, t.started, t.last, COALESCE((SELECT r.subject FROM archive_messages r WHERE r.list_id=$1 AND r.hash=t.thread), (SELECT e.subject FROM archive_messages e WHERE e.list_id=$1 AND e.thread=t.thread ORDER BY e.created_at, e.hash LIMIT 1), '') AS subject, COALESCE((SELECT CASE WHEN l.sender_name<>'' THEN l.sender_name ELSE l.sender_email END FROM archive_messages l WHERE l.list_id=$1 AND l.thread=t.thread ORDER BY l.created_at DESC, l.hash DESC LIMIT 1), '') AS last_sender FROM (SELECT thread, COUNT(*) AS posts, COUNT(DISTINCT sender_email) AS participants, MIN(COALESCE(message_date, created_at)) AS started, MAX(COALESCE(message_date, created_at)) AS last FROM archive_messages WHERE list_id=$1 AND COALESCE(message_date, created_at)>=$2 AND COALESCE(message_date, created_at)<$3 AND ($6='' OR thread IN (SELECT f.thread FROM archive_favorites f WHERE f.user_id=$6 AND f.list_id=$1)) AND ($7='' OR thread IN (SELECT g.thread FROM archive_tags g WHERE g.list_id=$1 AND g.tag=$7)) AND ($8='' OR thread IN (SELECT c.thread FROM archive_thread_categories c WHERE c.list_id=$1 AND c.category=$8)) GROUP BY thread) t ORDER BY ";
 
 fn month_of(ms: i64) -> Option<(i32, u32)> {
     use chrono::Datelike as _;
@@ -135,15 +145,20 @@ impl ArchiveRepo<'_> {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ThreadSummary>> {
-        let (from, until, order) = match selection {
-            ThreadSelection::Latest => (i64::MIN, i64::MAX, "t.last DESC, t.thread"),
-            ThreadSelection::Between { from_ms, until_ms } => {
-                (from_ms, until_ms, "t.last DESC, t.thread")
-            }
+        const LATEST: &str = "t.last DESC, t.thread";
+        let (mut from, mut until, mut order) = (i64::MIN, i64::MAX, LATEST);
+        let (mut favorites, mut tag, mut category) = (String::new(), String::new(), String::new());
+        match selection {
+            ThreadSelection::Latest => {}
+            ThreadSelection::Between { from_ms, until_ms } => (from, until) = (from_ms, until_ms),
             ThreadSelection::Active { since_ms } => {
-                (since_ms, i64::MAX, "t.posts DESC, t.last DESC, t.thread")
+                from = since_ms;
+                order = "t.posts DESC, t.last DESC, t.thread";
             }
-        };
+            ThreadSelection::Favorites(user) => favorites = user.to_string(),
+            ThreadSelection::Tagged(name) => tag = name,
+            ThreadSelection::InCategory(name) => category = name,
+        }
         let sql = format!("{THREAD_SQL}{order} LIMIT $4 OFFSET $5");
         let rows = sqlx::query(&sql)
             .bind(list.as_str())
@@ -151,6 +166,9 @@ impl ArchiveRepo<'_> {
             .bind(until)
             .bind(limit.clamp(1, 200))
             .bind(offset.clamp(0, 100_000))
+            .bind(favorites)
+            .bind(tag)
+            .bind(category)
             .fetch_all(self.db.pool())
             .await
             .map_err(db_error)?;
@@ -158,7 +176,8 @@ impl ArchiveRepo<'_> {
             Some(user) => self.views(list, user).await?,
             None => Vec::new(),
         };
-        rows.iter()
+        let rows = rows
+            .iter()
             .map(|row| {
                 let thread: String = row.try_get("thread").map_err(db_error)?;
                 let last_ms: i64 = row.try_get("last").map_err(db_error)?;
@@ -176,9 +195,14 @@ impl ArchiveRepo<'_> {
                     last_sender: row.try_get("last_sender").map_err(db_error)?,
                     unread,
                     thread,
+                    tags: Vec::new(),
+                    category: None,
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        let mut threads = rows;
+        self.label_threads(list, &mut threads).await?;
+        Ok(threads)
     }
 
     async fn views(&self, list: &ListId, user: UserId) -> Result<Vec<(String, i64)>> {

@@ -326,6 +326,33 @@ with sync_playwright() as p:
     expect(page.locator('article')).to_contain_text('Private archived body')
     page.get_by_role('link', name='Permanent link').click()
     expect(page).to_have_url(base + '/web/lists/private.example.com/archive?message=private-browser-archive')
+    # P5-INTERACTIONS: a signed-in member votes a post up, sees the score,
+    # and takes the vote back; the thread page offers tags and favourites.
+    expect(page.locator('article .score')).to_have_text('0')
+    page.get_by_role('button', name='Up vote').click()
+    expect(page).to_have_url(base + '/web/lists/private.example.com/archive?message=private-browser-archive&saved=voted')
+    expect(page.locator('article .score')).to_have_text('1')
+    expect(page.get_by_role('button', name='Up vote')).to_have_attribute('aria-pressed', 'true')
+    axe_scan(page, '/web/lists/private.example.com/archive?message=<hash> (voted)')
+    page.get_by_role('button', name='Up vote').click()
+    expect(page.locator('article .score')).to_have_text('0')
+    page.get_by_role('link', name='View thread').click()
+    thread_url = page.url
+    page.get_by_label('Add a tag').fill('Browser Test')
+    page.get_by_role('button', name='Tag', exact=True).click()
+    expect(page.locator('.thread-meta')).to_contain_text('browser-test')
+    page.get_by_role('button', name='Add to favourites').click()
+    expect(page.locator('main')).to_contain_text('Added to your favourites.')
+    axe_scan(page, '/web/lists/private.example.com/archive/thread/<hash> (tagged, favourite)')
+    page.get_by_role('link', name='Favourites').click()
+    expect(page.locator('table.threads tbody tr')).to_have_count(1)
+    expect(page.locator('table.threads')).to_contain_text('browser-test')
+    axe_scan(page, '/web/lists/private.example.com/archive/favorites')
+    page.goto(thread_url)
+    page.get_by_role('button', name='Remove tag browser-test').click()
+    expect(page.locator('.thread-meta')).not_to_contain_text('browser-test')
+    page.goto(base + '/web/lists/private.example.com/archive?message=private-browser-archive')
+    expect(page.locator('article')).to_have_count(1)
     with page.expect_download() as attachment_download:
         page.get_by_role('link', name='Download attachment: private.csv', exact=True).click()
     attachment = attachment_download.value
