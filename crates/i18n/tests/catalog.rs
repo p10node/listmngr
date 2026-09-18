@@ -87,6 +87,8 @@ const ARGUMENTS: &[(&str, &str)] = &[
     ("role", "x"),
     ("month", "2024-01"),
     ("query", "x"),
+    ("tag", "x"),
+    ("category", "x"),
 ];
 
 #[test]

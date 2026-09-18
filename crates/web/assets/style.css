@@ -47,6 +47,11 @@ input[type="checkbox"]{display:inline-block;width:auto;margin:0 .4rem 0 0;vertic
 .figures{display:flex;flex-wrap:wrap;gap:1rem;margin:0 0 1rem}.figures div{border:1px solid var(--line);border-radius:var(--radius);padding:.5rem .9rem;min-width:7rem}.figures dt{color:var(--muted);font-size:.85em}.figures dd{margin:0;font-size:1.4em;font-weight:600}
 .months{columns:2;list-style:none;padding:0}
 .muted{color:var(--muted)}
+.badge.category{border-color:var(--accent);color:var(--accent)}
+.badge.tag{text-decoration:none}
+form.inline{display:inline}form.inline button{padding:.1rem .5rem;margin:0 .1rem}
+.post .votes{display:flex;align-items:center;gap:.5rem;margin:.25rem 0}.post .score{font-weight:600;min-width:1.5rem;text-align:center}
+.thread-meta{border:1px solid var(--line);border-radius:var(--radius);padding:.5rem .9rem;margin:0 0 1rem}
 mark{background:#fde68a;color:#172b3a;padding:0 .1em}
 .post .sender a{color:inherit}
 .post .sender{color:var(--muted);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}

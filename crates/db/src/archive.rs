@@ -9,6 +9,8 @@ use sqlx::Row;
 pub mod browse;
 #[path = "browser_archive.rs"]
 mod browser;
+#[path = "archive_interact.rs"]
+pub mod interact;
 enum Selection<'a> {
     Thread(Option<&'a str>),
     Message(&'a str),
