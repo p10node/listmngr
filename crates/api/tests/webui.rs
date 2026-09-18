@@ -4,6 +4,8 @@ mod addresses;
 mod admin_pagination;
 #[path = "webui/archive_interactions.rs"]
 mod archive_interactions;
+#[path = "webui/archive_post.rs"]
+mod archive_post;
 #[path = "webui/archive_render.rs"]
 mod archive_render;
 #[path = "webui/archive_search.rs"]

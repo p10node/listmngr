@@ -1,5 +1,38 @@
 # listmngr
 
+## Posting from the web (`P5-WEB-POST`) — bounded local acceptance verified
+
+A signed-in reader who holds a verified address subscribed to the list
+(as a member, owner or moderator) can post from the archive: "New thread"
+in every archive page's navigation, and "Reply" on every post (the reply
+form quotes the parent and proposes `Re: …` without the list's prefix).
+The server composes the message itself — the member's address in `From`,
+the list's posting address in `To`, a fresh `Message-ID`, `In-Reply-To`
+and `References` for a reply, `User-Agent: listmngr-web`, a UTF-8 text
+body — and injects it into the `in` queue exactly as a message arriving by
+LMTP or the REST `queues/in` injection, with a context that records the
+web origin (the account and the address).
+
+The `in` runner admits a web post the way it admits an `Approved:` post —
+past emergency moderation and the deferred checks (explicit destination,
+size, recipients, subject, header rules) — but only when the envelope
+sender is the recorded verified address, the address is not banned, and
+the member would post unmoderated anyway (their own moderation action, or
+the list's default, is `defer` or `accept`). A moderated member's web post
+is held like their mail. From there the post takes the ordinary path: the
+pipeline, delivery to the members, the archive.
+
+Refusals: a visitor gets 401; a signed-in reader without a verified
+subscribed address, or whose address is banned, 403; a list whose archive
+is `never` has no form (404); an empty or over-long subject or body, or a
+subject with line breaks, is refused inline. The form alone takes a
+96 KiB request (every other browser form is held to 8 KiB); the handler
+refuses bodies over 64 KiB and subjects over 200 characters.
+
+Limits: no attachments from the web; no draft or preview; posting needs
+the archive to be readable by the poster (the form lives under the archive
+pages); no per-user posting rate limit beyond the list's own moderation.
+
 ## Archive interactions (`P5-INTERACTIONS`) — bounded local acceptance verified
 
 Signed-in readers now act on the archive, each action a plain form on the

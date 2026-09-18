@@ -46,6 +46,57 @@ fn site_header_checks(config: &Config) -> Vec<HeaderMatch> {
         .collect()
 }
 
+/// A post written on the web by a signed-in member from a verified
+/// address, as the web layer recorded it in the job's context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebPost {
+    pub user_id: String,
+    pub address: String,
+}
+
+impl WebPost {
+    /// The `web_post` object of a queued submission's context, if any.
+    #[must_use]
+    pub fn from_context(context: &serde_json::Value) -> Option<Self> {
+        let web = context.get("web_post")?;
+        Some(Self {
+            user_id: web.get("user_id")?.as_str()?.to_owned(),
+            address: web.get("address")?.as_str()?.to_owned(),
+        })
+    }
+}
+
+/// A web post is admitted the way an `Approved:` post is — past the
+/// deferred checks (destination, size, recipients, subject, header rules)
+/// and emergency moderation — when its envelope sender is the recorded
+/// verified address, the address is not banned, and the member would post
+/// unmoderated anyway (their own action, or the list's default, is `defer`
+/// or `accept`). A moderated member's web post is held like their mail.
+/// Returns whether the post was approved.
+pub fn approve_web_post(ctx: &mut PostingContext, web: Option<&WebPost>) -> bool {
+    let Some(web) = web else {
+        return false;
+    };
+    let same_sender = ctx
+        .envelope_sender
+        .as_deref()
+        .is_some_and(|sender| sender.eq_ignore_ascii_case(&web.address));
+    if !same_sender || ctx.sender.is_banned {
+        return false;
+    }
+    let effective = ctx
+        .member_moderation_action
+        .map(|own| own.unwrap_or(ctx.default_member_action));
+    if matches!(
+        effective,
+        Some(ModerationAction::Defer | ModerationAction::Accept)
+    ) {
+        ctx.sender.is_approved = true;
+        return true;
+    }
+    false
+}
+
 /// Verify an `Approved:` posting key against the list's moderator password.
 /// A message carrying no key, or a list with no password, is simply not
 /// approved; the key itself never leaves this function.

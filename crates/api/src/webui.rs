@@ -19,6 +19,8 @@ mod admin;
 mod archive;
 #[path = "webui_archive_interact.rs"]
 mod archive_interact;
+#[path = "webui_archive_post.rs"]
+mod archive_post;
 #[path = "webui_domains.rs"]
 mod domains;
 #[path = "webui_gdpr.rs"]
@@ -255,7 +257,17 @@ pub fn routes() -> Router<AppState> {
 /// The archive: reading pages, feeds, the avatar proxy, and readers'
 /// interactions.
 fn archive_routes() -> Router<AppState> {
+    // The posting form carries a message body, so it alone takes more
+    // than the 8 KiB every other browser form is held to; the handler
+    // still refuses bodies over its own limit.
+    let posting = Router::new()
+        .route(
+            "/web/lists/{id}/archive/post",
+            get(archive_post::form).post(archive_post::submit),
+        )
+        .layer(DefaultBodyLimit::max(96 * 1024));
     Router::new()
+        .merge(posting)
         .route("/web/lists/{id}/archive", get(archive::browse))
         .route("/web/lists/{id}/archive/overview", get(archive::overview))
         .route("/web/lists/{id}/archive/threads", get(archive::threads))
