@@ -1,5 +1,37 @@
 # Architecture
 
+## Archive interactions — bounded local acceptance verified
+
+`ArchiveRepo::interact` (`crates/db/src/archive_interact.rs`, migration
+`0050_archive_interactions.sql` adding `archive_votes`, `archive_tags`,
+`archive_categories`, `archive_thread_categories` and `archive_favorites`)
+owns readers' actions. Each write opens a `browser_write_tx`, takes the
+live user behind the session and admits them by the archive's policy
+(`reader_tx`: any signed-in reader of a public archive, a verified member
+of a private one, an owner through `browser_owner_tx` for categories and
+for removing another reader's tag), checks the post or thread exists,
+applies the change (delete-then-insert, so one row per reader and post, or
+per thread and tag), records the audit event (`archive.vote`,
+`archive.tag`, `archive.category`) and re-checks the session before the
+one commit. Favourites are a reader's bookmarks and carry no audit event.
+`normalize_tag` folds a tag to lowercase letters, digits and hyphens.
+Reads (`browser_votes`, `browser_thread_meta`, `categories`,
+`label_threads`) are plain bounded queries; the thread aggregate in
+`archive_browse.rs` takes three more filters (`ThreadSelection::Favorites`,
+`Tagged`, `InCategory`) as `IN (SELECT …)` clauses on the same query.
+
+In the API, `webui_archive_interact.rs` holds the four `POST` handlers
+(`vote`, `tag`, `category`, `favorite`), each a CSRF-checked form from a
+signed-in session redirecting to the post's permalink or the thread page
+with a `saved=` notice; `webui_archive.rs` gathers the page's scores and,
+on a thread page, the thread's meta (`interactions`), renders the vote
+form on every post for a signed-in reader, the "About this thread" section
+(`meta_view`: tags with remove buttons for their tagger or an owner, the
+owner's category select, the favourite toggle), and the three new thread
+lists (`favorites`, `tagged`, `in_category`) through the one
+`threads_page` and its `Listing`. The archive routes moved into
+`archive_routes()`.
+
 ## Archive browsing — bounded local acceptance verified
 
 `ArchiveRepo::browse` (`crates/db/src/archive_browse.rs`, migration

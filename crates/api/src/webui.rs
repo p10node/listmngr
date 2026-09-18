@@ -17,6 +17,8 @@ mod account_tokens;
 mod admin;
 #[path = "webui_archive.rs"]
 mod archive;
+#[path = "webui_archive_interact.rs"]
+mod archive_interact;
 #[path = "webui_domains.rs"]
 mod domains;
 #[path = "webui_gdpr.rs"]
@@ -242,6 +244,18 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/web/logout", post(logout))
         .route("/web/lists/{id}", get(lists::list_page))
+        .merge(archive_routes())
+        .route("/web/lists/{id}/request", post(subscription_request))
+        .merge(moderation::routes())
+        .route("/web/lists/{id}/confirm", get(confirm_form).post(confirm))
+        .layer(DefaultBodyLimit::max(8192))
+        .layer(middleware::from_fn(security_headers))
+}
+
+/// The archive: reading pages, feeds, the avatar proxy, and readers'
+/// interactions.
+fn archive_routes() -> Router<AppState> {
+    Router::new()
         .route("/web/lists/{id}/archive", get(archive::browse))
         .route("/web/lists/{id}/archive/overview", get(archive::overview))
         .route("/web/lists/{id}/archive/threads", get(archive::threads))
@@ -257,6 +271,22 @@ pub fn routes() -> Router<AppState> {
             "/web/lists/{id}/archive/senders/{digest}",
             get(archive::sender),
         )
+        .route("/web/lists/{id}/archive/favorites", get(archive::favorites))
+        .route("/web/lists/{id}/archive/tags/{tag}", get(archive::tagged))
+        .route(
+            "/web/lists/{id}/archive/categories/{name}",
+            get(archive::in_category),
+        )
+        .route("/web/lists/{id}/archive/vote", post(archive_interact::vote))
+        .route("/web/lists/{id}/archive/tags", post(archive_interact::tag))
+        .route(
+            "/web/lists/{id}/archive/category",
+            post(archive_interact::category),
+        )
+        .route(
+            "/web/lists/{id}/archive/favorite",
+            post(archive_interact::favorite),
+        )
         .route("/web/lists/{id}/archive/feed.atom", get(archive::feed_atom))
         .route("/web/lists/{id}/archive/feed.rss", get(archive::feed_rss))
         .route(
@@ -265,11 +295,6 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/web/lists/{id}/archive/reattach", post(archive::reattach))
         .route("/web/gravatar/{hash}", get(archive::gravatar))
-        .route("/web/lists/{id}/request", post(subscription_request))
-        .merge(moderation::routes())
-        .route("/web/lists/{id}/confirm", get(confirm_form).post(confirm))
-        .layer(DefaultBodyLimit::max(8192))
-        .layer(middleware::from_fn(security_headers))
 }
 
 /// The server owner's site-wide pages: domains, the system page and the

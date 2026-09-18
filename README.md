@@ -1,5 +1,34 @@
 # listmngr
 
+## Archive interactions (`P5-INTERACTIONS`) — bounded local acceptance verified
+
+Signed-in readers now act on the archive, each action a plain form on the
+page it concerns, applied under the list's archive policy (any signed-in
+reader of a public archive; a verified member of a private one):
+
+- **Votes**: every post shows its score (up votes minus down votes). A
+  signed-in reader votes `+1` or `-1` once per post and takes the vote back
+  by pressing the same button again; the pressed state is announced
+  (`aria-pressed`). Audited as `archive.vote`.
+- **Tags**: a thread page lists its tags, each a link to the threads tagged
+  the same way (`…/archive/tags/<tag>`). Any signed-in reader adds a tag
+  (normalised to lowercase letters, digits and hyphens, one to forty
+  characters); the tagger or a list owner removes it. Thread lists show
+  tags. Audited as `archive.tag`.
+- **Categories**: a list owner files a thread under one of the list's
+  categories (rows of `archive_categories`; the owner's page to manage them
+  comes with `P5-ADMIN`) or under none. Thread pages and lists show the
+  category as a link to `…/archive/categories/<name>`. Audited as
+  `archive.category`.
+- **Favourites**: a signed-in reader keeps threads as favourites and sees
+  them at `…/archive/favorites` (linked from every archive page when signed
+  in). Favourites are the reader's own bookmarks, like the last-view marks,
+  and carry no audit event.
+
+Limits: no category management page yet (`P5-ADMIN`); votes are not
+summed into thread lists or the overview; tags and categories are per list
+and do not cross lists.
+
 ## Archive browsing (`P5-UI`) — bounded local acceptance verified
 
 Every archive page now carries links to the others: an overview, the thread
@@ -33,8 +62,7 @@ lists, the recent-posts page, and the Atom and RSS feeds, all under
 
 Limits: the months are bucketed in Rust from the post dates (capped at
 200 000 posts per overview); "unread" is per list and per thread, not per
-post; the feeds carry no full body; there are no votes, tags, categories or
-favourites yet (`P5-INTERACTIONS`).
+post; the feeds carry no full body.
 
 ## Archive search (`P5-SEARCH`) — bounded local acceptance verified
 
