@@ -38,6 +38,7 @@ pub mod templates;
 mod templates_vi;
 pub mod topics;
 pub mod visible_recipients;
+pub mod web_post;
 
 /// Mail helper failures. Message contents are never included in diagnostics.
 #[derive(Debug, thiserror::Error)]

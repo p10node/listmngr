@@ -61,7 +61,7 @@ impl Default for ArchiveQuery {
         }
     }
 }
-fn links(id: &ListId, signed_in: bool) -> ArchiveLinks {
+pub(super) fn links(id: &ListId, signed_in: bool) -> ArchiveLinks {
     let base = format!("/web/lists/{}/archive", id.as_str());
     ArchiveLinks {
         overview_href: format!("{base}/overview"),
@@ -70,6 +70,7 @@ fn links(id: &ListId, signed_in: bool) -> ArchiveLinks {
         atom_href: format!("{base}/feed.atom"),
         rss_href: format!("{base}/feed.rss"),
         favorites_href: signed_in.then(|| format!("{base}/favorites")),
+        post_href: signed_in.then(|| format!("{base}/post")),
     }
 }
 pub(super) fn thread_link(id: &ListId, thread: &str) -> String {
@@ -519,6 +520,13 @@ fn message_view(
                 action: format!("/web/lists/{}/archive/vote", id.as_str()),
                 csrf: csrf.clone(),
             }),
+        reply_href: view.viewer.csrf.as_ref().map(|_| {
+            format!(
+                "/web/lists/{}/archive/post?reply={}",
+                id.as_str(),
+                message.hash
+            )
+        }),
     })
 }
 
@@ -613,6 +621,7 @@ fn render(
         "categorized" => Some("web-archive-categorized"),
         "favorited" => Some("web-archive-favorited"),
         "unfavorited" => Some("web-archive-unfavorited"),
+        "posted" => Some("web-archive-posted"),
         _ => None,
     }
     .map(|id| listmngr_i18n::message(language, id, &[]));

@@ -604,6 +604,8 @@ pub struct ArchiveLinks {
     pub rss_href: String,
     /// The signed-in reader's favourites.
     pub favorites_href: Option<String>,
+    /// The signed-in reader's new-thread form.
+    pub post_href: Option<String>,
 }
 
 /// The archive's overview: figures, months, recent and active threads,
@@ -761,6 +763,32 @@ pub struct FeedEntry {
     pub summary: String,
 }
 
+/// The web posting form: a new thread, or a reply quoting its parent.
+#[derive(Debug, Template)]
+#[template(path = "archive_post.html")]
+pub struct ArchivePost {
+    /// Document shell.
+    pub shell: Shell,
+    /// Links to the other pages.
+    pub links: ArchiveLinks,
+    /// "New thread" or "Reply".
+    pub heading: String,
+    /// Form target.
+    pub action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// The address the post goes out from.
+    pub sender: String,
+    /// The parent's hash for a reply, else empty.
+    pub reply: String,
+    /// The subject as typed or proposed.
+    pub subject: String,
+    /// The body as typed or quoted.
+    pub body: String,
+    /// Why the last submission was refused.
+    pub error: Option<String>,
+}
+
 /// The owner's form to move a post under another post.
 #[derive(Debug)]
 pub struct ReattachForm {
@@ -813,6 +841,8 @@ pub struct ArchiveMessage {
     pub own_vote: i32,
     /// The signed-in reader's vote form.
     pub vote: Option<VoteForm>,
+    /// The signed-in reader's reply form.
+    pub reply_href: Option<String>,
 }
 
 /// The vote form of one post.

@@ -14,6 +14,8 @@
 mod archive_index_tests;
 #[cfg(test)]
 mod lifecycle_tests;
+#[cfg(test)]
+mod web_post_tests;
 
 mod archive;
 pub mod bounce_maintenance;
