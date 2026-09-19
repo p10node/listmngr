@@ -62,8 +62,15 @@ impl Default for ArchiveQuery {
     }
 }
 pub(super) fn links(id: &ListId, signed_in: bool) -> ArchiveLinks {
+    links_for(id, signed_in, false)
+}
+
+/// The same navigation, with the owner's administration page when the
+/// reader administers the list.
+pub(super) fn links_for(id: &ListId, signed_in: bool, owner: bool) -> ArchiveLinks {
     let base = format!("/web/lists/{}/archive", id.as_str());
     ArchiveLinks {
+        admin_href: owner.then(|| format!("{base}/admin")),
         overview_href: format!("{base}/overview"),
         threads_href: format!("{base}/threads"),
         posts_href: base.clone(),
@@ -529,7 +536,24 @@ fn message_view(
                 message.hash
             )
         }),
+        admin: admin_forms(view, "message", &message.hash),
     })
+}
+
+/// The owner's hide and delete forms for one post or one thread; nothing
+/// for anyone else.
+fn admin_forms(view: &View<'_>, scope: &str, target: &str) -> Option<listmngr_web::AdminForms> {
+    let base = format!("/web/lists/{}/archive", view.id.as_str());
+    match (view.viewer.owner, &view.viewer.csrf) {
+        (true, Some(csrf)) => Some(listmngr_web::AdminForms {
+            hide_action: format!("{base}/hide"),
+            delete_action: format!("{base}/delete"),
+            csrf: csrf.clone(),
+            scope: scope.to_owned(),
+            target: target.to_owned(),
+        }),
+        _ => None,
+    }
 }
 
 /// A thread page's tags, category and favourite mark as the reader may
@@ -574,6 +598,7 @@ fn meta_view(view: &View<'_>, meta: &ThreadMeta) -> listmngr_web::ThreadMetaView
         },
         favorite: meta.favorite,
         export_href: format!("{base}/export.mbox?thread={}", view.query.thread),
+        admin: admin_forms(view, "thread", &view.query.thread),
     }
 }
 
@@ -625,6 +650,7 @@ fn render(
         "favorited" => Some("web-archive-favorited"),
         "unfavorited" => Some("web-archive-unfavorited"),
         "posted" => Some("web-archive-posted"),
+        "shown" => Some("web-archive-shown"),
         _ => None,
     }
     .map(|id| listmngr_i18n::message(language, id, &[]));
@@ -653,7 +679,7 @@ fn render(
         },
         reattach,
         notice,
-        links: links(id, view.viewer.csrf.is_some()),
+        links: links_for(id, view.viewer.csrf.is_some(), view.viewer.owner),
         results: total.map(|total| {
             listmngr_i18n::message(
                 language,
@@ -876,6 +902,9 @@ pub(super) fn message_link(id: &ListId, hash: &str) -> ApiResult<String> {
 pub(super) struct PageQuery {
     #[serde(default = "first_page")]
     page: u32,
+    /// The notice a redirect from an owner's change carries back.
+    #[serde(default)]
+    saved: String,
 }
 
 fn thread_row(id: &ListId, summary: &ThreadSummary) -> ThreadRow {
@@ -976,7 +1005,7 @@ pub(super) async fn threads(
     Query(query): Query<PageQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    threads_page(&s, &id, &headers, query.page, Listing::Latest).await
+    threads_page(&s, &id, &headers, &query, Listing::Latest).await
 }
 
 /// `GET /web/lists/{id}/archive/threads/{year}/{month}`: the threads with
@@ -990,7 +1019,7 @@ pub(super) async fn threads_month(
     if !(1970..=9999).contains(&year) {
         return Err(Error::Validation("archive month".into()).into());
     }
-    threads_page(&s, &id, &headers, query.page, Listing::Month(year, month)).await
+    threads_page(&s, &id, &headers, &query, Listing::Month(year, month)).await
 }
 
 /// `GET /web/lists/{id}/archive/favorites`: the signed-in reader's
@@ -1001,7 +1030,7 @@ pub(super) async fn favorites(
     Query(query): Query<PageQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    threads_page(&s, &id, &headers, query.page, Listing::Favorites).await
+    threads_page(&s, &id, &headers, &query, Listing::Favorites).await
 }
 
 /// `GET /web/lists/{id}/archive/tags/{tag}`: the threads carrying a tag.
@@ -1012,7 +1041,7 @@ pub(super) async fn tagged(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let tag = listmngr_db::archive::interact::normalize_tag(&tag)?;
-    threads_page(&s, &id, &headers, query.page, Listing::Tagged(tag)).await
+    threads_page(&s, &id, &headers, &query, Listing::Tagged(tag)).await
 }
 
 /// `GET /web/lists/{id}/archive/categories/{name}`: the threads filed
@@ -1026,7 +1055,7 @@ pub(super) async fn in_category(
     if name.is_empty() || name.len() > 60 {
         return Err(Error::Validation("archive category".into()).into());
     }
-    threads_page(&s, &id, &headers, query.page, Listing::InCategory(name)).await
+    threads_page(&s, &id, &headers, &query, Listing::InCategory(name)).await
 }
 
 /// Which thread list a page shows.
@@ -1042,9 +1071,10 @@ async fn threads_page(
     s: &AppState,
     id: &ListId,
     headers: &HeaderMap,
-    page: u32,
+    query: &PageQuery,
     listing: Listing,
 ) -> ApiResult<Response> {
+    let page = query.page;
     if !(1..=5001).contains(&page) {
         return Err(Error::Validation("archive query bounds".into()).into());
     }
@@ -1125,6 +1155,10 @@ async fn threads_page(
         previous: (page > 1).then(|| format!("{base}?page={}", page - 1)),
         next: (rows.len() > 20 && page < 5001).then(|| format!("{base}?page={}", page + 1)),
         export_href: export,
+        notice: match query.saved.as_str() {
+            "deleted" => Some(listmngr_i18n::message(language, "web-archive-deleted", &[])),
+            _ => None,
+        },
     };
     Ok(super::html(&page_view))
 }
@@ -1210,7 +1244,7 @@ pub(super) async fn sender(
             "web-archive-sender-posts",
             &[("count", &posts.to_string())],
         ),
-        links: links(&id, viewer.csrf.is_some()),
+        links: links_for(&id, viewer.csrf.is_some(), viewer.owner),
         messages: messages
             .iter()
             .take(20)

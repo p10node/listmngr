@@ -1,5 +1,49 @@
 # Architecture
 
+## Archive administration — bounded local acceptance verified
+
+Migration `0051_archive_admin` adds one nullable column,
+`archive_messages.hidden_at`. Every reading path filters `hidden_at IS
+NULL`: `read_selection` and the REST/browser read in `browser_archive.rs`,
+the thread aggregate and its three correlated subqueries, the overview's
+counts, months and top posters, the sender list, a sender's posts, the
+recent posts, the vote and thread existence checks in `archive_interact`,
+`export_rows`, and both search-index row queries (`INDEX_ROW_SQL`,
+`INDEX_ROWS_SQL`). The two message reads also report `parent_hash` only
+when the parent is itself visible, through a correlated `EXISTS` over the
+same table, so no page links to a post the reader may not open. The
+importer's thread lookup and the reattach helpers are deliberately not
+filtered: they work on structure, not on what is shown.
+
+`crates/db/src/archive_admin.rs` holds the owner's operations, each one
+taking `Database::browser_owner_tx` inside a `browser_write_tx`,
+re-checking the session with `browser_user_tx` before commit and writing
+its audit event in the same transaction. `browser_hide` sets or clears
+`hidden_at` for a `Scope::Message` (`hash`) or a `Scope::Thread`
+(`thread`) and audits `archive.hide`/`archive.unhide`. `browser_delete`
+routes to `delete_message` — the replies take the deleted post's parent,
+`forget_posts` removes the attachments, votes and the row, and when the
+root goes the oldest survivor becomes the new thread with
+`move_thread_marks` carrying the tags, category, favourites and views over
+— or to `delete_thread`, which takes every post of the thread and drops
+its marks; both audit `archive.delete`. `browser_categories` applies a
+`CategoryChange` (add, rename, remove) over `archive_categories` and
+`archive_thread_categories` and audits `archive.category`;
+`normalize_category` is `normalize_label` at sixty characters, the
+function `normalize_tag` now shares. `browser_administration` reads the
+categories with their thread counts and the hidden posts for the page.
+
+`crates/api/src/webui_archive_admin.rs` serves `GET …/archive/admin` and
+the three CSRF-checked forms `POST …/archive/categories`,
+`…/archive/hide` and `…/archive/delete`, each behind `load` and
+`privileged` with the owner check left to the repository. Hiding redirects
+to the administration page, because the post it hid can no longer be read;
+showing redirects to the post; deleting redirects to the thread list,
+whose `PageQuery` gained a `saved` field for the notice. `links_for` adds
+the administration link for an owner, and `admin_forms` builds the
+`AdminForms` that `archive.html` renders on each post and in "About this
+thread" — for an owner with a session and for nobody else.
+
 ## Archive import and export — bounded local acceptance verified
 
 `listmngr_archive::mbox` is the `mboxrd` codec and the importer.

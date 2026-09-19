@@ -106,7 +106,7 @@ impl ArchiveRepo<'_> {
                 .replace('%', "!%")
                 .replace('_', "!_")
         );
-        let rows = sqlx::query("SELECT hash,thread,raw_b64,sender_name,sender_email,message_date,parent_hash,(SELECT anonymous_list FROM mailing_lists WHERE list_id=$1) AS anonymous_list,(SELECT subject_prefix FROM mailing_lists WHERE list_id=$1) AS subject_prefix FROM archive_messages WHERE list_id=$1 AND ($2='' OR thread=$2) AND ($3='' OR hash=$3) AND (LOWER(subject) LIKE LOWER($4) ESCAPE '!' OR LOWER(body) LIKE LOWER($4) ESCAPE '!') ORDER BY created_at,hash LIMIT $5 OFFSET $6")
+        let rows = sqlx::query("SELECT hash,thread,raw_b64,sender_name,sender_email,message_date,CASE WHEN EXISTS(SELECT 1 FROM archive_messages p WHERE p.list_id=m.list_id AND p.hash=m.parent_hash AND p.hidden_at IS NULL) THEN m.parent_hash ELSE NULL END AS parent_hash,(SELECT anonymous_list FROM mailing_lists WHERE list_id=$1) AS anonymous_list,(SELECT subject_prefix FROM mailing_lists WHERE list_id=$1) AS subject_prefix FROM archive_messages m WHERE m.list_id=$1 AND m.hidden_at IS NULL AND ($2='' OR thread=$2) AND ($3='' OR hash=$3) AND (LOWER(subject) LIKE LOWER($4) ESCAPE '!' OR LOWER(body) LIKE LOWER($4) ESCAPE '!') ORDER BY created_at,hash LIMIT $5 OFFSET $6")
             .bind(list.as_str()).bind(thread).bind(hash).bind(pattern).bind(limit).bind(offset)
             .fetch_all(&mut *tx).await.map_err(db_error)?;
         if private {
