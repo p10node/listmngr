@@ -1,5 +1,50 @@
 # Architecture
 
+## Archive import and export — bounded local acceptance verified
+
+`listmngr_archive::mbox` is the `mboxrd` codec and the importer.
+`write_message` writes one message under a fixed `From ` separator and
+quotes every body line that would otherwise end it; `Reader` streams a
+`BufRead` back into messages, consuming the separator that opens each
+message exactly once (the line that ends one message is held in `pending`
+and opens the next) and unquoting `>From ` by one `>`, so an archive of a
+hundred thousand posts never sits in memory. `prepare` parses a message
+once, outside the database, into the `ImportItem` the batch inserts:
+`listmngr_archive::identity` for the hash, provisional thread, parent and
+date, `listmngr_db::archive::sender_of` for the sender, and
+`listmngr_mail::attachments::stored` for the attachments; a message with
+no usable `Message-ID` is given `<import.<sha256 of its bytes>@<mail
+host>>`, prepended to the stored copy so the hash and the headers agree.
+`mbox::import` checks the list's policy through
+`ArchiveRepo::ensure_importable` before it reads a line, then fills a
+batch and hands it over.
+
+`ArchiveRepo::import_batch` (`crates/db/src/archive_import.rs`) stores one
+batch in one transaction: the archive policy re-read inside it
+(`importable`), a thread lookup per message so a reply joins its root's
+thread, `INSERT … ON CONFLICT(list_id,hash) DO NOTHING` (a conflict counts
+as skipped), the attachments, an `UPDATE` re-rooting replies that arrived
+before their parent, and one `archive.import` audit event — the rows and
+the event commit together. `export_rows` pages by `(created_at, hash)`
+with an optional thread or `[from_ms, until_ms)` date window and projects
+each stored copy through the same `publication` (`handlers::cook_with`
+with `Target::Archive`) the archive pages use, so anonymising and the
+list's prefix apply to an export as well. `browser_export_authorize`
+applies the archive policy for the session once, before the first page.
+
+`crates/api/src/webui_archive_export.rs` serves `…/archive/export.mbox`
+and `…/archive/export.mbox.gz`: `selection` turns `?thread=`/`?month=`
+into an `ExportSelection` and the file name's middle part (both together,
+an unknown parameter, a malformed month or an over-long thread id are
+400), the session is authorized once, and a spawned task streams pages of
+two hundred messages into an `mpsc` channel that becomes the response
+body, through a `flate2` encoder for the `.gz` address. `crates/cli/src/
+archive.rs` gains `archive import` (a `.gz` file read through
+`flate2::read::GzDecoder`, progress on standard error every ten thousand
+messages) and `archive export` (the same selection from `--thread`,
+`--month`, `--gzip` and `--output`), neither of which touches the search
+index.
+
 ## Posting from the web — bounded local acceptance verified
 
 `listmngr_mail::web_post::compose` builds the message a web post becomes

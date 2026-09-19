@@ -71,6 +71,8 @@ pub(super) fn links(id: &ListId, signed_in: bool) -> ArchiveLinks {
         rss_href: format!("{base}/feed.rss"),
         favorites_href: signed_in.then(|| format!("{base}/favorites")),
         post_href: signed_in.then(|| format!("{base}/post")),
+        export_href: format!("{base}/export.mbox"),
+        export_gz_href: format!("{base}/export.mbox.gz"),
     }
 }
 pub(super) fn thread_link(id: &ListId, thread: &str) -> String {
@@ -571,6 +573,7 @@ fn meta_view(view: &View<'_>, meta: &ThreadMeta) -> listmngr_web::ThreadMetaView
             Vec::new()
         },
         favorite: meta.favorite,
+        export_href: format!("{base}/export.mbox?thread={}", view.query.thread),
     }
 }
 
@@ -842,7 +845,10 @@ fn avatar_response(content_type: &str, bytes: bytes::Bytes) -> Response {
         .into_response()
 }
 
-async fn archive_session(s: &AppState, headers: &HeaderMap) -> ApiResult<Option<WebSession>> {
+pub(super) async fn archive_session(
+    s: &AppState,
+    headers: &HeaderMap,
+) -> ApiResult<Option<WebSession>> {
     match super::load(s, headers).await {
         Ok(session) => Ok(Some(session)),
         Err(ApiError(Error::Authentication)) => Ok(None),
@@ -1048,6 +1054,7 @@ async fn threads_page(
     };
     let language = language_for(s, headers, session.as_ref()).await?;
     let base = format!("/web/lists/{}/archive", id.as_str());
+    let mut export = None;
     let (selection, heading, base) = match listing {
         Listing::Latest => (
             ThreadSelection::Latest,
@@ -1056,6 +1063,7 @@ async fn threads_page(
         ),
         Listing::Month(year, month) => {
             let (from_ms, until_ms) = month_bounds(year, month)?;
+            export = Some(format!("{base}/export.mbox?month={year:04}-{month:02}"));
             (
                 ThreadSelection::Between { from_ms, until_ms },
                 listmngr_i18n::message(
@@ -1116,6 +1124,7 @@ async fn threads_page(
         threads: rows.iter().take(20).map(|t| thread_row(id, t)).collect(),
         previous: (page > 1).then(|| format!("{base}?page={}", page - 1)),
         next: (rows.len() > 20 && page < 5001).then(|| format!("{base}?page={}", page + 1)),
+        export_href: export,
     };
     Ok(super::html(&page_view))
 }

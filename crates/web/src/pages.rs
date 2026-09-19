@@ -606,6 +606,10 @@ pub struct ArchiveLinks {
     pub favorites_href: Option<String>,
     /// The signed-in reader's new-thread form.
     pub post_href: Option<String>,
+    /// The whole archive as mbox.
+    pub export_href: String,
+    /// The same, gzipped.
+    pub export_gz_href: String,
 }
 
 /// The archive's overview: figures, months, recent and active threads,
@@ -696,6 +700,8 @@ pub struct ArchiveThreads {
     pub previous: Option<String>,
     /// Next page link.
     pub next: Option<String>,
+    /// This month as mbox, on a month's page.
+    pub export_href: Option<String>,
 }
 
 /// One sender's posts.
@@ -888,6 +894,8 @@ pub struct ThreadMetaView {
     pub categories: Vec<CategoryOption>,
     /// Whether the reader keeps this thread as a favourite.
     pub favorite: bool,
+    /// This thread as mbox.
+    pub export_href: String,
 }
 
 /// One category in the owner's select.
