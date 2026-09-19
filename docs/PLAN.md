@@ -55,7 +55,7 @@ trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
 936 passed, 0 failed, 56 ignored) và `TEST_POSTGRES_URL=… scripts/test-postgres.sh`
 (38 tests, PostgreSQL 14.24 dùng một lần rồi drop). Ledger đã cập nhật.
 
-Chưa có: P3-SUBSCRIPTION-E2E (P3-CLIENT-SUITE và P3-DIGEST-SNAPSHOT đã đóng), toàn bộ
+Phase 3: P3-CLIENT-SUITE, P3-DIGEST-SNAPSHOT và P3-SUBSCRIPTION-E2E đã đóng; P3-DUAL-BACKEND-CI chỉ còn thiếu hosted CI run (ledger ghi wiring, không claim run). Chưa có: toàn bộ
 Phase 4–7 trừ các lát nêu trên (P4-SHELL, toàn bộ P4-ACCOUNT-*, P4-TOTP,
 P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS, P4-GDPR, P4-ACCEPTANCE đã đóng — Phase 4 hoàn tất theo ledger; Phase 5: P5-RENDER, P5-SEARCH, P5-UI, P5-INTERACTIONS, P5-WEB-POST, P5-MBOX, P5-ADMIN, P5-REMOTE-ARCHIVERS, P5-ACCEPTANCE đã đóng — Phase 5 hoàn tất theo ledger). Chi tiết và thứ tự ở §7.
 
@@ -880,7 +880,7 @@ Mục tiêu: parity Core hoàn chỉnh (trừ NNTP/DMARC wrap).
 - [x] **P3-DUAL-BACKEND-CI** (M): CI chạy suite SQLite (mọi test không ignore), gate PG chọn lọc (`scripts/test-postgres.sh`, 38) và **mọi** test `#[ignore]` PostgreSQL (`scripts/test-postgres-all.sh`, 53) trên cùng một server dùng một lần; từng test tự tạo/drop schema qua `listmngr_db::test_support::IsolatedSchema`, không cần DB rỗng riêng, không silent fallback.
 - [x] ~~**P3-CLIENT-SUITE**~~ (xong): `tests/compat/mailmanclient_suite.py` — doctest `using.rst` của mailmanclient 3.3.5 từng section (18 section, 232 check, 7 deviation có ghi) chạy qua `scripts/test-mailmanclient.py` sau Phase 1 flow và held flow; REST compat bổ sung để client thật chạy đúng (styles, `GET /members`, mass unsubscribe, users/addresses/preferred_address, `lists/find`, role routes, archivers dict, `when`, `respond_and_continue`, hold reason của Mailman…); kèm hai sửa chung: log 500 với correlation id, SQLite pragma per-connection + `BEGIN IMMEDIATE` cho mọi write.
 - [x] ~~**P3-DIGEST-SNAPSHOT**~~ (xong) (S): snapshot RFC 1153/MIME so với output Mailman 3.3 từ fixture thật — `tests/compat/generate_mailman_digest.py` chạy chính `RFC1153Digester`/`MIMEDigester` của Mailman 3.3.10 ra `crates/mail/tests/fixtures/digests/`; `crates/mail/tests/digest_snapshot.rs` so từng dòng (plain) và từng part (MIME) thay cho insta; renderer đổi theo Mailman (masthead wrap 70 cột, header trước TOC, TOC bỏ subject prefix và lấy display name, kept headers đúng thứ tự Mailman, scrubber note, `Message: n` trong post MIME, không còn closing part); ba quirk của Mailman được nêu tên và không sao chép.
-- [ ] **P3-SUBSCRIPTION-E2E** (S): confirm-token round-trip qua email trong e2e harness (`-join` → challenge → `-confirm` → member; `-leave` tương tự).
+- [x] ~~**P3-SUBSCRIPTION-E2E**~~ (xong) (S): confirm-token round-trip qua email trong e2e harness (`-join` → challenge → `-confirm` → member; `-leave` tương tự) — `join_and_leave_by_mail_round_trip_their_confirmation_tokens` trong `crates/cli/tests/mailpath_e2e.rs` (binary thật, LMTP vào, SMTP sink ra: challenge, receipt, welcome, post được giao, challenge mới cho leave, goodbye, replay token đã dùng không làm gì); sửa cooldown theo address chỉ đếm request còn chờ (`consumed=0`) vì trước đó leave ngay sau join bị nuốt im lặng.
 - Acceptance: full `mailmanclient` doctest-equivalent suite pass; bounce corpus detection ≥ flufl.bounce; digest snapshot tests (insta) so với Mailman output; subscription flow e2e qua email (confirm token round-trip).
 
 ### Phase 4 — Web UI, Postorius parity (L)
