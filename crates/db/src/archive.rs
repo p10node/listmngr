@@ -176,6 +176,75 @@ async fn queue_mail_archive(
     .await
 }
 
+/// The thread a post joins, resolved the way `HyperKitty` resolves it: the
+/// thread of its provisional root when that root is archived, else the
+/// thread of its parent when the parent is, else — for compatibility
+/// with posts filed under a root that never arrived — the provisional
+/// root when something is already filed there, else the post itself. A
+/// reply whose ancestors are all absent therefore starts its own thread
+/// rather than one named after a post nobody holds.
+pub(crate) async fn resolve_thread(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    list: &ListId,
+    hash: &str,
+    provisional: &str,
+    parent: Option<&str>,
+) -> Result<String> {
+    for candidate in [Some(provisional), parent].into_iter().flatten() {
+        let thread: Option<String> =
+            sqlx::query_scalar("SELECT thread FROM archive_messages WHERE list_id=$1 AND hash=$2")
+                .bind(list.as_str())
+                .bind(candidate)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(db_error)?;
+        if let Some(thread) = thread {
+            return Ok(thread);
+        }
+    }
+    let filed: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM archive_messages WHERE list_id=$1 AND thread=$2 LIMIT 1")
+            .bind(list.as_str())
+            .bind(provisional)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(db_error)?;
+    Ok(if filed.is_some() {
+        provisional.to_owned()
+    } else {
+        hash.to_owned()
+    })
+}
+
+/// A parent arriving after its replies takes them in: replies that
+/// started their own thread for want of it, with their whole subtrees,
+/// and posts filed under this hash as a provisional root.
+pub(crate) async fn adopt_orphans(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    list: &ListId,
+    hash: &str,
+    thread: &str,
+) -> Result<()> {
+    // Two statements, each on its own index (`archive_thread`,
+    // `archive_parent`): one `OR` between them costs a table scan per
+    // archived post, which a hundred-thousand-post import cannot afford.
+    sqlx::query("UPDATE archive_messages SET thread=$1 WHERE list_id=$2 AND thread=$3")
+        .bind(thread)
+        .bind(list.as_str())
+        .bind(hash)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    sqlx::query("UPDATE archive_messages SET thread=$1 WHERE list_id=$2 AND thread IN (SELECT o.hash FROM archive_messages o WHERE o.list_id=$2 AND o.parent_hash=$3 AND o.thread=o.hash AND o.hash<>$1)")
+        .bind(thread)
+        .bind(list.as_str())
+        .bind(hash)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    Ok(())
+}
+
 /// Whether one of a list's archivers is switched on.
 async fn archiver_on(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
@@ -551,16 +620,15 @@ impl<'a> ArchiveRepo<'a> {
         // UPDATE locks the policy row against a concurrent privacy change before storage.
         let policy: String = sqlx::query_scalar("UPDATE mailing_lists SET archive_policy=archive_policy WHERE list_id=$1 RETURNING archive_policy").bind(list.as_str()).fetch_one(&mut *tx).await.map_err(db_error)?;
         if policy == "public" || policy == "private" {
-            // Resolve an indexed parent's root in the same list and transaction.
-            let thread: Option<String> = sqlx::query_scalar(
-                "SELECT thread FROM archive_messages WHERE list_id=$1 AND hash=$2",
+            let thread = resolve_thread(
+                &mut tx,
+                &list,
+                &item.hash,
+                &item.thread,
+                item.parent.as_deref(),
             )
-            .bind(list.as_str())
-            .bind(&item.thread)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_error)?;
-            let thread = thread.as_deref().unwrap_or(&item.thread);
+            .await?;
+            let thread = thread.as_str();
             let (sender_name, sender_email) = sender(&parsed);
             let date_ms = parsed
                 .date()
@@ -583,14 +651,7 @@ impl<'a> ArchiveRepo<'a> {
                         .execute(&mut *tx).await.map_err(db_error)?;
                 }
             }
-            // A parent arriving after its replies unifies their provisional root.
-            sqlx::query("UPDATE archive_messages SET thread=$1 WHERE list_id=$2 AND thread=$3")
-                .bind(thread)
-                .bind(list.as_str())
-                .bind(&item.hash)
-                .execute(&mut *tx)
-                .await
-                .map_err(db_error)?;
+            adopt_orphans(&mut tx, &list, &item.hash, thread).await?;
             Database::record_tx_with_context(
                 &mut tx,
                 &crate::AuditContext::system(),
