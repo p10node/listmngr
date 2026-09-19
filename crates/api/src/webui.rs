@@ -17,6 +17,8 @@ mod account_tokens;
 mod admin;
 #[path = "webui_archive.rs"]
 mod archive;
+#[path = "webui_archive_admin.rs"]
+mod archive_admin;
 #[path = "webui_archive_export.rs"]
 mod archive_export;
 #[path = "webui_archive_interact.rs"]
@@ -300,6 +302,16 @@ fn archive_routes() -> Router<AppState> {
         .route(
             "/web/lists/{id}/archive/favorite",
             post(archive_interact::favorite),
+        )
+        .route("/web/lists/{id}/archive/admin", get(archive_admin::page))
+        .route(
+            "/web/lists/{id}/archive/categories",
+            post(archive_admin::categories),
+        )
+        .route("/web/lists/{id}/archive/hide", post(archive_admin::hide))
+        .route(
+            "/web/lists/{id}/archive/delete",
+            post(archive_admin::delete),
         )
         .route(
             "/web/lists/{id}/archive/export.mbox",

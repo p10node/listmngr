@@ -39,13 +39,16 @@ pub struct ThreadMeta {
     pub favorite: bool,
 }
 
-/// A tag as stored: lowercase letters, digits and hyphens, one to forty
-/// characters, runs of anything else collapsed to one hyphen.
+/// A label as stored: lowercase letters, digits and hyphens, runs of
+/// anything else collapsed to one hyphen, at most `max` characters. Tags
+/// and categories both take this shape, so neither needs escaping in a
+/// URL path.
 /// # Errors
-/// Returns validation for an empty or over-long result.
-pub fn normalize_tag(tag: &str) -> Result<String> {
-    let mut out = String::with_capacity(tag.len());
-    for c in tag.trim().to_lowercase().chars() {
+/// Returns `Validation` named after `what` for an empty or over-long
+/// result.
+pub(crate) fn normalize_label(value: &str, max: usize, what: &str) -> Result<String> {
+    let mut out = String::with_capacity(value.len());
+    for c in value.trim().to_lowercase().chars() {
         if c.is_ascii_alphanumeric() {
             out.push(c);
         } else if !out.ends_with('-') && !out.is_empty() {
@@ -53,10 +56,17 @@ pub fn normalize_tag(tag: &str) -> Result<String> {
         }
     }
     let out = out.trim_end_matches('-').to_owned();
-    if out.is_empty() || out.len() > 40 {
-        return Err(Error::Validation("archive tag".into()));
+    if out.is_empty() || out.len() > max {
+        return Err(Error::Validation(what.to_owned()));
     }
     Ok(out)
+}
+
+/// A tag as stored: `normalize_label` at forty characters.
+/// # Errors
+/// Returns validation for an empty or over-long result.
+pub fn normalize_tag(tag: &str) -> Result<String> {
+    normalize_label(tag, 40, "archive tag")
 }
 
 impl ArchiveRepo<'_> {
@@ -109,7 +119,7 @@ impl ArchiveRepo<'_> {
         let mut tx = self.db.browser_write_tx().await?;
         let user = self.reader_tx(&mut tx, session, list).await?;
         let exists: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM archive_messages WHERE list_id=$1 AND hash=$2",
+            "SELECT COUNT(*) FROM archive_messages WHERE list_id=$1 AND hash=$2 AND hidden_at IS NULL",
         )
         .bind(list.as_str())
         .bind(hash)
@@ -457,7 +467,9 @@ async fn thread_exists_tx(
         return Err(Error::Validation("archive thread bounds".into()));
     }
     let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM archive_messages WHERE list_id=$1 AND thread=$2")
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM archive_messages WHERE list_id=$1 AND thread=$2 AND hidden_at IS NULL",
+        )
             .bind(list.as_str())
             .bind(thread)
             .fetch_one(&mut **tx)
