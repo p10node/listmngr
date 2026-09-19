@@ -77,7 +77,7 @@ pub enum ThreadSelection {
     InCategory(String),
 }
 
-const THREAD_SQL: &str = "SELECT t.thread, t.posts, t.participants, t.started, t.last, COALESCE((SELECT r.subject FROM archive_messages r WHERE r.list_id=$1 AND r.hash=t.thread), (SELECT e.subject FROM archive_messages e WHERE e.list_id=$1 AND e.thread=t.thread ORDER BY e.created_at, e.hash LIMIT 1), '') AS subject, COALESCE((SELECT CASE WHEN l.sender_name<>'' THEN l.sender_name ELSE l.sender_email END FROM archive_messages l WHERE l.list_id=$1 AND l.thread=t.thread ORDER BY l.created_at DESC, l.hash DESC LIMIT 1), '') AS last_sender FROM (SELECT thread, COUNT(*) AS posts, COUNT(DISTINCT sender_email) AS participants, MIN(COALESCE(message_date, created_at)) AS started, MAX(COALESCE(message_date, created_at)) AS last FROM archive_messages WHERE list_id=$1 AND COALESCE(message_date, created_at)>=$2 AND COALESCE(message_date, created_at)<$3 AND ($6='' OR thread IN (SELECT f.thread FROM archive_favorites f WHERE f.user_id=$6 AND f.list_id=$1)) AND ($7='' OR thread IN (SELECT g.thread FROM archive_tags g WHERE g.list_id=$1 AND g.tag=$7)) AND ($8='' OR thread IN (SELECT c.thread FROM archive_thread_categories c WHERE c.list_id=$1 AND c.category=$8)) GROUP BY thread) t ORDER BY ";
+const THREAD_SQL: &str = "SELECT t.thread, t.posts, t.participants, t.started, t.last, COALESCE((SELECT r.subject FROM archive_messages r WHERE r.list_id=$1 AND r.hash=t.thread AND r.hidden_at IS NULL), (SELECT e.subject FROM archive_messages e WHERE e.list_id=$1 AND e.thread=t.thread AND e.hidden_at IS NULL ORDER BY e.created_at, e.hash LIMIT 1), '') AS subject, COALESCE((SELECT CASE WHEN l.sender_name<>'' THEN l.sender_name ELSE l.sender_email END FROM archive_messages l WHERE l.list_id=$1 AND l.thread=t.thread AND l.hidden_at IS NULL ORDER BY l.created_at DESC, l.hash DESC LIMIT 1), '') AS last_sender FROM (SELECT thread, COUNT(*) AS posts, COUNT(DISTINCT sender_email) AS participants, MIN(COALESCE(message_date, created_at)) AS started, MAX(COALESCE(message_date, created_at)) AS last FROM archive_messages WHERE list_id=$1 AND hidden_at IS NULL AND COALESCE(message_date, created_at)>=$2 AND COALESCE(message_date, created_at)<$3 AND ($6='' OR thread IN (SELECT f.thread FROM archive_favorites f WHERE f.user_id=$6 AND f.list_id=$1)) AND ($7='' OR thread IN (SELECT g.thread FROM archive_tags g WHERE g.list_id=$1 AND g.tag=$7)) AND ($8='' OR thread IN (SELECT c.thread FROM archive_thread_categories c WHERE c.list_id=$1 AND c.category=$8)) GROUP BY thread) t ORDER BY ";
 
 fn month_of(ms: i64) -> Option<(i32, u32)> {
     use chrono::Datelike as _;
@@ -234,12 +234,12 @@ impl ArchiveRepo<'_> {
     ) -> Result<Overview> {
         self.browser_authorize(list, session).await?;
         let reader = session.and_then(|s| s.user_id);
-        let row = sqlx::query("SELECT COUNT(*) AS posts, COUNT(DISTINCT thread) AS threads, COUNT(DISTINCT sender_email) AS participants FROM archive_messages WHERE list_id=$1")
+        let row = sqlx::query("SELECT COUNT(*) AS posts, COUNT(DISTINCT thread) AS threads, COUNT(DISTINCT sender_email) AS participants FROM archive_messages WHERE list_id=$1 AND hidden_at IS NULL")
             .bind(list.as_str())
             .fetch_one(self.db.pool())
             .await
             .map_err(db_error)?;
-        let dates: Vec<i64> = sqlx::query_scalar("SELECT COALESCE(message_date, created_at) FROM archive_messages WHERE list_id=$1 LIMIT 200000")
+        let dates: Vec<i64> = sqlx::query_scalar("SELECT COALESCE(message_date, created_at) FROM archive_messages WHERE list_id=$1 AND hidden_at IS NULL LIMIT 200000")
             .bind(list.as_str())
             .fetch_all(self.db.pool())
             .await
@@ -260,7 +260,7 @@ impl ArchiveRepo<'_> {
         }
         months.sort_by(|a, b| (b.year, b.month).cmp(&(a.year, a.month)));
         let since = now_ms - 30 * 24 * 3600 * 1000;
-        let posters = sqlx::query("SELECT sender_name, sender_email, COUNT(*) AS posts FROM archive_messages WHERE list_id=$1 AND COALESCE(message_date, created_at)>=$2 AND sender_email<>'' GROUP BY sender_email, sender_name ORDER BY COUNT(*) DESC, sender_email LIMIT 10")
+        let posters = sqlx::query("SELECT sender_name, sender_email, COUNT(*) AS posts FROM archive_messages WHERE list_id=$1 AND hidden_at IS NULL AND COALESCE(message_date, created_at)>=$2 AND sender_email<>'' GROUP BY sender_email, sender_name ORDER BY COUNT(*) DESC, sender_email LIMIT 10")
             .bind(list.as_str())
             .bind(since)
             .fetch_all(self.db.pool())
@@ -356,7 +356,7 @@ impl ArchiveRepo<'_> {
         session: Option<&WebSession>,
     ) -> Result<Vec<Poster>> {
         self.browser_authorize(list, session).await?;
-        let rows = sqlx::query("SELECT sender_name, sender_email, COUNT(*) AS posts FROM archive_messages WHERE list_id=$1 AND sender_email<>'' GROUP BY sender_email, sender_name ORDER BY sender_email, sender_name LIMIT 5000")
+        let rows = sqlx::query("SELECT sender_name, sender_email, COUNT(*) AS posts FROM archive_messages WHERE list_id=$1 AND hidden_at IS NULL AND sender_email<>'' GROUP BY sender_email, sender_name ORDER BY sender_email, sender_name LIMIT 5000")
             .bind(list.as_str())
             .fetch_all(self.db.pool())
             .await
@@ -384,7 +384,7 @@ impl ArchiveRepo<'_> {
         offset: i64,
     ) -> Result<Vec<ArchiveMessage>> {
         self.browser_authorize(list, session).await?;
-        let hashes: Vec<String> = sqlx::query_scalar("SELECT hash FROM archive_messages WHERE list_id=$1 AND sender_email=$2 ORDER BY COALESCE(message_date, created_at) DESC, hash LIMIT 21 OFFSET $3")
+        let hashes: Vec<String> = sqlx::query_scalar("SELECT hash FROM archive_messages WHERE list_id=$1 AND hidden_at IS NULL AND sender_email=$2 ORDER BY COALESCE(message_date, created_at) DESC, hash LIMIT 21 OFFSET $3")
             .bind(list.as_str())
             .bind(email)
             .bind(offset.clamp(0, 100_000))
@@ -407,7 +407,7 @@ impl ArchiveRepo<'_> {
         session: Option<&WebSession>,
     ) -> Result<Vec<ArchiveMessage>> {
         self.browser_authorize(list, session).await?;
-        let hashes: Vec<String> = sqlx::query_scalar("SELECT hash FROM archive_messages WHERE list_id=$1 ORDER BY COALESCE(message_date, created_at) DESC, hash LIMIT 20")
+        let hashes: Vec<String> = sqlx::query_scalar("SELECT hash FROM archive_messages WHERE list_id=$1 AND hidden_at IS NULL ORDER BY COALESCE(message_date, created_at) DESC, hash LIMIT 20")
             .bind(list.as_str())
             .fetch_all(self.db.pool())
             .await

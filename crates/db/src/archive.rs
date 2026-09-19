@@ -5,6 +5,8 @@ use base64::Engine;
 use listmngr_core::{Error, ListId, Result};
 use serde::Serialize;
 use sqlx::Row;
+#[path = "archive_admin.rs"]
+pub mod admin;
 #[path = "archive_browse.rs"]
 pub mod browse;
 #[path = "browser_archive.rs"]
@@ -121,8 +123,8 @@ fn render_rows(
         .collect()
 }
 
-const INDEX_ROW_SQL: &str = "SELECT list_id, hash, thread, substr(subject,1,1000) AS subject, substr(body,1,200000) AS body, sender_name, sender_email, COALESCE(message_date, created_at) AS date_ms, created_at FROM archive_messages WHERE list_id=$1 AND hash=$2 AND created_at>=$3 AND hash<>$4 LIMIT $5";
-const INDEX_ROWS_SQL: &str = "SELECT list_id, hash, thread, substr(subject,1,1000) AS subject, substr(body,1,200000) AS body, sender_name, sender_email, COALESCE(message_date, created_at) AS date_ms, created_at FROM archive_messages WHERE (created_at>$1 OR (created_at=$1 AND hash>$2)) ORDER BY created_at, hash LIMIT $3";
+const INDEX_ROW_SQL: &str = "SELECT list_id, hash, thread, substr(subject,1,1000) AS subject, substr(body,1,200000) AS body, sender_name, sender_email, COALESCE(message_date, created_at) AS date_ms, created_at FROM archive_messages WHERE list_id=$1 AND hash=$2 AND created_at>=$3 AND hash<>$4 AND hidden_at IS NULL LIMIT $5";
+const INDEX_ROWS_SQL: &str = "SELECT list_id, hash, thread, substr(subject,1,1000) AS subject, substr(body,1,200000) AS body, sender_name, sender_email, COALESCE(message_date, created_at) AS date_ms, created_at FROM archive_messages WHERE (created_at>$1 OR (created_at=$1 AND hash>$2)) AND hidden_at IS NULL ORDER BY created_at, hash LIMIT $3";
 
 fn index_row(row: &sqlx::any::AnyRow) -> Result<IndexRow> {
     Ok(IndexRow {
@@ -327,7 +329,7 @@ impl<'a> ArchiveRepo<'a> {
                 .replace('_', "!_")
         );
         let settings = self.db.lists().get(list).await?;
-        let rows = sqlx::query("SELECT hash,thread,subject,body,raw_b64,sender_name,sender_email,message_date,parent_hash,(SELECT anonymous_list FROM mailing_lists WHERE list_id=$1) AS anonymous_list,(SELECT subject_prefix FROM mailing_lists WHERE list_id=$1) AS subject_prefix FROM archive_messages WHERE list_id=$1 AND ($2='' OR thread=$2) AND ($11='' OR hash=$11) AND (LOWER(subject) LIKE LOWER($3) ESCAPE '!' OR LOWER(body) LIKE LOWER($3) ESCAPE '!') AND EXISTS(SELECT 1 FROM mailing_lists l JOIN domains d ON d.mail_host=l.mail_host WHERE l.list_id=$1 AND (l.archive_policy='public' OR (l.archive_policy='private' AND ($6=1 OR ($7=1 AND ($8='' OR $8=l.list_id) AND ($9='' OR $9=d.id) AND EXISTS(SELECT 1 FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=l.list_id AND m.role='member' AND a.user_id=$10 AND a.verified_on IS NOT NULL)))))) ORDER BY created_at,hash LIMIT $4 OFFSET $5")
+        let rows = sqlx::query("SELECT hash,thread,subject,body,raw_b64,sender_name,sender_email,message_date,CASE WHEN EXISTS(SELECT 1 FROM archive_messages p WHERE p.list_id=m.list_id AND p.hash=m.parent_hash AND p.hidden_at IS NULL) THEN m.parent_hash ELSE NULL END AS parent_hash,(SELECT anonymous_list FROM mailing_lists WHERE list_id=$1) AS anonymous_list,(SELECT subject_prefix FROM mailing_lists WHERE list_id=$1) AS subject_prefix FROM archive_messages m WHERE m.list_id=$1 AND m.hidden_at IS NULL AND ($2='' OR thread=$2) AND ($11='' OR hash=$11) AND (LOWER(subject) LIKE LOWER($3) ESCAPE '!' OR LOWER(body) LIKE LOWER($3) ESCAPE '!') AND EXISTS(SELECT 1 FROM mailing_lists l JOIN domains d ON d.mail_host=l.mail_host WHERE l.list_id=$1 AND (l.archive_policy='public' OR (l.archive_policy='private' AND ($6=1 OR ($7=1 AND ($8='' OR $8=l.list_id) AND ($9='' OR $9=d.id) AND EXISTS(SELECT 1 FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=l.list_id AND m.role='member' AND a.user_id=$10 AND a.verified_on IS NOT NULL)))))) ORDER BY created_at,hash LIMIT $4 OFFSET $5")
    .bind(list.as_str()).bind(thread).bind(pattern).bind(limit).bind(offset)
    .bind(i64::from(auth.is_some_and(|a| a.scopes.contains("admin") && a.list_id.is_none() && a.domain_id.is_none())))
    .bind(i64::from(auth.is_some_and(|a| a.has_scope("members:read"))))

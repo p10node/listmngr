@@ -604,6 +604,8 @@ pub struct ArchiveLinks {
     pub rss_href: String,
     /// The signed-in reader's favourites.
     pub favorites_href: Option<String>,
+    /// The owner's archive administration page.
+    pub admin_href: Option<String>,
     /// The signed-in reader's new-thread form.
     pub post_href: Option<String>,
     /// The whole archive as mbox.
@@ -684,6 +686,47 @@ pub struct PosterRow {
     pub posts: i64,
 }
 
+/// The owner's archive administration: the list's categories and what is
+/// hidden from the reading pages.
+#[derive(Debug, Template)]
+#[template(path = "archive_admin.html")]
+pub struct ArchiveAdmin {
+    /// Document shell.
+    pub shell: Shell,
+    /// The archive's sub-navigation.
+    pub links: ArchiveLinks,
+    /// Base path of the archive.
+    pub base: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// The list's categories with the threads filed under each.
+    pub categories: Vec<AdminCategory>,
+    /// Every hidden post, newest first.
+    pub hidden: Vec<HiddenRow>,
+    /// A notice after a redirect.
+    pub notice: Option<String>,
+}
+
+/// One category on the owner's page.
+#[derive(Debug, Clone)]
+pub struct AdminCategory {
+    pub name: String,
+    /// Threads filed under it.
+    pub threads: i64,
+    /// Its page in the archive.
+    pub href: String,
+}
+
+/// One hidden post on the owner's page.
+#[derive(Debug, Clone)]
+pub struct HiddenRow {
+    pub hash: String,
+    pub subject: String,
+    pub sender: String,
+    /// The thread it belongs to, for the link back.
+    pub thread_href: String,
+}
+
 /// A page of threads: the latest, or one month's.
 #[derive(Debug, Template)]
 #[template(path = "archive_threads.html")]
@@ -702,6 +745,8 @@ pub struct ArchiveThreads {
     pub next: Option<String>,
     /// This month as mbox, on a month's page.
     pub export_href: Option<String>,
+    /// A notice after an owner's change elsewhere.
+    pub notice: Option<String>,
 }
 
 /// One sender's posts.
@@ -849,6 +894,23 @@ pub struct ArchiveMessage {
     pub vote: Option<VoteForm>,
     /// The signed-in reader's reply form.
     pub reply_href: Option<String>,
+    /// The owner's hide and delete forms for this post.
+    pub admin: Option<AdminForms>,
+}
+
+/// The owner's hide and delete forms for one post or one thread.
+#[derive(Debug, Clone)]
+pub struct AdminForms {
+    /// The hide form's target.
+    pub hide_action: String,
+    /// The delete form's target.
+    pub delete_action: String,
+    /// Session CSRF token.
+    pub csrf: String,
+    /// `message` or `thread`.
+    pub scope: String,
+    /// The hash or the thread the forms act on.
+    pub target: String,
 }
 
 /// The vote form of one post.
@@ -896,6 +958,8 @@ pub struct ThreadMetaView {
     pub favorite: bool,
     /// This thread as mbox.
     pub export_href: String,
+    /// The owner's hide and delete forms for the whole thread.
+    pub admin: Option<AdminForms>,
 }
 
 /// One category in the owner's select.
