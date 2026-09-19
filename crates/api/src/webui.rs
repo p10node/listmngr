@@ -17,6 +17,8 @@ mod account_tokens;
 mod admin;
 #[path = "webui_archive.rs"]
 mod archive;
+#[path = "webui_archive_export.rs"]
+mod archive_export;
 #[path = "webui_archive_interact.rs"]
 mod archive_interact;
 #[path = "webui_archive_post.rs"]
@@ -298,6 +300,14 @@ fn archive_routes() -> Router<AppState> {
         .route(
             "/web/lists/{id}/archive/favorite",
             post(archive_interact::favorite),
+        )
+        .route(
+            "/web/lists/{id}/archive/export.mbox",
+            get(archive_export::export_mbox),
+        )
+        .route(
+            "/web/lists/{id}/archive/export.mbox.gz",
+            get(archive_export::export_gzip),
         )
         .route("/web/lists/{id}/archive/feed.atom", get(archive::feed_atom))
         .route("/web/lists/{id}/archive/feed.rss", get(archive::feed_rss))

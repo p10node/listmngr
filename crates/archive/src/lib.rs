@@ -2,6 +2,7 @@
 //! MIME parsing with reviewed mail-parser 0.11.8. Indexing derives the
 //! thread and the parent from the reference headers; rendering (`render`)
 //! and thread order (`threading`) are pure functions the browser uses.
+pub mod mbox;
 pub mod render;
 pub mod search;
 pub mod threading;
@@ -128,23 +129,8 @@ fn last_reference_hash(value: &mail_parser::HeaderValue<'_>) -> Option<String> {
 pub fn mbox(messages: &[ArchiveMessage]) -> Vec<u8> {
     let mut out = Vec::new();
     for message in messages {
-        out.extend_from_slice(b"From archive@localhost Thu Jan  1 00:00:00 1970\n");
-        for line in message.raw.split_inclusive(|b| *b == b'\n') {
-            if line
-                .iter()
-                .copied()
-                .skip_while(|b| *b == b'>')
-                .collect::<Vec<_>>()
-                .starts_with(b"From ")
-            {
-                out.push(b'>');
-            }
-            out.extend_from_slice(line);
-        }
-        if !out.ends_with(b"\n") {
-            out.push(b'\n');
-        }
-        out.push(b'\n');
+        // Writing into a Vec cannot fail.
+        let _ = mbox::write_message(&mut out, &message.raw);
     }
     out
 }
