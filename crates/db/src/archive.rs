@@ -140,6 +140,58 @@ fn index_row(row: &sqlx::any::AnyRow) -> Result<IndexRow> {
     })
 }
 
+/// The `mail-archive` archiver: a public list's copy goes to the service
+/// through the outbound queue, queued with the archived post so the two
+/// commit together. Does nothing when the list has the archiver off.
+async fn queue_mail_archive(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    list: &ListId,
+    address: &str,
+    message: crate::mail_queue::MessageId,
+    hash: &str,
+    now_ms: i64,
+) -> Result<()> {
+    if !archiver_on(tx, list, "mail-archive").await? {
+        return Ok(());
+    }
+    let child = crate::mail_queue::insert_child_job(
+        tx,
+        message,
+        &crate::mail_queue::ChildJob {
+            queue: Queue::Out,
+            max_attempts: 8,
+            recipients: vec![address.to_owned()],
+        },
+        now_ms,
+    )
+    .await?;
+    Database::record_tx_with_context(
+        tx,
+        &crate::AuditContext::system(),
+        "archive.archiver",
+        "list",
+        list.as_str(),
+        serde_json::json!({"archiver": "mail-archive", "hash": hash, "job": child.id.0.to_string()}),
+    )
+    .await
+}
+
+/// Whether one of a list's archivers is switched on.
+async fn archiver_on(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    list: &ListId,
+    name: &str,
+) -> Result<bool> {
+    let enabled: Option<i64> =
+        sqlx::query_scalar("SELECT enabled FROM list_archivers WHERE list_id=$1 AND name=$2")
+            .bind(list.as_str())
+            .bind(name)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(db_error)?;
+    Ok(enabled.is_some_and(|value| value != 0))
+}
+
 /// The first `From` mailbox of a parsed message: name and address, each
 /// bounded. The importer parses outside this crate and needs the same
 /// projection the archive runner stores.
@@ -548,6 +600,21 @@ impl<'a> ArchiveRepo<'a> {
                 serde_json::json!({"hash": item.hash}),
             )
             .await?;
+            // The mail-archive archiver is a durable write, so its child
+            // job and its audit event commit with the archived post.
+            if policy == "public"
+                && let Some(address) = self.db.mail_archive_address()
+            {
+                queue_mail_archive(
+                    &mut tx,
+                    &list,
+                    address,
+                    lease.job.message_id,
+                    &item.hash,
+                    now_ms,
+                )
+                .await?;
+            }
         }
         // Index/audit writes can wait too. Fence last, with the queue lock held.
         ack_leased_job(&mut tx, lease, queue.time(now_ms)).await?;

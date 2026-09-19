@@ -2,6 +2,7 @@
 //! MIME parsing with reviewed mail-parser 0.11.8. Indexing derives the
 //! thread and the parent from the reference headers; rendering (`render`)
 //! and thread order (`threading`) are pure functions the browser uses.
+pub mod archivers;
 pub mod mbox;
 pub mod render;
 pub mod search;

@@ -207,6 +207,29 @@ impl ArchiveRepo<'_> {
             .collect()
     }
 
+    /// The archived copy of one post, without policy: the bytes the
+    /// remote archivers forward, exactly as the archive pages publish
+    /// them. `None` when the post is not archived or is hidden.
+    /// # Errors
+    /// Database failures, or a stored message that will not decode.
+    pub async fn archived_copy(&self, list: &ListId, hash: &str) -> Result<Option<Vec<u8>>> {
+        let stored: Option<String> = sqlx::query_scalar(
+            "SELECT raw_b64 FROM archive_messages WHERE list_id=$1 AND hash=$2 AND hidden_at IS NULL",
+        )
+        .bind(list.as_str())
+        .bind(hash)
+        .fetch_optional(self.db.pool())
+        .await
+        .map_err(db_error)?;
+        stored
+            .map(|raw| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(raw)
+                    .map_err(|_| Error::Validation("stored message".into()))
+            })
+            .transpose()
+    }
+
     /// The browser's export: the archive's policy for the reader, once,
     /// before any page is read.
     /// # Errors
