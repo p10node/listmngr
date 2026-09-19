@@ -52,6 +52,8 @@ cargo test --locked -p listmngr-db --test bans \
   postgres_site_bans_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test tasks \
   postgres_task_sweep_and_notify_contract -- --ignored --exact
+cargo test --locked -p listmngr-db --test workflows \
+  postgres_confirmed_join_then_leave_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test notice_language \
   postgres_notice_language_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test alter_messages_settings \
