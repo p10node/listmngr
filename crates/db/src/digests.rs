@@ -23,6 +23,7 @@ pub struct DigestPost {
 pub struct DigestIssue {
     pub list: ListId,
     pub display_name: String,
+    pub subject_prefix: String,
     pub volume: i32,
     pub number: i64,
     pub timestamp: i64,
@@ -37,6 +38,7 @@ pub struct DigestIssue {
 /// The list's digest settings as the flush reads them under the lock.
 struct DigestSettings {
     display_name: String,
+    subject_prefix: String,
     volume: i32,
     number: i64,
     last_sent_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -50,10 +52,11 @@ async fn load_settings(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     list: &ListId,
 ) -> Result<DigestSettings> {
-    let row = sqlx::query("UPDATE mailing_lists SET next_digest_number=next_digest_number WHERE list_id=$1 RETURNING display_name,volume,next_digest_number,digest_last_sent_at,digest_size_threshold,digest_send_periodic,digest_volume_frequency").bind(list.as_str()).fetch_optional(&mut **tx).await.map_err(db_error)?.ok_or_else(|| Error::NotFound(list.to_string()))?;
+    let row = sqlx::query("UPDATE mailing_lists SET next_digest_number=next_digest_number WHERE list_id=$1 RETURNING display_name,subject_prefix,volume,next_digest_number,digest_last_sent_at,digest_size_threshold,digest_send_periodic,digest_volume_frequency").bind(list.as_str()).fetch_optional(&mut **tx).await.map_err(db_error)?.ok_or_else(|| Error::NotFound(list.to_string()))?;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     Ok(DigestSettings {
         display_name: row.try_get("display_name").map_err(db_error)?,
+        subject_prefix: row.try_get("subject_prefix").map_err(db_error)?,
         volume: i32::try_from(row.try_get::<i64, _>("volume").map_err(db_error)?)
             .map_err(db_error)?,
         number: row.try_get("next_digest_number").map_err(db_error)?,
@@ -359,6 +362,7 @@ impl<'a> DigestRepo<'a> {
         let issue = DigestIssue {
             list: list.clone(),
             display_name: settings.display_name,
+            subject_prefix: settings.subject_prefix,
             volume,
             number,
             timestamp: now_ms / 1000,
@@ -506,6 +510,7 @@ pub fn render(issue: &DigestIssue) -> Result<Vec<DigestOutput>> {
             let raw = listmngr_mail::digest::build(&listmngr_mail::digest::Digest {
                 list: issue.list.clone(),
                 display_name: issue.display_name.clone(),
+                subject_prefix: issue.subject_prefix.clone(),
                 volume: issue.volume,
                 number: issue.number,
                 mode: mode.parse()?,
