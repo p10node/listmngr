@@ -341,3 +341,54 @@ async fn global_and_address_notice_limits_are_durable_and_bounded() {
         .unwrap();
     assert_eq!(count(&db, "queue_jobs").await, 101);
 }
+
+/// The hourly per-address cooldown bounds outstanding requests, not
+/// answered ones: once a join is confirmed, the leave that follows within
+/// the hour gets its own challenge (Mailman has no such cooldown at all).
+#[tokio::test]
+async fn a_confirmed_join_does_not_block_the_leave_that_follows() {
+    a_confirmed_join_does_not_block_the_leave_that_follows_on(&fixture().await).await;
+}
+
+/// The same on `PostgreSQL`: the cooldown's count with `consumed=0`.
+#[tokio::test]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
+async fn postgres_confirmed_join_then_leave_contract() {
+    let schema = listmngr_db::test_support::IsolatedSchema::create("workflow_cooldown")
+        .await
+        .unwrap();
+    let db = fixture_at(&schema.url).await;
+    a_confirmed_join_does_not_block_the_leave_that_follows_on(&db).await;
+    db.pool().close().await;
+    schema.drop().await.unwrap();
+}
+
+async fn a_confirmed_join_does_not_block_the_leave_that_follows_on(db: &Database) {
+    let list: listmngr_core::ListId = "test.example.com".parse().unwrap();
+    db.workflows()
+        .request(&list, "hop@example.com", SubscriptionAction::Join, 100_000)
+        .await
+        .unwrap();
+    assert_eq!(count(db, "queue_jobs").await, 1, "the join challenge");
+    let token = token(db).await;
+    db.workflows()
+        .confirm(&list, &token, 101_000)
+        .await
+        .unwrap();
+    assert_eq!(count(db, "members").await, 1);
+    db.workflows()
+        .request(&list, "hop@example.com", SubscriptionAction::Leave, 102_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        count(db, "subscription_workflows").await,
+        2,
+        "the leave request has its own row"
+    );
+    // A second leave while that one waits is what the cooldown holds.
+    db.workflows()
+        .request(&list, "hop@example.com", SubscriptionAction::Leave, 103_000)
+        .await
+        .unwrap();
+    assert_eq!(count(db, "subscription_workflows").await, 2);
+}

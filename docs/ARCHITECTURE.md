@@ -1,5 +1,33 @@
 # Architecture
 
+## Subscription by mail, end to end — bounded local acceptance verified
+
+`join_and_leave_by_mail_round_trip_their_confirmation_tokens` in
+`crates/cli/tests/mailpath_e2e.rs` drives the flow through the fixture's
+real sockets: `send_command` delivers a one-line command over LMTP to a
+`-join`, `-confirm` or `-leave` address and requires the durable `250`;
+`next_mail_to` waits on the SMTP sink for the next mail to an address
+with a given subject, counting from the deliveries already seen, and
+names every delivery (envelope, recipients, subject) when it does not
+come; `challenge_token` reads the token from `Subject: confirm TOKEN` and
+checks the challenge's `Reply-To`, `To`, null reverse path and
+`Auto-Submitted`; `roster` reads `/3.1/lists/{id}/roster/member`. The
+test then asserts the sequence — challenge, no member; reply, member,
+receipt and welcome; a post delivered with the prefix; a second
+challenge with a different token; reply, no member, goodbye; a spent
+token replayed, nothing.
+
+The one change it forced is in `WorkflowRepo::request_owned`
+(`crates/db/src/workflows.rs`): the per-address hourly cooldown query now
+carries `consumed=0`, so a request whose token has been spent no longer
+counts against the next one. The bound it exists for is unchanged — one
+outstanding challenge or moderator-queue row per address per hour — and
+`global_and_address_notice_limits_are_durable_and_bounded` still holds
+(a leave while a join waits is dropped).
+`a_confirmed_join_does_not_block_the_leave_that_follows` pins the new
+case on SQLite and, as `postgres_confirmed_join_then_leave_contract` on
+an `IsolatedSchema`, in `scripts/test-postgres.sh`.
+
 ## Digest snapshot — bounded local acceptance verified
 
 `listmngr_mail::digest` is a port of Mailman's two digesters
@@ -1259,7 +1287,9 @@ accept/reject/discard/defer, each committing the membership change, its
 notices and the audit event together, and refusing a request that is not
 waiting. The per-address hourly cooldown now applies only where a request
 produces something (a mail, a queue row): an `open` list is exempt, because a
-member who has just joined must be able to leave again.
+member who has just joined must be able to leave again — and, since
+`P3-SUBSCRIPTION-E2E`, a request already answered (token spent) no longer
+counts, for the same reason on a confirming list.
 
 `TokenOwner` (Mailman's word) is derived from `state`: `pending_confirmation`
 is the subscriber's move, `pending_moderation` the moderator's. `pending`

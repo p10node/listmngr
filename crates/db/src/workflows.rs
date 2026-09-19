@@ -348,10 +348,11 @@ impl<'a> WorkflowRepo<'a> {
         // The per-address hourly cooldown bounds what an unauthenticated
         // request can produce: a confirmation mail, or a row in the
         // moderator's queue. An `open` list produces neither — it acts on
-        // the roster — and a member who joins must be able to leave again
-        // within the hour, so the cooldown does not apply there.
+        // the roster — so the cooldown does not apply there; and a request
+        // the mailbox has answered (its token spent) no longer counts, so a
+        // member who has just confirmed a join can ask to leave again.
         if policy != "open" {
-            let recent:i64=sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND email=$2 AND created_at>$3").bind(list.as_str()).bind(&address.email).bind(now_ms.saturating_sub(3_600_000)).fetch_one(&mut *tx).await.map_err(db_error)?;
+            let recent:i64=sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND email=$2 AND consumed=0 AND created_at>$3").bind(list.as_str()).bind(&address.email).bind(now_ms.saturating_sub(3_600_000)).fetch_one(&mut *tx).await.map_err(db_error)?;
             if recent > 0 {
                 return self.commit_command(tx, lease, now_ms).await;
             }
