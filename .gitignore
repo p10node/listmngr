@@ -7,3 +7,8 @@ playwright-report/
 test-results/
 __pycache__/
 *.pyc
+
+# Per-workstation Cargo limits (job count, incremental); CI must not inherit them.
+.cargo/
+# Session handoff notes; docs/PLAN.md and docs/FEATURE_PARITY.md are the record.
+docs/HANDOFF.md
