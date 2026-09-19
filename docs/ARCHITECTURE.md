@@ -1,5 +1,48 @@
 # Architecture
 
+## Digest snapshot — bounded local acceptance verified
+
+`listmngr_mail::digest` is a port of Mailman's two digesters
+(`mailman/runners/digest.py`, 3.3.10) rather than a layout of its own.
+`build` wraps the masthead (`wrap`, Mailman's
+`mailman.utilities.string.wrap`: unindented paragraphs filled by a port of
+Python's `TextWrapper` with `break_on_hyphens=False` and
+`fix_sentence_endings=True` — tabs expanded to eight columns, two spaces
+after a sentence end, a word longer than the column broken at it —
+indented paragraphs copied verbatim), applies `decorate`'s rule to the
+header and footer (a whitespace-only template is nothing), and builds the
+table of contents as `add_to_toc` does: the subject through `oneline`
+(RFC 2047 decoded and unfolded, via `mail_parser`'s public
+`parse_unstructured`), the list's `subject_prefix` removed by the same
+`(re:? *)?(prefix)` match, the first `From` mailbox's name or address in
+parentheses on the last line when it fits in seventy columns, the line
+wrapped at sixty-five. `plaintext_body` is `RFC1153Digester`'s sequence
+of `print` calls: for each post `Message: n`, then each header of
+Mailman's default `plain_digest_keep_headers` in that order, wrapped at
+seventy with `\n\t` continuations, then `scrub` — every leaf part in
+document order (nested `message/rfc822` parts descended), `text/plain`
+as text, anything else as the `A message part incompatible …` note with
+the attachment name, lowercased type, decoded size and description, the
+parts joined by the `next part` line. `mime_body` is `MIMEDigester`: the
+texts as `text/plain` parts with `Content-Description`, the posts as
+`message/rfc822` parts with `Message: n` inserted after their own
+headers (`with_message_header`), no closing part. `Digest` carries
+`subject_prefix`; `DigestIssue` and `load_settings` in
+`listmngr_db::digests` read it from the list row with the display name.
+
+The evidence is `crates/mail/tests/digest_snapshot.rs` over fixtures that
+`tests/compat/generate_mailman_digest.py` produced by running Mailman
+core itself (`uv run --python 3.12 --with mailman==3.3.10`): a
+`ConfigLayer`-style test configuration with an in-memory database and a
+temporary var directory, a domain and a list made through Mailman's own
+interfaces, the header and footer set as `file://` template URIs, the two
+posts added to the list's `digest.mmdf` mailbox, and the digesters'
+`finish()` results written as bytes. The test parses both sides with
+`mail_parser` and compares text, so the volatile `Date`, `Message-ID` and
+boundaries stay out of it, and names the three Mailman quirks it does not
+copy (its 8-bit scrubbing, the joined `next part` line, the single
+encoded word for an 8-bit `From`).
+
 ## Real-client suite — bounded local acceptance verified
 
 `tests/compat/mailmanclient_suite.py` is a straight-line script — the
