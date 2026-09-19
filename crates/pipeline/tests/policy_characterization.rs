@@ -46,12 +46,20 @@ fn clean_message() -> MessageChecks {
     }
 }
 
-fn moderation(action: ModerationAction) -> Disposition {
+/// The disposition a moderation action maps to, with Mailman's reason
+/// for the rule that set it: a member's own or default action, or a
+/// nonmember's.
+fn moderation(action: ModerationAction, member: bool) -> Disposition {
+    let reason = if member {
+        "The message comes from a moderated member"
+    } else {
+        "The message is not from a list member"
+    };
     match action {
         ModerationAction::Defer | ModerationAction::Accept => Disposition::Accept,
-        ModerationAction::Hold => Disposition::Hold("moderation policy".into()),
-        ModerationAction::Reject => Disposition::Reject("moderation policy".into()),
-        ModerationAction::Discard => Disposition::Discard("moderation policy".into()),
+        ModerationAction::Hold => Disposition::Hold(reason.into()),
+        ModerationAction::Reject => Disposition::Reject(reason.into()),
+        ModerationAction::Discard => Disposition::Discard(reason.into()),
     }
 }
 
@@ -81,7 +89,7 @@ fn oracle(ctx: &PostingContext) -> Disposition {
             .unwrap_or(ctx.default_nonmember_action),
     };
     if action != ModerationAction::Defer {
-        return moderation(action);
+        return moderation(action, ctx.member_moderation_action.is_some());
     }
     let mut reasons = Vec::new();
     if ctx.list.too_many_recipients {

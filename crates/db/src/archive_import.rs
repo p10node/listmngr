@@ -85,7 +85,7 @@ impl ArchiveRepo<'_> {
         items: &[ImportItem],
         now_ms: i64,
     ) -> Result<Outcome> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let policy: Option<String> =
             sqlx::query_scalar("SELECT archive_policy FROM mailing_lists WHERE list_id=$1")
                 .bind(list.as_str())

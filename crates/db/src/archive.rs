@@ -600,7 +600,7 @@ impl<'a> ArchiveRepo<'a> {
             .as_str()
             .ok_or_else(|| Error::Validation("missing list".into()))?
             .parse()?;
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let settings = crate::lock_list_for_patch(&mut tx, &list).await?;
         let raw = publication(
             &message.raw,

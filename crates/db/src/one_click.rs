@@ -125,7 +125,7 @@ impl OneClickRepo<'_> {
         if &member.list_id != list || member.role != listmngr_core::MemberRole::Member {
             return Err(not_found());
         }
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let preferences_id: Option<String> =
             sqlx::query_scalar("SELECT preferences_id FROM members WHERE id=$1")
                 .bind(member_id.to_string())

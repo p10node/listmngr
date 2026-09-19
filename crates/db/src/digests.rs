@@ -188,7 +188,7 @@ impl<'a> DigestRepo<'a> {
     /// # Errors
     /// Returns missing-list, overflow, database or audit errors.
     pub async fn bump_with_context(&self, list: &ListId, context: &AuditContext) -> Result<()> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::bump_tx(&mut tx, list, context).await?;
         tx.commit().await.map_err(db_error)
     }
@@ -239,7 +239,7 @@ impl<'a> DigestRepo<'a> {
         {
             return Err(Error::Validation("invalid digest collection".into()));
         }
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         // Serialize with issue publication BEFORE reading pending rows (PG + SQLite).
         sqlx::query(
             "UPDATE mailing_lists SET next_digest_number=next_digest_number WHERE list_id=$1",
@@ -276,7 +276,7 @@ impl<'a> DigestRepo<'a> {
     where
         F: FnOnce(&DigestIssue) -> Result<Vec<DigestOutput>>,
     {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let settings = load_settings(&mut tx, list).await?;
         let rows = sqlx::query("SELECT id,raw,recipients,accepted_at FROM digest_posts WHERE list_id=$1 AND issue_id IS NULL ORDER BY accepted_at,id LIMIT 1000").bind(list.as_str()).fetch_all(&mut *tx).await.map_err(db_error)?;
         if rows.is_empty() {

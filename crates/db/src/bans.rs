@@ -123,7 +123,7 @@ impl BanRepo<'_> {
     /// # Errors
     /// Returns validation, missing-list/ban, database or audit errors.
     pub async fn delete(&self, id: &ListId, value: &str, context: &AuditContext) -> Result<()> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::delete_tx(&mut tx, id, value, context).await?;
         tx.commit().await.map_err(db_error)
     }
@@ -207,7 +207,7 @@ impl BanRepo<'_> {
     /// # Errors
     /// Returns validation, conflict, database or audit errors.
     pub async fn site_create(&self, value: &str, context: &AuditContext) -> Result<String> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let value = Self::site_create_tx(&mut tx, value, context).await?;
         tx.commit().await.map_err(db_error)?;
         Ok(value)
@@ -254,7 +254,7 @@ impl BanRepo<'_> {
     /// # Errors
     /// Returns validation, missing-ban, database or audit errors.
     pub async fn site_delete(&self, value: &str, context: &AuditContext) -> Result<()> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::site_delete_tx(&mut tx, value, context).await?;
         tx.commit().await.map_err(db_error)
     }
@@ -292,7 +292,7 @@ impl BanRepo<'_> {
     /// # Errors
     /// Returns validation, missing-list, conflict, database or audit errors.
     pub async fn create(&self, id: &ListId, value: &str, context: &AuditContext) -> Result<String> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let value = Self::create_tx(&mut tx, id, value, context).await?;
         tx.commit().await.map_err(db_error)?;
         Ok(value)

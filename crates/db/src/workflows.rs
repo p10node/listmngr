@@ -280,7 +280,7 @@ impl<'a> WorkflowRepo<'a> {
             }
             // Mailman's halt: the message carried no command to run.
             EmailCommand::End => {
-                let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+                let mut tx = self.db.write_tx().await?;
                 lock(&mut tx).await?;
                 let now_ms = now_ms.saturating_add(
                     i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
@@ -314,7 +314,7 @@ impl<'a> WorkflowRepo<'a> {
     ) -> Result<()> {
         let address = Address::new(email, String::new())?;
         notice_mailbox(email)?;
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         lock(&mut tx).await?;
         let now_ms = if lease.is_some() {
             now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX))
@@ -432,7 +432,7 @@ impl<'a> WorkflowRepo<'a> {
         if !email.is_ascii() || email.bytes().any(|b| b.is_ascii_control()) {
             return Err(Error::Validation("unsupported notice mailbox".into()));
         }
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         lock(&mut tx).await?;
         let now_ms =
             now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
@@ -502,7 +502,7 @@ impl<'a> WorkflowRepo<'a> {
             return Err(invalid_token());
         }
         let hash = format!("{:x}", Sha256::digest(secret));
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         lock(&mut tx).await?;
         // The supplied Unix clock is sampled at call time, not after pool or
         // writer-lock waits. Advance it monotonically before consuming a token.
@@ -581,7 +581,7 @@ impl<'a> WorkflowRepo<'a> {
         now_ms: i64,
     ) -> Result<SubscriptionOutcome> {
         let address = Address::new(request.email, request.display_name.to_owned())?;
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         lock(&mut tx).await?;
         let policy: Option<String> =
             sqlx::query_scalar("SELECT subscription_policy FROM mailing_lists WHERE list_id=$1")
@@ -727,7 +727,7 @@ impl<'a> WorkflowRepo<'a> {
         reason: &str,
         context: &AuditContext,
     ) -> Result<()> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::decide_tx(&mut tx, self.db, id, decision, reason, context).await?;
         tx.commit().await.map_err(db_error)
     }

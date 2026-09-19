@@ -280,7 +280,7 @@ async fn every_group(db: &Database, app: &axum::Router, owner: &str) {
                 ("autoresponse_owner_text", "Owner reply $display_name"),
                 ("autorespond_postings", "none"),
                 ("autoresponse_postings_text", ""),
-                ("autorespond_requests", "respond"),
+                ("autorespond_requests", "respond_and_continue"),
                 ("autoresponse_request_text", "Request reply"),
                 ("autoresponse_grace_period", "3"),
                 ("respond_to_post_requests", "true"),

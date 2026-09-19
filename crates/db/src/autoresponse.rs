@@ -73,7 +73,7 @@ impl AutoresponseRepo<'_> {
         to: &str,
         now_ms: i64,
     ) -> Result<ResponseAction> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let row = sqlx::query(&format!(
             "SELECT {} AS action, {} AS text, autoresponse_grace_period FROM mailing_lists WHERE list_id=$1",
             kind.action_column(),
@@ -84,11 +84,10 @@ impl AutoresponseRepo<'_> {
         .await
         .map_err(db_error)?
         .ok_or_else(|| listmngr_core::Error::NotFound(list.to_string()))?;
-        let action: ResponseAction = row
-            .try_get::<String, _>("action")
-            .map_err(db_error)?
-            .parse()
-            .map_err(|_| listmngr_core::Error::Validation("autorespond action".into()))?;
+        let action: ResponseAction = crate::response_action_from_stored(
+            &row.try_get::<String, _>("action").map_err(db_error)?,
+        )
+        .map_err(|_| listmngr_core::Error::Validation("autorespond action".into()))?;
         if action == ResponseAction::None {
             return Ok(action);
         }

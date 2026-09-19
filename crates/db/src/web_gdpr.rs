@@ -220,7 +220,7 @@ impl Database {
     /// `NotFound`, `Validation` for the last owner, database or audit
     /// failures.
     pub async fn erase_user(&self, user: UserId, context: &AuditContext) -> Result<Deleted> {
-        let mut tx = self.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.write_tx().await?;
         let deleted = erase_tx(&mut tx, user, context, "administrator").await?;
         tx.commit().await.map_err(db_error)?;
         Ok(deleted)

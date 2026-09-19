@@ -144,7 +144,7 @@ def run_held(url, token, cli, user_id, directory, lmtp_port, sink):
             assert item.message_id == f"held-{label}@example.invalid"
             assert item.sender == "outsider@example.invalid"
             assert item.type == "held_message"
-            assert item.reason == "moderation policy"
+            assert item.reason == "The message is not from a list member"
             assert item.msg == raw
             assert message_from_string(item.msg).get_payload() == f"Unique held body {label}\r\n"
             assert rows("SELECT q.state FROM queue_jobs q JOIN held_messages h ON h.message_id=q.message_id WHERE h.id=? AND q.queue='in'", (item.request_id,)) == [("done",)]

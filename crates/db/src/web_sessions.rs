@@ -213,7 +213,7 @@ impl Database {
     ) -> Result<WebSession> {
         let token = secret();
         let csrf = secret();
-        let mut tx = self.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.write_tx().await?;
         let version: Option<String> = if let Some(u) = user {
             Some(
                 sqlx::query_scalar(
@@ -280,7 +280,7 @@ impl Database {
     /// # Errors
     /// Returns database errors.
     pub async fn delete_web_session(&self, session: &WebSession) -> Result<()> {
-        let mut tx = self.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.write_tx().await?;
         sqlx::query("DELETE FROM web_sessions WHERE token_hash=$1")
             .bind(digest(&session.token))
             .execute(&mut *tx)

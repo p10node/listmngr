@@ -231,7 +231,10 @@ async fn a_wrong_or_absent_approved_key_falls_through_to_nonmember_moderation() 
         ),
     )
     .await;
-    assert_eq!(outcome.held_reason.as_deref(), Some("moderation policy"));
+    assert_eq!(
+        outcome.held_reason.as_deref(),
+        Some("The message is not from a list member")
+    );
     assert_eq!(outcome.outgoing, 0);
 
     let db = fixture(json!({})).await;
@@ -248,7 +251,7 @@ async fn a_wrong_or_absent_approved_key_falls_through_to_nonmember_moderation() 
     .await;
     assert_eq!(
         outcome.held_reason.as_deref(),
-        Some("moderation policy"),
+        Some("The message is not from a list member"),
         "a list without a password never approves"
     );
 }

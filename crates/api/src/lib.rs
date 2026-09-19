@@ -605,6 +605,20 @@ impl utoipa::Modify for SecurityAddon {
         list_held_count,
         list_held_get,
         list_held_moderate,
+        roster_mass_unsubscribe,
+        lists_find,
+        list_archivers_set,
+        list_owner,
+        list_owner_delete,
+        list_moderator,
+        list_moderator_delete,
+        list_nonmember,
+        list_nonmember_delete,
+        user_preferred_address,
+        user_preferred_address_set,
+        user_preferred_address_unset,
+        address_delete,
+        members_list,
         members_create,
         members_mass,
         members_find,
@@ -884,6 +898,10 @@ impl IntoResponse for ApiError {
         let correlation_id = uuid::Uuid::now_v7();
         let title = status.canonical_reason().unwrap_or("request failed");
         let detail = if status.is_server_error() {
+            // The client gets the id alone; the log carries the cause an
+            // administrator will be asked about (an sqlx or configuration
+            // message, never a credential).
+            tracing::error!(%correlation_id, error = %self.0, "request failed");
             "request failed; quote the correlation_id to an administrator"
         } else {
             title
@@ -1031,6 +1049,7 @@ fn phase_one_routes() -> Router<AppState> {
         .route("/domains/{host}/owners", get(domain_owners))
         .route("/lists", get(lists_list).post(lists_create))
         .route("/lists/styles", get(styles))
+        .route("/lists/find", post(lists_find))
         .route("/lists/{id}", get(lists_get).delete(lists_delete))
         .route(
             "/lists/{id}/config",
@@ -1044,11 +1063,29 @@ fn phase_one_routes() -> Router<AppState> {
                 .put(list_config_attr_put)
                 .patch(list_config_attr_patch),
         )
-        .route("/lists/{id}/archivers", get(list_archivers))
+        .route(
+            "/lists/{id}/archivers",
+            get(list_archivers).patch(list_archivers_set),
+        )
         .merge(bans::routes())
         .route("/lists/{id}/bounces", get(bounces::list))
         .route("/lists/{id}/templates", get(list_templates))
-        .route("/lists/{id}/roster/{role}", get(roster))
+        .route(
+            "/lists/{id}/roster/{role}",
+            get(roster).delete(roster_mass_unsubscribe),
+        )
+        .route(
+            "/lists/{id}/owner/{email}",
+            get(list_owner).delete(list_owner_delete),
+        )
+        .route(
+            "/lists/{id}/moderator/{email}",
+            get(list_moderator).delete(list_moderator_delete),
+        )
+        .route(
+            "/lists/{id}/nonmember/{email}",
+            get(list_nonmember).delete(list_nonmember_delete),
+        )
         .route(
             "/lists/{id}/member/{email}",
             get(list_member).delete(list_member_delete),
@@ -1063,7 +1100,13 @@ fn phase_one_routes() -> Router<AppState> {
             "/lists/{id}/held/{held_id}",
             get(list_held_get).post(list_held_moderate),
         )
-        .route("/members", post(members_create))
+        .merge(people_routes())
+}
+
+/// The membership, user and address routes of the compatibility surface.
+fn people_routes() -> Router<AppState> {
+    Router::new()
+        .route("/members", get(members_list).post(members_create))
         .route("/members/mass", post(members_mass))
         .route("/members/find", post(members_find))
         .route(
@@ -1093,8 +1136,17 @@ fn phase_one_routes() -> Router<AppState> {
                 .patch(user_preferences_patch),
         )
         .route("/users/{id}/all/preferences", get(user_all_preferences))
+        .route(
+            "/users/{id}/preferred_address",
+            get(user_preferred_address)
+                .post(user_preferred_address_set)
+                .delete(user_preferred_address_unset),
+        )
         .route("/users/{id}/login", post(user_login))
-        .route("/addresses/{email}", get(address_get))
+        .route(
+            "/addresses/{email}",
+            get(address_get).delete(address_delete),
+        )
         .route("/addresses/{email}/verify", post(address_verify))
         .route("/addresses/{email}/unverify", post(address_unverify))
         .route(
@@ -1440,13 +1492,63 @@ fn page_response(flavor: ApiFlavor, selected: &[Value], start: usize, total: usi
     }
 }
 
+/// A user as `mailmanclient` reads it: on the compatibility flavour the
+/// `self_link`, `user_id`, `created_on` and a `password` that is always
+/// `null` — the hash Mailman hands out is never shown here.
+fn user_value(flavor: ApiFlavor, user: &listmngr_core::User) -> Value {
+    let mut value = serde_json::to_value(user).expect("user serializes");
+    if matches!(flavor, ApiFlavor::Compat31) {
+        let object = value.as_object_mut().expect("user is an object");
+        object.insert("self_link".into(), json!(format!("/3.1/users/{}", user.id)));
+        object.insert("user_id".into(), json!(user.id.to_string()));
+        object.insert("created_on".into(), json!(user.created_at));
+        object.insert("password".into(), Value::Null);
+    }
+    value
+}
+
+/// An address as `mailmanclient` reads it: `self_link`, `verified`, and
+/// the owner's `user` link on the compatibility flavour.
+fn address_value(flavor: ApiFlavor, address: &listmngr_core::Address) -> Value {
+    let mut value = serde_json::to_value(address).expect("address serializes");
+    if matches!(flavor, ApiFlavor::Compat31) {
+        let object = value.as_object_mut().expect("address is an object");
+        object.insert(
+            "self_link".into(),
+            json!(format!("/3.1/addresses/{}", address.email)),
+        );
+        object.insert("verified".into(), json!(address.verified_on.is_some()));
+        if let Some(user) = address.user_id {
+            object.insert("user".into(), json!(format!("/3.1/users/{user}")));
+        }
+    }
+    value
+}
+
+/// The user a `/users/{id}` segment names: the id, or on the
+/// compatibility flavour an address of the account, as Mailman allows.
+async fn resolve_user_id(s: &AppState, segment: &str) -> Result<UserId, Error> {
+    if let Ok(id) = segment.parse::<UserId>() {
+        return Ok(id);
+    }
+    if matches!(s.flavor, ApiFlavor::Compat31) && segment.contains('@') {
+        return Ok(s.db.users().get_by_email(segment).await?.id);
+    }
+    Err(Error::Validation("user id".into()))
+}
+
 fn domain_value(flavor: ApiFlavor, domain: &listmngr_core::Domain) -> Value {
     let mut value = serde_json::to_value(domain).expect("domain serializes");
     if matches!(flavor, ApiFlavor::Compat31) {
-        value.as_object_mut().expect("domain is an object").insert(
+        let object = value.as_object_mut().expect("domain is an object");
+        object.insert(
             "self_link".into(),
             json!(format!("/3.1/domains/{}", domain.mail_host)),
         );
+        // Mailman keeps no description as `null`; the doctest prints `None`.
+        if domain.description.is_empty() {
+            object.insert("description".into(), Value::Null);
+        }
     }
     value
 }
@@ -1479,7 +1581,19 @@ async fn system_config(
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "system:read").await?;
-    Ok(Json(s.config.redacted_json()))
+    let value = s.config.redacted_json();
+    if matches!(s.flavor, ApiFlavor::Compat31) {
+        // Mailman's shape: the section names; each section is its own
+        // resource.
+        let sections: Vec<&String> = value
+            .as_object()
+            .map(|object| object.keys().collect())
+            .unwrap_or_default();
+        return Ok(Json(
+            json!({"sections": sections, "self_link": "/3.1/system/configuration"}),
+        ));
+    }
+    Ok(Json(value))
 }
 #[utoipa::path(
     get,
@@ -1535,6 +1649,17 @@ async fn system_pipelines(
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "system:read").await?;
     let registry = listmngr_mail::handlers::builtin_registry();
+    if matches!(s.flavor, ApiFlavor::Compat31) {
+        // Mailman's shape: the pipeline names alone.
+        let mut names: Vec<&str> = registry
+            .pipelines()
+            .map(listmngr_pipeline::handlers::Pipeline::name)
+            .collect();
+        names.sort_unstable();
+        return Ok(Json(
+            json!({"pipelines": names, "self_link": "/3.1/system/pipelines"}),
+        ));
+    }
     let entries: Vec<Value> = registry
         .pipelines()
         .map(|pipeline| {
@@ -1563,6 +1688,17 @@ async fn system_chains(
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "system:read").await?;
+    if matches!(s.flavor, ApiFlavor::Compat31) {
+        // Mailman's shape: the chain names alone.
+        let mut names: Vec<&str> = listmngr_pipeline::builtin()
+            .chains()
+            .map(listmngr_pipeline::Chain::name)
+            .collect();
+        names.sort_unstable();
+        return Ok(Json(
+            json!({"chains": names, "self_link": "/3.1/system/chains"}),
+        ));
+    }
     let entries: Vec<Value> = listmngr_pipeline::builtin()
         .chains()
         .map(chain_entry)
@@ -1715,7 +1851,7 @@ async fn domains_delete(
 #[utoipa::path(
     get,
     path = "/api/v1/domains/{host}/lists",
-    params(PageQuery, ("host" = String, Path, description = "host path parameter")),
+    params(PageQuery, ("host" = String, Path, description = "host path parameter"), ("advertised" = Option<bool>, Query, description = "Filter by advertised status")),
     responses((status = 200, description = "Successful operation", body = MailingListPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -1723,6 +1859,7 @@ async fn domain_lists(
     State(s): State<AppState>,
     Path(host): Path<String>,
     Query(page_query): Query<PageQuery>,
+    Query(q): Query<ListQuery>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
@@ -1733,6 +1870,10 @@ async fn domain_lists(
     }
     let mut lists = Vec::new();
     for list in s.db.lists().by_domain(&host).await? {
+        // `?advertised=true` narrows a domain's lists as it does `/lists`.
+        if q.advertised.is_some_and(|wanted| list.advertised != wanted) {
+            continue;
+        }
         if auth.allows_list(&list.id, domain.id) {
             lists.push(list_value(s.flavor, &list));
         }
@@ -1765,6 +1906,61 @@ async fn domain_owners(
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 struct ListQuery {
     advertised: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+struct FindListsInput {
+    subscriber: String,
+    role: Option<MemberRole>,
+    mail_host: Option<String>,
+    count: Option<usize>,
+    page: Option<usize>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/lists/find",
+    request_body(content((FindListsInput = "application/json"), (FindListsInput = "application/x-www-form-urlencoded"))),
+    responses((status = 200, description = "Successful operation", body = MailingListPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+/// Mailman's `lists/find`: the lists on which an address holds a role
+/// (any role when none is given), optionally within one mail host.
+async fn lists_find(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    JsonOrForm(v): JsonOrForm<FindListsInput>,
+) -> ApiResult<Json<Value>> {
+    let auth = authenticate_for_authorization(&s, &h, peer(c), "lists:read").await?;
+    let memberships = s.db.members().find(&v.subscriber).await?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut lists = Vec::new();
+    for member in memberships {
+        if v.role.is_some_and(|role| member.role != role)
+            || !seen.insert(member.list_id.to_string())
+        {
+            continue;
+        }
+        let list = s.db.lists().get(&member.list_id).await?;
+        if v.mail_host
+            .as_deref()
+            .is_some_and(|host| list.id.mail_host() != host)
+        {
+            continue;
+        }
+        let domain = s.db.domains().get(list.id.mail_host()).await?;
+        if auth.allows_list(&list.id, domain.id) {
+            lists.push(list_value(s.flavor, &list));
+        }
+    }
+    finish_authorization(&s, auth).await?;
+    let page_query = PageQuery {
+        cursor: None,
+        page: v.page,
+        count: v.count,
+    };
+    Ok(Json(paged(s.flavor, lists, &page_query)?))
 }
 #[utoipa::path(
     get,
@@ -1811,9 +2007,14 @@ impl ListInput {
             }
             (None, None) => return Err(Error::Validation("list_id is required".into())),
         };
-        let display_name = self
-            .display_name
-            .unwrap_or_else(|| list_id.list_name().to_owned());
+        // Mailman's default is the list name with its first letter upper-cased
+        // (`str.capitalize()`): `test-1` becomes `Test-1`.
+        let display_name = self.display_name.unwrap_or_else(|| {
+            let mut chars = list_id.list_name().chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(chars).collect()
+            })
+        });
         Ok(NewList {
             list_id,
             display_name,
@@ -1914,7 +2115,7 @@ async fn lists_delete(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<StatusCode> {
-    let id = id.parse()?;
+    let id = parse_list_path(s.flavor, &id)?;
     let addr = peer(c);
     let auth = authorize_list(&s, &h, addr, "lists:write", &id).await?;
     s.db.lists()
@@ -1937,12 +2138,19 @@ async fn styles(
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h, peer(c), "lists:read").await?;
+    let styles = builtin_styles();
+    if matches!(s.flavor, ApiFlavor::Compat31) {
+        // Mailman 3.3's shape: the styles with their descriptions, the
+        // default, and the bare names for older clients.
+        return Ok(Json(json!({
+            "styles": styles.iter().map(|style| json!({"name": style.name(), "description": style.description()})).collect::<Vec<_>>(),
+            "style_names": styles.iter().map(|style| style.name()).collect::<Vec<_>>(),
+            "default": "legacy-default",
+        })));
+    }
     Ok(Json(paged(
         s.flavor,
-        builtin_styles()
-            .iter()
-            .map(|v| v.name())
-            .collect::<Vec<_>>(),
+        styles.iter().map(|v| v.name()).collect::<Vec<_>>(),
         &page_query,
     )?))
 }
@@ -2182,7 +2390,7 @@ async fn list_config_attr(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    let id = id.parse()?;
+    let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
     let v = bounce_config::project(
         s.flavor,
@@ -2201,7 +2409,7 @@ async fn list_config_attr(
     put,
     path = "/api/v1/lists/{id}/config/{attr}",
     params(("id" = String, Path, description = "id path parameter"), ("attr" = String, Path, description = "attr path parameter")),
-    request_body(content = ListConfigAttributeValue, content_type = "application/json"),
+    request_body(content((ListConfigAttributeValue = "application/json"), (ListConfigAttributeValue = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = listmngr_core::MailingList), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -2210,7 +2418,7 @@ async fn list_config_attr_put(
     path: Path<(String, String)>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Value>,
+    body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     list_config_attr_write(state, path, headers, connect, body).await
 }
@@ -2218,7 +2426,7 @@ async fn list_config_attr_put(
     patch,
     path = "/api/v1/lists/{id}/config/{attr}",
     params(("id" = String, Path, description = "id path parameter"), ("attr" = String, Path, description = "attr path parameter")),
-    request_body(content = ListConfigAttributeValue, content_type = "application/json"),
+    request_body(content((ListConfigAttributeValue = "application/json"), (ListConfigAttributeValue = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = listmngr_core::MailingList), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -2227,7 +2435,7 @@ async fn list_config_attr_patch(
     path: Path<(String, String)>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Value>,
+    body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     list_config_attr_write(state, path, headers, connect, body).await
 }
@@ -2236,9 +2444,9 @@ async fn list_config_attr_write(
     Path((id, attr)): Path<(String, String)>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Value>,
+    JsonOrForm(v): JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
-    let id = id.parse()?;
+    let id = parse_list_path(s.flavor, &id)?;
     let addr = peer(c);
     let auth = authorize_list(&s, &h, addr, "lists:write", &id).await?;
     let value = if v.is_object() {
@@ -2274,13 +2482,60 @@ async fn list_archivers(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    let id = id.parse()?;
+    let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
-    Ok(Json(paged(
-        s.flavor,
-        s.db.lists().archivers(&id).await?,
-        &page_query,
-    )?))
+    let stored = s.db.lists().archivers(&id).await?;
+    if matches!(s.flavor, ApiFlavor::Compat31) {
+        // Mailman's shape: every site archiver with its switch.
+        let mut object = serde_json::Map::new();
+        for name in ARCHIVER_NAMES {
+            let on = stored.iter().any(|(stored, on)| stored == name && *on);
+            object.insert((*name).to_owned(), json!(on));
+        }
+        // No `self_link`: the doctest iterates the keys as the archivers.
+        return Ok(Json(Value::Object(object)));
+    }
+    Ok(Json(paged(s.flavor, stored, &page_query)?))
+}
+
+/// The archivers a list can switch on, as `[archive] archivers` and the
+/// settings page know them.
+const ARCHIVER_NAMES: [&str; 3] = ["mail-archive", "mhonarc", "prototype"];
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/lists/{id}/archivers",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content((Object = "application/json"), (Object = "application/x-www-form-urlencoded"))),
+    responses((status = 204, description = "Successful operation"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+/// Mailman's archiver switches: each named archiver on or off (`True`
+/// and `False` strings on a form, booleans in JSON).
+async fn list_archivers_set(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    JsonOrForm(v): JsonOrForm<Value>,
+) -> ApiResult<StatusCode> {
+    let id = parse_list_path(s.flavor, &id)?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "lists:write", &id).await?;
+    let object = v
+        .as_object()
+        .ok_or_else(|| ApiError(Error::Validation("archivers".into())))?;
+    let context = audit_context(&auth, addr);
+    for (name, value) in object {
+        if !ARCHIVER_NAMES.contains(&name.as_str()) {
+            return Err(ApiError(Error::Validation(format!("archiver {name}"))));
+        }
+        let enabled = preference_bool(name, value)?;
+        s.db.lists()
+            .set_archiver_with_context(&id, name, enabled, &context)
+            .await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(
     get,
@@ -2296,7 +2551,7 @@ async fn list_templates(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    let id = id.parse()?;
+    let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "lists:read", &id).await?;
     Ok(Json(paged(
         s.flavor,
@@ -2363,12 +2618,8 @@ where
 async fn member_value(state: &AppState, member: &listmngr_core::Member) -> Result<Value, Error> {
     let mut value = serde_json::to_value(member).expect("member serializes");
     if matches!(state.flavor, ApiFlavor::Compat31) {
-        let email = state
-            .db
-            .addresses()
-            .get_by_id(member.address_id)
-            .await?
-            .email;
+        let address = state.db.addresses().get_by_id(member.address_id).await?;
+        let email = address.email;
         let object = value.as_object_mut().expect("member is an object");
         object.insert("email".into(), json!(email));
         object.insert("address".into(), json!(format!("/3.1/addresses/{email}")));
@@ -2377,6 +2628,11 @@ async fn member_value(state: &AppState, member: &listmngr_core::Member) -> Resul
             json!(format!("/3.1/members/{}", member.id)),
         );
         object.insert("member_id".into(), json!(member.id));
+        // Mailman links the member's user; a membership by address still
+        // belongs to the address's user.
+        if let Some(user) = member.user_id.or(address.user_id) {
+            object.insert("user".into(), json!(format!("/3.1/users/{user}")));
+        }
     }
     Ok(value)
 }
@@ -2558,7 +2814,7 @@ async fn roster(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    let id = id.parse()?;
+    let id = parse_list_path(s.flavor, &id)?;
     authorize_list(&s, &h, peer(c), "members:read", &id).await?;
     let members = s.db.members().roster(&id, role.parse()?).await?;
     let mut entries = Vec::with_capacity(members.len());
@@ -2566,6 +2822,78 @@ async fn roster(
         entries.push(member_value(&s, &member).await?);
     }
     Ok(Json(paged(s.flavor, entries, &page_query)?))
+}
+/// The addresses a mass unsubscribe names: `emails` repeated on a form,
+/// as mailmanclient sends it, or a JSON list.
+fn mass_unsubscribe_emails(headers: &HeaderMap, body: &[u8]) -> Result<Vec<String>, Error> {
+    let json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/json"));
+    if json {
+        #[derive(Deserialize)]
+        struct Emails {
+            emails: Vec<String>,
+        }
+        return serde_json::from_slice::<Emails>(body)
+            .map(|input| input.emails)
+            .map_err(|error| Error::Validation(error.to_string()));
+    }
+    let pairs: Vec<(String, String)> =
+        serde_urlencoded::from_bytes(body).map_err(|error| Error::Validation(error.to_string()))?;
+    Ok(pairs
+        .into_iter()
+        .filter(|(key, _)| key == "emails")
+        .map(|(_, value)| value)
+        .collect())
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/lists/{id}/roster/{role}",
+    params(("id" = String, Path, description = "id path parameter"), ("role" = String, Path, description = "role path parameter")),
+    request_body(content = String, content_type = "application/x-www-form-urlencoded"),
+    responses((status = 200, description = "Each address mapped to whether it was unsubscribed", body = Object), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+/// Mailman's mass unsubscribe: `DELETE …/roster/member` with `emails`,
+/// answering each address with whether it was a member and is now gone.
+async fn roster_mass_unsubscribe(
+    State(s): State<AppState>,
+    Path((id, role)): Path<(String, String)>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    body: String,
+) -> ApiResult<Json<Value>> {
+    let id = parse_list_path(s.flavor, &id)?;
+    let role: MemberRole = role.parse()?;
+    let addr = peer(c);
+    let auth = authorize_list(&s, &h, addr, "members:write", &id).await?;
+    let emails = mass_unsubscribe_emails(&h, body.as_bytes())?;
+    if emails.is_empty() || emails.len() > 1000 {
+        return Err(ApiError(Error::Validation("emails".into())));
+    }
+    let context = audit_context(&auth, addr);
+    let mut outcome = serde_json::Map::new();
+    for email in emails {
+        let member =
+            s.db.members()
+                .find(&email)
+                .await?
+                .into_iter()
+                .find(|member| member.list_id == id && member.role == role);
+        let removed = match member {
+            Some(member) => {
+                s.db.members()
+                    .delete_with_context(member.id, &context)
+                    .await?;
+                true
+            }
+            None => false,
+        };
+        outcome.insert(email, json!(removed));
+    }
+    Ok(Json(Value::Object(outcome)))
 }
 #[utoipa::path(
     get,
@@ -2580,15 +2908,93 @@ async fn list_member(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    let id = id.parse()?;
-    authorize_list(&s, &h, peer(c), "members:read", &id).await?;
-    let values = s.db.members().find(&email).await?;
+    role_membership(&s, &h, c, &id, MemberRole::Member, &email).await
+}
+
+/// Mailman's `lists/{id}/{role}/{email}`: the address's membership in one
+/// role on the list.
+async fn role_membership(
+    s: &AppState,
+    h: &HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    id: &str,
+    role: MemberRole,
+    email: &str,
+) -> ApiResult<Json<Value>> {
+    let id = parse_list_path(s.flavor, id)?;
+    authorize_list(s, h, peer(c), "members:read", &id).await?;
+    let values = s.db.members().find(email).await?;
     let member = values
         .iter()
-        .find(|member| member.list_id == id)
-        .ok_or(ApiError(Error::NotFound(email)))?;
-    Ok(Json(member_value(&s, member).await?))
+        .find(|member| member.list_id == id && member.role == role)
+        .ok_or_else(|| ApiError(Error::NotFound(email.to_owned())))?;
+    Ok(Json(member_value(s, member).await?))
 }
+
+/// Mailman's `DELETE lists/{id}/{role}/{email}` for the administrative
+/// roles: the owner, moderator or nonmember record goes at once.
+async fn role_membership_delete(
+    s: &AppState,
+    h: &HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    id: &str,
+    role: MemberRole,
+    email: &str,
+) -> ApiResult<StatusCode> {
+    let id = parse_list_path(s.flavor, id)?;
+    let addr = peer(c);
+    let auth = authorize_list(s, h, addr, "members:write", &id).await?;
+    let values = s.db.members().find(email).await?;
+    let member = values
+        .iter()
+        .find(|member| member.list_id == id && member.role == role)
+        .ok_or_else(|| ApiError(Error::NotFound(email.to_owned())))?;
+    s.db.members()
+        .delete_with_context(member.id, &audit_context(&auth, addr))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+macro_rules! role_routes {
+    ($get:ident, $delete:ident, $role:expr, $path:literal) => {
+        #[utoipa::path(get, path = $path, params(("id" = String, Path, description = "id path parameter"), ("email" = String, Path, description = "email path parameter")), responses((status = 200, description = "Successful operation", body = listmngr_core::Member), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)), security(("bearerAuth" = [])))]
+        async fn $get(
+            State(s): State<AppState>,
+            Path((id, email)): Path<(String, String)>,
+            h: HeaderMap,
+            c: ConnectInfo<SocketAddr>,
+        ) -> ApiResult<Json<Value>> {
+            role_membership(&s, &h, c, &id, $role, &email).await
+        }
+        #[utoipa::path(delete, path = $path, params(("id" = String, Path, description = "id path parameter"), ("email" = String, Path, description = "email path parameter")), responses((status = 204, description = "Successful operation"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)), security(("bearerAuth" = [])))]
+        async fn $delete(
+            State(s): State<AppState>,
+            Path((id, email)): Path<(String, String)>,
+            h: HeaderMap,
+            c: ConnectInfo<SocketAddr>,
+        ) -> ApiResult<StatusCode> {
+            role_membership_delete(&s, &h, c, &id, $role, &email).await
+        }
+    };
+}
+role_routes!(
+    list_owner,
+    list_owner_delete,
+    MemberRole::Owner,
+    "/api/v1/lists/{id}/owner/{email}"
+);
+role_routes!(
+    list_moderator,
+    list_moderator_delete,
+    MemberRole::Moderator,
+    "/api/v1/lists/{id}/moderator/{email}"
+);
+role_routes!(
+    list_nonmember,
+    list_nonmember_delete,
+    MemberRole::Nonmember,
+    "/api/v1/lists/{id}/nonmember/{email}"
+);
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -2614,7 +3020,7 @@ async fn list_member_delete(
     c: ConnectInfo<SocketAddr>,
     JsonOrForm(input): JsonOrForm<UnsubscribeInput>,
 ) -> ApiResult<StatusCode> {
-    let id = id.parse()?;
+    let id = parse_list_path(s.flavor, &id)?;
     let addr = peer(c);
     let auth = authorize_list(&s, &h, addr, "members:write", &id).await?;
     if !input.pre_confirmed || !input.pre_approved {
@@ -2882,7 +3288,7 @@ async fn members_delete(
     patch,
     path = "/api/v1/members/{id}",
     params(("id" = String, Path, description = "id path parameter")),
-    request_body(content = MemberPatchInput, content_type = "application/json"),
+    request_body(content((MemberPatchInput = "application/json"), (MemberPatchInput = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = listmngr_core::Member), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -2891,7 +3297,7 @@ async fn member_patch(
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Value>,
+    JsonOrForm(v): JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     let id: MemberId = id
         .parse()
@@ -2966,6 +3372,30 @@ async fn members_find(
 }
 #[utoipa::path(
     get,
+    path = "/api/v1/members",
+    params(PageQuery),
+    responses((status = 200, description = "Successful operation", body = MemberPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+/// Every membership the caller may see, by list and then in subscription
+/// order — Mailman's `client.members`.
+async fn members_list(
+    State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<Json<Value>> {
+    let auth = authenticate_for_authorization(&s, &h, peer(c), "members:read").await?;
+    let members = filter_members_for_auth(&s, &auth, s.db.members().all().await?).await?;
+    finish_authorization(&s, auth).await?;
+    let mut entries = Vec::with_capacity(members.len());
+    for member in members {
+        entries.push(member_value(&s, &member).await?);
+    }
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
+}
+#[utoipa::path(
+    get,
     path = "/api/v1/members/{id}/preferences",
     params(("id" = String, Path, description = "id path parameter")),
     responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
@@ -3012,6 +3442,20 @@ async fn member_all_preferences(
         .expect("serialize"),
     ))
 }
+/// A preference boolean as JSON or as the `True`/`False` string a form
+/// carries.
+fn preference_bool(key: &str, value: &Value) -> Result<bool, Error> {
+    match value {
+        Value::Bool(flag) => Ok(*flag),
+        Value::String(text) => match text.to_ascii_lowercase().as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(Error::Validation(key.to_owned())),
+        },
+        _ => Err(Error::Validation(key.to_owned())),
+    }
+}
+
 fn preferences_update(
     current: Preferences,
     value: &Value,
@@ -3031,22 +3475,14 @@ fn preferences_update(
                 result.acknowledge_posts = if value.is_null() {
                     None
                 } else {
-                    Some(
-                        value
-                            .as_bool()
-                            .ok_or_else(|| Error::Validation(key.clone()))?,
-                    )
+                    Some(preference_bool(key, value)?)
                 };
             }
             "hide_address" => {
                 result.hide_address = if value.is_null() {
                     None
                 } else {
-                    Some(
-                        value
-                            .as_bool()
-                            .ok_or_else(|| Error::Validation(key.clone()))?,
-                    )
+                    Some(preference_bool(key, value)?)
                 };
             }
             "preferred_language" => {
@@ -3066,22 +3502,14 @@ fn preferences_update(
                 result.receive_list_copy = if value.is_null() {
                     None
                 } else {
-                    Some(
-                        value
-                            .as_bool()
-                            .ok_or_else(|| Error::Validation(key.clone()))?,
-                    )
+                    Some(preference_bool(key, value)?)
                 };
             }
             "receive_own_postings" => {
                 result.receive_own_postings = if value.is_null() {
                     None
                 } else {
-                    Some(
-                        value
-                            .as_bool()
-                            .ok_or_else(|| Error::Validation(key.clone()))?,
-                    )
+                    Some(preference_bool(key, value)?)
                 };
             }
             "delivery_mode" => {
@@ -3122,7 +3550,7 @@ fn preferences_update(
     put,
     path = "/api/v1/members/{id}/preferences",
     params(("id" = String, Path, description = "id path parameter")),
-    request_body(content = Preferences, content_type = "application/json"),
+    request_body(content((Preferences = "application/json"), (Preferences = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3131,7 +3559,7 @@ async fn member_preferences_put(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Value>,
+    body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     member_preferences_write(state, path, headers, connect, body, true).await
 }
@@ -3139,7 +3567,7 @@ async fn member_preferences_put(
     patch,
     path = "/api/v1/members/{id}/preferences",
     params(("id" = String, Path, description = "id path parameter")),
-    request_body(content = Preferences, content_type = "application/json"),
+    request_body(content((Preferences = "application/json"), (Preferences = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3148,7 +3576,7 @@ async fn member_preferences_patch(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Value>,
+    body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     member_preferences_write(state, path, headers, connect, body, false).await
 }
@@ -3157,7 +3585,7 @@ async fn member_preferences_write(
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Value>,
+    JsonOrForm(v): JsonOrForm<Value>,
     replace: bool,
 ) -> ApiResult<Json<Value>> {
     let id: MemberId = id
@@ -3193,7 +3621,7 @@ async fn users_list(
     let mut users = Vec::new();
     for user in s.db.users().list().await? {
         if auth_allows_user(&s, &auth, user.id).await? {
-            users.push(user);
+            users.push(user_value(s.flavor, &user));
         }
     }
     finish_authorization(&s, auth).await?;
@@ -3202,7 +3630,7 @@ async fn users_list(
 #[utoipa::path(
     post,
     path = "/api/v1/users",
-    request_body(content = listmngr_db::NewUser, content_type = "application/json"),
+    request_body(content((listmngr_db::NewUser = "application/json"), (listmngr_db::NewUser = "application/x-www-form-urlencoded"))),
     responses((status = 201, description = "Successful operation", body = listmngr_core::User), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3210,18 +3638,24 @@ async fn users_create(
     State(s): State<AppState>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<NewUser>,
-) -> ApiResult<impl IntoResponse> {
+    JsonOrForm(v): JsonOrForm<NewUser>,
+) -> ApiResult<Response> {
     let addr = peer(c);
     let auth = authorize_admin(&s, &h, addr, "users:write").await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(
-            s.db.users()
-                .create_with_context(v, &audit_context(&auth, addr))
-                .await?,
-        ),
-    ))
+    let user =
+        s.db.users()
+            .create_with_context(v, &audit_context(&auth, addr))
+            .await?;
+    let value = user_value(s.flavor, &user);
+    Ok(match s.flavor {
+        ApiFlavor::Compat31 => (
+            StatusCode::CREATED,
+            [(header::LOCATION, format!("/3.1/users/{}", user.id))],
+            Json(value),
+        )
+            .into_response(),
+        ApiFlavor::V1 => (StatusCode::CREATED, Json(value)).into_response(),
+    })
 }
 #[utoipa::path(
     get,
@@ -3236,13 +3670,9 @@ async fn users_get(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    let id: UserId = id
-        .parse()
-        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let id = resolve_user_id(&s, &id).await?;
     authorize_user(&s, &h, peer(c), "system:read", id).await?;
-    Ok(Json(
-        serde_json::to_value(s.db.users().get(id).await?).expect("serialize"),
-    ))
+    Ok(Json(user_value(s.flavor, &s.db.users().get(id).await?)))
 }
 #[utoipa::path(
     delete,
@@ -3257,9 +3687,7 @@ async fn users_delete(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<StatusCode> {
-    let id = id
-        .parse()
-        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let id = resolve_user_id(&s, &id).await?;
     let addr = peer(c);
     let auth = authorize_user(&s, &h, addr, "users:write", id).await?;
     s.db.users()
@@ -3271,7 +3699,7 @@ async fn users_delete(
     patch,
     path = "/api/v1/users/{id}",
     params(("id" = String, Path, description = "id path parameter")),
-    request_body(content = UserPatchInput, content_type = "application/json"),
+    request_body(content((UserPatchInput = "application/json"), (UserPatchInput = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = listmngr_core::User), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3280,21 +3708,40 @@ async fn users_patch(
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Value>,
+    JsonOrForm(mut v): JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
-    let id: UserId = id
-        .parse()
-        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let id = resolve_user_id(&s, &id).await?;
     let addr = peer(c);
     let auth = authorize_user(&s, &h, addr, "users:write", id).await?;
-    Ok(Json(
-        serde_json::to_value(
+    let context = audit_context(&auth, addr);
+    // `mailmanclient` saves its writable properties on a form:
+    // `cleartext_password` sets the password, and booleans arrive as
+    // `True`/`False` strings.
+    if let Some(object) = v.as_object_mut() {
+        if let Some(password) = object.remove("cleartext_password") {
+            let password = password
+                .as_str()
+                .ok_or_else(|| ApiError(Error::Validation("cleartext_password".into())))?;
             s.db.users()
-                .update_with_context(id, &v, &audit_context(&auth, addr))
-                .await?,
-        )
-        .expect("serialize"),
-    ))
+                .set_password_with_context(id, password, &context)
+                .await?;
+        }
+        if let Some(Value::String(flag)) = object.get("is_server_owner") {
+            let flag = match flag.to_ascii_lowercase().as_str() {
+                "true" => true,
+                "false" => false,
+                _ => return Err(ApiError(Error::Validation("is_server_owner".into()))),
+            };
+            object.insert("is_server_owner".into(), json!(flag));
+        }
+        if object.is_empty() {
+            return Ok(Json(user_value(s.flavor, &s.db.users().get(id).await?)));
+        }
+    }
+    Ok(Json(user_value(
+        s.flavor,
+        &s.db.users().update_with_context(id, &v, &context).await?,
+    )))
 }
 #[utoipa::path(
     get,
@@ -3347,7 +3794,7 @@ async fn user_all_preferences(
     put,
     path = "/api/v1/users/{id}/preferences",
     params(("id" = String, Path, description = "id path parameter")),
-    request_body(content = Preferences, content_type = "application/json"),
+    request_body(content((Preferences = "application/json"), (Preferences = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3356,7 +3803,7 @@ async fn user_preferences_put(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Value>,
+    body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     user_preferences_write(state, path, headers, connect, body, true).await
 }
@@ -3364,7 +3811,7 @@ async fn user_preferences_put(
     patch,
     path = "/api/v1/users/{id}/preferences",
     params(("id" = String, Path, description = "id path parameter")),
-    request_body(content = Preferences, content_type = "application/json"),
+    request_body(content((Preferences = "application/json"), (Preferences = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3373,7 +3820,7 @@ async fn user_preferences_patch(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Value>,
+    body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     user_preferences_write(state, path, headers, connect, body, false).await
 }
@@ -3382,7 +3829,7 @@ async fn user_preferences_write(
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Value>,
+    JsonOrForm(v): JsonOrForm<Value>,
     replace: bool,
 ) -> ApiResult<Json<Value>> {
     let id = id
@@ -3436,9 +3883,7 @@ async fn user_addresses(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    let id = id
-        .parse()
-        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    let id = resolve_user_id(&s, &id).await?;
     let auth = authenticate_for_authorization(&s, &h, peer(c), "system:read").await?;
     if !auth_allows_user(&s, &auth, id).await? {
         return Err(ApiError(Error::Forbidden("system:read".into())));
@@ -3447,7 +3892,7 @@ async fn user_addresses(
     let mut entries = Vec::new();
     for address in s.db.addresses().by_user(id).await? {
         if auth_allows_address(&s, &auth, &address.email).await? {
-            entries.push(address);
+            entries.push(address_value(s.flavor, &address));
         }
     }
     finish_authorization(&s, auth).await?;
@@ -3456,12 +3901,27 @@ async fn user_addresses(
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 struct LinkInput {
     email: String,
+    /// Mailman's `absorb_existing`: take the address from another account
+    /// (`1`, `true` or `True` on a form).
+    #[serde(default)]
+    absorb_existing: Option<Value>,
+}
+
+impl LinkInput {
+    fn absorbs(&self) -> bool {
+        match &self.absorb_existing {
+            Some(Value::Bool(flag)) => *flag,
+            Some(Value::Number(number)) => number.as_i64() == Some(1),
+            Some(Value::String(text)) => matches!(text.to_ascii_lowercase().as_str(), "1" | "true"),
+            _ => false,
+        }
+    }
 }
 #[utoipa::path(
     post,
     path = "/api/v1/users/{id}/addresses",
     params(("id" = String, Path, description = "id path parameter")),
-    request_body(content = LinkInput, content_type = "application/json"),
+    request_body(content((LinkInput = "application/json"), (LinkInput = "application/x-www-form-urlencoded"))),
     responses((status = 201, description = "Successful operation", body = listmngr_core::Address), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3470,21 +3930,133 @@ async fn user_address_link(
     Path(id): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<LinkInput>,
-) -> ApiResult<Json<Value>> {
-    let id = id
-        .parse()
-        .map_err(|_| ApiError(Error::Validation("user id".into())))?;
+    JsonOrForm(v): JsonOrForm<LinkInput>,
+) -> ApiResult<Response> {
+    let id = resolve_user_id(&s, &id).await?;
     let addr = peer(c);
     let auth = authorize_user_and_address(&s, &h, addr, "users:write", id, &v.email).await?;
-    Ok(Json(
-        serde_json::to_value(
+    let context = audit_context(&auth, addr);
+    let address = match s.flavor {
+        // Mailman creates an unknown address for the account and adopts
+        // one nobody owns; the native flavour keeps its relink semantics.
+        ApiFlavor::Compat31 => {
             s.db.addresses()
-                .link_with_context(&v.email, Some(id), &audit_context(&auth, addr))
-                .await?,
+                .add_to_user_with_context(&v.email, id, v.absorbs(), &context)
+                .await?
+        }
+        ApiFlavor::V1 => {
+            s.db.addresses()
+                .link_with_context(&v.email, Some(id), &context)
+                .await?
+        }
+    };
+    let value = address_value(s.flavor, &address);
+    Ok(match s.flavor {
+        ApiFlavor::Compat31 => (
+            StatusCode::CREATED,
+            [(
+                header::LOCATION,
+                format!("/3.1/addresses/{}", address.email),
+            )],
+            Json(value),
         )
-        .expect("serialize"),
-    ))
+            .into_response(),
+        ApiFlavor::V1 => Json(value).into_response(),
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/users/{id}/preferred_address",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 200, description = "Successful operation", body = listmngr_core::Address), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+/// The account's preferred address; 404 while none is set, as Mailman.
+async fn user_preferred_address(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<Json<Value>> {
+    let id = resolve_user_id(&s, &id).await?;
+    authorize_user(&s, &h, peer(c), "system:read", id).await?;
+    let user = s.db.users().get(id).await?;
+    let preferred = user
+        .preferred_address_id
+        .ok_or_else(|| ApiError(Error::NotFound("preferred address".into())))?;
+    Ok(Json(address_value(
+        s.flavor,
+        &s.db.addresses().get_by_id(preferred).await?,
+    )))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/users/{id}/preferred_address",
+    params(("id" = String, Path, description = "id path parameter")),
+    request_body(content((LinkInput = "application/json"), (LinkInput = "application/x-www-form-urlencoded"))),
+    responses((status = 204, description = "Successful operation"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+async fn user_preferred_address_set(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+    JsonOrForm(v): JsonOrForm<LinkInput>,
+) -> ApiResult<StatusCode> {
+    let id = resolve_user_id(&s, &id).await?;
+    let addr = peer(c);
+    let auth = authorize_user_and_address(&s, &h, addr, "users:write", id, &v.email).await?;
+    s.db.users()
+        .set_preferred_address_with_context(id, Some(&v.email), &audit_context(&auth, addr))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/users/{id}/preferred_address",
+    params(("id" = String, Path, description = "id path parameter")),
+    responses((status = 204, description = "Successful operation"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+async fn user_preferred_address_unset(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<StatusCode> {
+    let id = resolve_user_id(&s, &id).await?;
+    let addr = peer(c);
+    let auth = authorize_user(&s, &h, addr, "users:write", id).await?;
+    s.db.users()
+        .set_preferred_address_with_context(id, None, &audit_context(&auth, addr))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/addresses/{email}",
+    params(("email" = String, Path, description = "email path parameter")),
+    responses((status = 204, description = "Successful operation"), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+/// Mailman's address deletion; an address with memberships is a conflict.
+async fn address_delete(
+    State(s): State<AppState>,
+    Path(email): Path<String>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<StatusCode> {
+    let addr = peer(c);
+    let auth = authorize_address(&s, &h, addr, "users:write", &email).await?;
+    s.db.addresses()
+        .delete_with_context(&email, &audit_context(&auth, addr))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -3501,9 +4073,10 @@ async fn address_get(
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
     authorize_address(&s, &h, peer(c), "system:read", &email).await?;
-    Ok(Json(
-        serde_json::to_value(s.db.addresses().get(&email).await?).expect("serialize"),
-    ))
+    Ok(Json(address_value(
+        s.flavor,
+        &s.db.addresses().get(&email).await?,
+    )))
 }
 #[utoipa::path(
     post,
@@ -3691,7 +4264,7 @@ async fn address_all_preferences(
     put,
     path = "/api/v1/addresses/{email}/preferences",
     params(("email" = String, Path, description = "email path parameter")),
-    request_body(content = Preferences, content_type = "application/json"),
+    request_body(content((Preferences = "application/json"), (Preferences = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3700,7 +4273,7 @@ async fn address_preferences_put(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Value>,
+    body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     address_preferences_write(state, path, headers, connect, body, true).await
 }
@@ -3708,7 +4281,7 @@ async fn address_preferences_put(
     patch,
     path = "/api/v1/addresses/{email}/preferences",
     params(("email" = String, Path, description = "email path parameter")),
-    request_body(content = Preferences, content_type = "application/json"),
+    request_body(content((Preferences = "application/json"), (Preferences = "application/x-www-form-urlencoded"))),
     responses((status = 200, description = "Successful operation", body = Preferences), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
     security(("bearerAuth" = []))
 )]
@@ -3717,7 +4290,7 @@ async fn address_preferences_patch(
     path: Path<String>,
     headers: HeaderMap,
     connect: ConnectInfo<SocketAddr>,
-    body: Json<Value>,
+    body: JsonOrForm<Value>,
 ) -> ApiResult<Json<Value>> {
     address_preferences_write(state, path, headers, connect, body, false).await
 }
@@ -3726,7 +4299,7 @@ async fn address_preferences_write(
     Path(email): Path<String>,
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
-    Json(v): Json<Value>,
+    JsonOrForm(v): JsonOrForm<Value>,
     replace: bool,
 ) -> ApiResult<Json<Value>> {
     let addr = peer(c);

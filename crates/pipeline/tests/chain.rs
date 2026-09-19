@@ -338,18 +338,14 @@ fn the_terminal_carries_the_reason_of_the_rule_that_jumped_to_it() {
 #[test]
 fn the_moderation_chain_maps_the_resolved_action_to_a_terminal() {
     let registry = builtin();
+    // The fixture context is a member's, so the member rule's reason.
+    let reason = "The message comes from a moderated member";
     for (action, expected) in [
-        (
-            ModerationAction::Hold,
-            Disposition::Hold("moderation policy".into()),
-        ),
-        (
-            ModerationAction::Reject,
-            Disposition::Reject("moderation policy".into()),
-        ),
+        (ModerationAction::Hold, Disposition::Hold(reason.into())),
+        (ModerationAction::Reject, Disposition::Reject(reason.into())),
         (
             ModerationAction::Discard,
-            Disposition::Discard("moderation policy".into()),
+            Disposition::Discard(reason.into()),
         ),
         (ModerationAction::Accept, Disposition::Accept),
         (ModerationAction::Defer, Disposition::Accept),
