@@ -86,7 +86,7 @@ impl<'a> BounceProcessingRepo<'a> {
             .as_str()
             .ok_or_else(|| Error::Validation("bounce without a list".into()))?
             .parse()?;
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let queue = self.queue();
         let now = queue.lock_time(&mut tx, lease, now_ms).await?;
         let disposition: Option<String> = sqlx::query_scalar(

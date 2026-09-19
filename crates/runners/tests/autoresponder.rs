@@ -120,7 +120,7 @@ async fn outgoing(db: &Database) -> Vec<(String, String, String)> {
 #[tokio::test]
 async fn the_owner_address_answers_and_still_forwards_unless_told_to_discard() {
     let (db, mut handler) = fixture(json!({
-        "autorespond_owner": "respond",
+        "autorespond_owner": "respond_and_continue",
         "autoresponse_owner_text": "Owners of $listname reply within a week.",
     }))
     .await;
@@ -170,7 +170,7 @@ async fn the_owner_address_answers_and_still_forwards_unless_told_to_discard() {
 #[tokio::test]
 async fn the_request_address_answers_and_discarding_skips_the_command() {
     let (db, mut handler) = fixture(json!({
-        "autorespond_requests": "respond",
+        "autorespond_requests": "respond_and_continue",
     }))
     .await;
     deliver(&mut handler, "test-request@example.com", "help").await;
@@ -193,7 +193,7 @@ async fn the_request_address_answers_and_discarding_skips_the_command() {
 #[tokio::test]
 async fn the_posting_address_answers_and_discarding_never_delivers() {
     let (db, mut handler) = fixture(json!({
-        "autorespond_postings": "respond",
+        "autorespond_postings": "respond_and_continue",
         "autoresponse_postings_text": "Got it.",
     }))
     .await;

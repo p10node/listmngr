@@ -28,7 +28,7 @@ async fn automatic_response_settings_round_trip_and_validate() {
         let patch = json!({
             "autorespond_owner": "respond_and_discard",
             "autoresponse_owner_text": "Owners of $listname answer weekly.",
-            "autorespond_requests": "respond",
+            "autorespond_requests": "respond_and_continue",
             "autoresponse_grace_period": 7,
         });
         let saved =
@@ -42,14 +42,17 @@ async fn automatic_response_settings_round_trip_and_validate() {
             saved["autoresponse_owner_text"],
             "Owners of $listname answer weekly."
         );
-        assert_eq!(saved["autorespond_requests"], "respond");
+        assert_eq!(saved["autorespond_requests"], "respond_and_continue");
         assert_eq!(saved["autorespond_postings"], "none");
         assert_eq!(saved["autoresponse_grace_period"], 7);
 
         // mailmanclient posts forms.
         let form = "autorespond_postings=respond&autoresponse_postings_text=Got%20it.&autoresponse_grace_period=0";
         let saved = response_json(call_form(&app, "PATCH", &uri, &token, form).await).await;
-        assert_eq!(saved["autorespond_postings"], "respond", "{prefix}");
+        assert_eq!(
+            saved["autorespond_postings"], "respond_and_continue",
+            "{prefix}"
+        );
         assert_eq!(saved["autoresponse_postings_text"], "Got it.");
         assert_eq!(saved["autoresponse_grace_period"], 0);
 

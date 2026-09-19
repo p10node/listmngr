@@ -1617,7 +1617,8 @@ async fn preferences_and_token_revoke_roll_back_when_audit_is_sabotaged() {
             .await
             .unwrap()
             .hide_address,
-        Some(false)
+        // Mailman's system default, since no layer set it.
+        Some(true)
     );
     assert!(db.tokens().authenticate(&issued.token).await.is_ok());
 

@@ -90,17 +90,24 @@ fn value(state: &AppState, request: &PendingRequest) -> Value {
             request.id, request.requested_at
         ))
     );
-    json!(RequestResponse {
+    let mut value = json!(RequestResponse {
         email: request.email.clone(),
         display_name: request.display_name.clone(),
         list_id: request.list_id.to_string(),
         token: request.id.clone(),
         token_owner: token_owner.into(),
         kind: kind(request.action).into(),
-        request_date,
+        request_date: request_date.clone(),
         self_link: format!("{prefix}/lists/{}/requests/{}", request.list_id, request.id),
         http_etag: etag,
-    })
+    });
+    // Mailman names the request's time `when`; mailmanclient reads it.
+    if matches!(state.flavor, crate::ApiFlavor::Compat31)
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("when".into(), json!(request_date));
+    }
+    value
 }
 
 fn filter_of(query: &RequestQuery) -> ApiResult<RequestFilter> {

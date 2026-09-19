@@ -271,7 +271,7 @@ impl<'a> MailQueueRepo<'a> {
             .checked_add(lease_ms)
             .filter(|_| lease_ms > 0)
             .ok_or_else(|| Error::Validation("lease must be positive and not overflow".into()))?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let now_ms = self.lock_time(&mut tx, lease, now_ms).await?;
         let until = now_ms
             .checked_add(lease_ms)
@@ -304,7 +304,7 @@ impl<'a> MailQueueRepo<'a> {
                 "unshunt target must be a live processing queue".into(),
             ));
         }
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let row = sqlx::query("UPDATE queue_jobs SET queue=$1,state='ready',attempts=0,run_after=$2,last_error='',locked_by=NULL,lease_token=NULL,lease_until=NULL WHERE id=$3 AND state='shunted' RETURNING *")
             .bind(queue_name(target)).bind(now_ms).bind(id.0.to_string())
             .fetch_optional(&mut *tx).await.map_err(db_error)?
@@ -354,7 +354,7 @@ impl<'a> MailQueueRepo<'a> {
         plan: Option<&RecipientPlan>,
         effects: Option<&AcceptEffects<'_>>,
     ) -> Result<(QueueJob, Vec<QueueJob>)> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let now_ms = self.lock_time(&mut tx, lease, now_ms).await?;
         let deadline = Self::locked_deadline(&mut tx, lease).await?;
         let source = ack_leased_job(&mut tx, lease, now_ms).await?;
@@ -503,7 +503,7 @@ impl<'a> MailQueueRepo<'a> {
         recipients: &[String],
         issuer: Option<&listmngr_core::dsn_issuance::Issuer>,
     ) -> Result<Vec<String>> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let now_ms = self.lock_time(&mut tx, lease, now_ms).await?;
         let row = sqlx::query("UPDATE queue_jobs SET last_error=last_error WHERE id=$1 AND state='leased' AND lease_token=$2 AND lease_until>$3 RETURNING *")
             .bind(lease.job.id.0.to_string()).bind(&lease.token).bind(now_ms)
@@ -679,7 +679,7 @@ impl<'a> MailQueueRepo<'a> {
         let delay = due
             .checked_sub(now_ms)
             .ok_or_else(|| Error::Validation("delay overflow".into()))?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let now_ms = self.lock_time(&mut tx, lease, now_ms).await?;
         let due = now_ms
             .checked_add(delay)
@@ -782,7 +782,7 @@ impl<'a> MailQueueRepo<'a> {
         if inputs.iter().any(|input| input.max_attempts <= 0) {
             return Err(Error::Validation("max_attempts must be positive".into()));
         }
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let mut jobs = Vec::with_capacity(inputs.len());
         for input in inputs {
             let key = format!("{:x}", Sha256::digest(&input.raw));

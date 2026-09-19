@@ -315,7 +315,8 @@ async fn mailman_create_list_accepts_fqdn_and_returns_followable_canonical_links
     assert_eq!(body["self_link"], "/3.1/lists/dev.example.com");
     assert_eq!(body["list_id"], "dev.example.com");
     assert_eq!(body["fqdn_listname"], "dev@example.com");
-    assert_eq!(body["display_name"], "dev");
+    // Mailman's default display name is the list name capitalised.
+    assert_eq!(body["display_name"], "Dev");
 
     let followed = call(
         &app,

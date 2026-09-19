@@ -64,7 +64,7 @@ impl<'a> OwnerMailRepo<'a> {
         ) {
             return Err(Error::Validation("unsafe owner forwarding request".into()));
         }
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let locked = sqlx::query("UPDATE mailing_lists SET list_id=list_id WHERE list_id=$1")
             .bind(list.as_str())
             .execute(&mut *tx)
