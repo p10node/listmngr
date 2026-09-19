@@ -919,6 +919,7 @@ pub fn router(db: Database, config: Config) -> Router {
     // URLs) and the site's name and owner address.
     let db = db
         .with_base_url(&config.site.base_url)
+        .with_mail_archive_address(&config.archive.archivers.mail_archive_address)
         .with_site(&config.site.name, &config.site.site_owner);
     let pre_auth_rate = RateLimiter::from_config(
         config
