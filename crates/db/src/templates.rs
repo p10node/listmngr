@@ -178,7 +178,7 @@ impl TemplateRepo<'_> {
         }
         self.ensure_scope(scope).await?;
         let (kind, id) = scope.column_values();
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         sqlx::query("INSERT INTO templates(id,name,scope,scope_id,language,uri,body,username,password) VALUES($1,$2,$3,$4,$5,$6,NULL,$7,$8) ON CONFLICT(name,scope,scope_id,language) DO UPDATE SET uri=excluded.uri, body=NULL, username=excluded.username, password=excluded.password")
             .bind(Uuid::now_v7().to_string()).bind(name).bind(kind).bind(&id).bind(DEFAULT_LANGUAGE).bind(uri).bind(username).bind(password)
             .execute(&mut *tx).await.map_err(db_error)?;
@@ -225,7 +225,7 @@ impl TemplateRepo<'_> {
         context: &AuditContext,
     ) -> Result<()> {
         self.ensure_scope(scope).await?;
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::set_body_tx(&mut tx, scope, name, language, body, context).await?;
         tx.commit().await.map_err(db_error)
     }
@@ -278,7 +278,7 @@ impl TemplateRepo<'_> {
         context: &AuditContext,
     ) -> Result<()> {
         self.ensure_scope(scope).await?;
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::delete_tx(&mut tx, scope, name, context).await?;
         tx.commit().await.map_err(db_error)
     }
@@ -334,7 +334,7 @@ impl TemplateRepo<'_> {
         list: &MailingList,
         language: &str,
     ) -> Result<Resolved> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let resolved = resolve_tx(&mut tx, name, list, language).await?;
         tx.commit().await.map_err(db_error)?;
         Ok(resolved)

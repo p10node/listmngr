@@ -321,6 +321,11 @@ impl Rule for SuspiciousHeader {
     }
 }
 
+/// Mailman's hold reasons for the two moderation rules, word for word:
+/// they reach the moderator, the held-message resource and the notices.
+pub const MEMBER_MODERATION_REASON: &str = "The message comes from a moderated member";
+pub const NONMEMBER_MODERATION_REASON: &str = "The message is not from a list member";
+
 /// The sender holds a membership on this list and their action is not
 /// `defer`. Records the action for the `moderation` chain; an explicit
 /// `accept` therefore bypasses the deferred checks, as in Mailman.
@@ -337,7 +342,8 @@ impl Rule for MemberModeration {
             return None;
         }
         state.moderation_action = Some(action);
-        Some("moderation policy".to_owned())
+        // Mailman's reason for this rule, as the held message reports it.
+        Some(MEMBER_MODERATION_REASON.to_owned())
     }
 }
 
@@ -385,7 +391,7 @@ impl Rule for NonmemberModeration {
             return None;
         }
         state.moderation_action = Some(action);
-        Some("moderation policy".to_owned())
+        Some(NONMEMBER_MODERATION_REASON.to_owned())
     }
 }
 

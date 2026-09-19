@@ -67,7 +67,7 @@ impl SiteNoticeRepo<'_> {
         placeholders: Placeholders,
         now_ms: i64,
     ) -> Result<()> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         self.enqueue_tx(&mut tx, notice, placeholders, now_ms)
             .await?;
         Database::record_tx_with_context(

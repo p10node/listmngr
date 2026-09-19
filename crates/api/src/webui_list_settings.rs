@@ -92,7 +92,7 @@ const ACTIONS: Options = &[
 ];
 const RESPONSE: Options = &[
     ("none", "web-ls-response-none"),
-    ("respond", "web-ls-response-respond"),
+    ("respond_and_continue", "web-ls-response-respond"),
     ("respond_and_discard", "web-ls-response-discard"),
 ];
 const FILTER_ACTION: Options = &[

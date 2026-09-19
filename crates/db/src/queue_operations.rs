@@ -37,7 +37,7 @@ impl Database {
                 "acknowledgement requires a bounded, single-line reason".into(),
             ));
         }
-        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.write_tx().await?;
         // First statement acquires the writer/row lock and rechecks authority.
         // No lease is stolen, even if a worker claims while this statement waits.
         let changed = sqlx::query(
@@ -89,7 +89,7 @@ impl Database {
                 "retry requires explicit duplicate-risk acknowledgement".into(),
             ));
         }
-        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.write_tx().await?;
         // First statement is a conditional write: acquires the row/writer lock
         // before inspecting recipients on both PostgreSQL and SQLite.
         let locked = sqlx::query("UPDATE queue_jobs SET last_error=last_error WHERE id=$1 AND ((queue='out' AND state='done') OR (queue='shunt' AND state='shunted'))")

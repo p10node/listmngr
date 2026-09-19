@@ -75,7 +75,7 @@ impl BounceMaintenanceRepository<'_> {
         id: &str,
         clock: &(impl Fn() -> DateTime<Utc> + Sync),
     ) -> Result<Action> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         match maintain(&mut tx, self.db, id, clock).await {
             Ok(action) => {
                 tx.commit().await.map_err(db_error)?;

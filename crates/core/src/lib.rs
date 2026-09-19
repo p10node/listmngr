@@ -301,7 +301,9 @@ string_enum!(Personalization { None => "none", Individual => "individual", Full 
 // Mailman's `digest_volume_frequency`: how often the digest volume rolls.
 string_enum!(DigestFrequency { Yearly => "yearly", Monthly => "monthly", Quarterly => "quarterly", Weekly => "weekly", Daily => "daily" });
 // Mailman's `ResponseAction`: what the list does with mail it answers.
-string_enum!(ResponseAction { None => "none", Respond => "respond", RespondAndDiscard => "respond_and_discard" });
+// Mailman's `ResponseAction` names: `respond_and_continue` is what Postorius
+// and mailmanclient send; the pre-parity spelling `respond` is still read.
+string_enum!(ResponseAction { None => "none", RespondAndContinue => "respond_and_continue", RespondAndDiscard => "respond_and_discard" });
 string_enum!(SubscriptionPolicy { Open => "open", Confirm => "confirm", Moderate => "moderate", ConfirmThenModerate => "confirm_then_moderate" });
 string_enum!(RosterVisibility { Public => "public", Members => "members", Moderators => "moderators" });
 string_enum!(UnrecognizedBounceDisposition { Discard => "discard", SiteOwner => "site_owner", Administrators => "administrators" });
@@ -353,7 +355,9 @@ impl Preferences {
     pub const fn system_defaults(language: String) -> Self {
         Self {
             acknowledge_posts: Some(false),
-            hide_address: Some(false),
+            // Mailman's system default: an address is hidden from the
+            // roster unless the member says otherwise.
+            hide_address: Some(true),
             preferred_language: Some(language),
             receive_list_copy: Some(true),
             receive_own_postings: Some(true),
@@ -860,6 +864,9 @@ pub struct Member {
 
 pub trait ListStyle: fmt::Debug + Send + Sync {
     fn name(&self) -> &'static str;
+    /// Mailman's one-line description of the style, as `/lists/styles`
+    /// reports it.
+    fn description(&self) -> &'static str;
     fn apply(&self, list: &mut MailingList);
 }
 
@@ -870,6 +877,13 @@ struct BuiltinStyle {
 impl ListStyle for BuiltinStyle {
     fn name(&self) -> &'static str {
         self.name
+    }
+    fn description(&self) -> &'static str {
+        match self.name {
+            "legacy-announce" => "Announce only mailing list style.",
+            "private-default" => "Discussion mailing list style with private archives.",
+            _ => "Ordinary discussion mailing list style.",
+        }
     }
     fn apply(&self, list: &mut MailingList) {
         list.style_name = self.name.into();

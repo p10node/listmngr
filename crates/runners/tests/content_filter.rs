@@ -379,7 +379,10 @@ async fn a_chain_rejection_tells_the_author_why_and_a_chain_discard_is_silent() 
                 .body_text(0)
                 .unwrap()
                 .into_owned();
-            assert!(body.contains("moderation policy"), "{body}");
+            assert!(
+                body.contains("The message is not from a list member"),
+                "{body}"
+            );
         }
     }
 }
