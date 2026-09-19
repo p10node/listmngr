@@ -1246,6 +1246,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a31d2a3fbaaeb2af2368bbdd904aa8e812d3c04a1ee10d3171f52d556e5d0a3"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1318,6 +1333,7 @@ version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
 dependencies = [
+ "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -2080,6 +2096,7 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
+ "flate2",
  "listmngr-api",
  "listmngr-archive",
  "listmngr-core",
@@ -2111,6 +2128,8 @@ dependencies = [
  "chrono",
  "ciborium",
  "dashmap",
+ "flate2",
+ "futures",
  "http",
  "ipnet",
  "listmngr-archive",
@@ -2152,6 +2171,7 @@ dependencies = [
  "pulldown-cmark",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tantivy",
  "tempfile",

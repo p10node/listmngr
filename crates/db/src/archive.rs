@@ -9,6 +9,8 @@ use sqlx::Row;
 pub mod browse;
 #[path = "browser_archive.rs"]
 mod browser;
+#[path = "archive_import.rs"]
+pub mod import;
 #[path = "archive_interact.rs"]
 pub mod interact;
 enum Selection<'a> {
@@ -134,6 +136,14 @@ fn index_row(row: &sqlx::any::AnyRow) -> Result<IndexRow> {
         date_ms: row.try_get("date_ms").map_err(db_error)?,
         created_at: row.try_get("created_at").map_err(db_error)?,
     })
+}
+
+/// The first `From` mailbox of a parsed message: name and address, each
+/// bounded. The importer parses outside this crate and needs the same
+/// projection the archive runner stores.
+#[must_use]
+pub fn sender_of(parsed: &mail_parser::Message<'_>) -> (String, String) {
+    sender(parsed)
 }
 
 /// The first `From` mailbox of the cooked copy: name and address.

@@ -1,5 +1,50 @@
 # listmngr
 
+## Archive import and export (`P5-MBOX`) — bounded local acceptance verified
+
+`listmngr archive import <list> <file>` reads an mbox in `mboxrd` form (a
+`.gz` file is decompressed on the way in) and stores every message in the
+list's archive — five hundred a transaction by default (`--batch`) — with
+the same Message-ID-Hash, threading, sender, date and attachments a
+message arriving by mail is stored with. A post already archived under
+the same hash is skipped, so importing the same file twice stores nothing
+the second time; bytes that will not parse as a message are skipped and
+counted; a message without a `Message-ID` is given one derived from its
+own bytes, written into the stored copy so that its hash and its headers
+agree. The list must keep an archive: `archive_policy = never` and an
+unknown list are both refused before a byte of the file is read. Every
+batch commits its rows and one `archive.import` audit event together. The
+importer writes the database only — run `listmngr archive reindex`
+afterwards to put the imported posts into the search index.
+
+`listmngr archive export <list>` writes an archive back out as `mboxrd`:
+everything, one thread (`--thread <hash>`) or one month (`--month
+YYYY-MM`), to a file (`--output`) or to standard output, gzipped with
+`--gzip`. The browser has the same export at `…/archive/export.mbox` and
+`…/archive/export.mbox.gz` (`?thread=`, `?month=`), linked from the
+archive navigation, from a thread's "About this thread" and from a
+month's thread list. It reads a page of messages at a time and streams
+them, so a large archive never sits in memory, and the browser export is
+authorized once, before the first page, under the list's archive policy
+for the session: a public archive opens to anyone, a private one to a
+verified member (a visitor gets 403), and `never` is 404. Both exports
+write the archive's published copy — the same projection the archive
+pages apply — so an anonymous list's authors stay hidden in the file.
+
+Performance: the manual benchmark `import_100k_posts_in_under_ten_minutes`
+imports a hundred thousand synthetic posts through the real binary and
+asserts it finishes in under ten minutes; the numbers of the local run
+are in the ledger.
+
+Limits: the command line applies no archive policy on export (it is the
+operator's tool; the browser export authorizes); an imported post is not
+searchable until a reindex; the page's older `?format=mbox` download (the
+twenty messages of the page) is unchanged and separate; a selection is a
+whole archive, one thread or one calendar month — nothing narrower; the
+`From ` separator carries a fixed epoch date, as Mailman's exports do;
+an interrupted import resumes only in the sense that the messages already
+stored are skipped on the next run.
+
 ## Posting from the web (`P5-WEB-POST`) — bounded local acceptance verified
 
 A signed-in reader who holds a verified address subscribed to the list

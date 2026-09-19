@@ -9,6 +9,8 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+flate2.workspace = true
+futures.workspace = true
 askama.workspace = true
 listmngr-archive = { path = "../archive", version = "0.1.0" }
 axum = { workspace = true, features = ["multipart"] }

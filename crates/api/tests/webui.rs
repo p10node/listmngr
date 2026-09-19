@@ -2,6 +2,8 @@
 mod addresses;
 #[path = "webui/admin_pagination.rs"]
 mod admin_pagination;
+#[path = "webui/archive_export.rs"]
+mod archive_export;
 #[path = "webui/archive_interactions.rs"]
 mod archive_interactions;
 #[path = "webui/archive_post.rs"]
