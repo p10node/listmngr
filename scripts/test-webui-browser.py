@@ -1,5 +1,6 @@
 """Disposable Chromium acceptance. No cookies/passwords/tokens written to evidence."""
 import base64
+import gzip
 import re
 import hashlib
 import hmac
@@ -717,6 +718,10 @@ with sync_playwright() as p:
     denied_attachment = context.request.get(base + '/web/lists/private.example.com/archive?message=private-browser-archive&attachment=0')
     assert denied_attachment.status == 403
     assert denied_attachment.body() != b'\xe9\x00\xff'
+    # P5-MBOX: the streamed export is refused to a visitor of a private archive.
+    denied_export = context.request.get(base + '/web/lists/private.example.com/archive/export.mbox')
+    assert denied_export.status == 403, denied_export.status
+    assert 'Private archived body' not in denied_export.text()
     page.set_viewport_size({'width': 390, 'height': 844})
     page.screenshot(path=str(out / '07-mobile-directory.png'), full_page=True)
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'no horizontal overflow'
@@ -789,6 +794,27 @@ with sync_playwright() as p:
         assert b'Archived text <script>unsafe</script>' in payload
     finally:
         exported.close()
+    # P5-MBOX: the archive's own mbox export, streamed under the policy, and
+    # its gzipped address; a private archive refuses a visitor.
+    page.goto(base + '/web/lists/public.example.com/archive/overview')
+    with page.expect_download() as export_info:
+        page.get_by_role('link', name='Download the archive (mbox)', exact=True).click()
+    archive_export = export_info.value
+    assert archive_export.suggested_filename == 'public.example.com-all.mbox', (
+        archive_export.suggested_filename
+    )
+    export_path = out / 'public-archive-all.mbox'
+    archive_export.save_as(str(export_path))
+    whole = mailbox.mbox(str(export_path), create=False)
+    try:
+        subjects = [str(message['Subject']) for message in whole]
+        assert any(subject.endswith('Browser archive fixture') for subject in subjects), subjects
+    finally:
+        whole.close()
+    gzipped = context.request.get(base + '/web/lists/public.example.com/archive/export.mbox.gz')
+    assert gzipped.status == 200, gzipped.status
+    assert gzipped.headers['content-type'] == 'application/gzip', gzipped.headers
+    assert gzip.decompress(gzipped.body()).startswith(b'From archive@localhost '), 'gzip export'
     # P4-SHELL: one template shell — document language, current-page marking,
     # both colour schemes, and no third-party asset on any page.
     page.goto(base + '/web')
@@ -869,6 +895,6 @@ with sync_playwright() as p:
     else:
         print('AXE SKIPPED: set WEBUI_AXE_SCRIPT to a local axe.min.js to scan.', flush=True)
     assert not errors, errors
-    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials. Settings groups previewed/refused inline/saved, a header rule added, tested and removed, a ban added and lifted, a template previewed, saved and removed, and the delete confirmation refused a wrong id. Member rosters per role, an htmx search swap, mass subscription with outcomes, a member\'s options and bounce reset, a CSV export, and removals by button and by pasted address. Held queue with a rendered preview, the sender moderated from the post, two posts discarded in bulk, one accepted by keyboard, and a subscription request accepted. A list created from the administration index, a taken id refused inline, the directory searched and filtered by domain with the owner badge, and the new list\'s summary with its addresses. A domain added, an owner seated and removed, a mistyped deletion refused, the empty domain deleted, an account searched, opened and renamed, its data exported as JSON and its erasure refused as the last server owner. The system page with redacted configuration and queues, and the audit log filtered by action. The cross-list moderation page carrying every held post and request.')
+    print(f'CHROMIUM PASS ({browser.version}): rendered CSS; login; saved preference; public request/confirm; escaped held source; accept; logout; public archive/search/thread; the archive downloaded whole as mbox and as gzip with a private archive\'s export refused; mobile layout; second factor enrolled from the shown secret, two-step login with a drifted app code and once with a recovery code; a passkey registered through a virtual authenticator, used for a passwordless login and removed; profile edited with the interface language switching to Vietnamese and back; a second address added unverified; a bound API token minted, shown once and revoked; the delete-account confirmation reached; own session listed and ended; anonymous signup accepted and the verification page prefilled; a reset requested for a verified account; shell language/current-page/dark scheme/Vietnamese negotiation; CSP header and origin-served htmx; zero console/page errors. Screenshots contain no credentials. Settings groups previewed/refused inline/saved, a header rule added, tested and removed, a ban added and lifted, a template previewed, saved and removed, and the delete confirmation refused a wrong id. Member rosters per role, an htmx search swap, mass subscription with outcomes, a member\'s options and bounce reset, a CSV export, and removals by button and by pasted address. Held queue with a rendered preview, the sender moderated from the post, two posts discarded in bulk, one accepted by keyboard, and a subscription request accepted. A list created from the administration index, a taken id refused inline, the directory searched and filtered by domain with the owner badge, and the new list\'s summary with its addresses. A domain added, an owner seated and removed, a mistyped deletion refused, the empty domain deleted, an account searched, opened and renamed, its data exported as JSON and its erasure refused as the last server owner. The system page with redacted configuration and queues, and the audit log filtered by action. The cross-list moderation page carrying every held post and request.')
     context.close()
     browser.close()

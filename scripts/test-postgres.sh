@@ -112,6 +112,8 @@ cargo test --locked -p listmngr-api --test webui \
   archive_interactions::postgres_archive_interactions_contract -- --ignored --exact
 cargo test --locked -p listmngr-api --test webui \
   archive_post::postgres_archive_post_contract -- --ignored --exact
+cargo test --locked -p listmngr-api --test webui \
+  archive_export::postgres_archive_export_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::dsn_issuance_tests::dsn_issuance_postgres -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \

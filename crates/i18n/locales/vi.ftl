@@ -939,3 +939,7 @@ web-archive-post-no-body = Cần có nội dung thư.
 web-archive-post-subject-lines = Tiêu đề không được chứa ngắt dòng.
 web-archive-post-subject-long = Tiêu đề quá dài.
 web-archive-post-body-long = Thư quá dài.
+web-archive-export = Tải kho lưu trữ (mbox)
+web-archive-export-gz = nén gzip
+web-archive-export-thread = Tải chủ đề này (mbox)
+web-archive-export-month = Tải tháng này (mbox)

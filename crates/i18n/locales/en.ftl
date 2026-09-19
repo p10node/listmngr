@@ -938,3 +938,7 @@ web-archive-post-no-body = A message body is required.
 web-archive-post-subject-lines = The subject cannot contain line breaks.
 web-archive-post-subject-long = The subject is too long.
 web-archive-post-body-long = The message is too long.
+web-archive-export = Download the archive (mbox)
+web-archive-export-gz = gzip
+web-archive-export-thread = Download this thread (mbox)
+web-archive-export-month = Download this month (mbox)
