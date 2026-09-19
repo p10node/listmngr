@@ -373,6 +373,66 @@ async fn verify_late_thread_parent(db: Database) {
 }
 
 #[tokio::test]
+async fn a_reply_to_a_parent_nobody_holds_starts_its_own_thread_until_the_parent_arrives() {
+    let db = fixture().await;
+    verify_orphans_adopted_by_a_late_parent(db).await;
+}
+
+async fn thread_of(db: &Database, hash: String) -> String {
+    sqlx::query_scalar("SELECT thread FROM archive_messages WHERE list_id=$1 AND hash=$2")
+        .bind("dev.example.invalid")
+        .bind(hash)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+}
+
+/// `HyperKitty`'s rule, checked against its own data in
+/// `hyperkitty_parity.rs`: a reply whose ancestors are all absent is a
+/// thread of its own, named after itself and not after a post nobody
+/// holds; two such replies to the same absent parent are two threads;
+/// and when the parent finally arrives it takes them in with their
+/// subtrees.
+async fn verify_orphans_adopted_by_a_late_parent(db: Database) {
+    let list: listmngr_core::ListId = "dev.example.invalid".parse().unwrap();
+    let hash = |id: &str| listmngr_mail::message_id_hash(&format!("{id}@example.invalid")).unwrap();
+    for (id, headers) in [
+        ("lonely", "In-Reply-To: <absent@example.invalid>\r\n"),
+        ("sibling", "In-Reply-To: <absent@example.invalid>\r\n"),
+        ("under-lonely", "In-Reply-To: <lonely@example.invalid>\r\n"),
+    ] {
+        let lease = enqueue(&db, "dev.example.invalid", id, headers, id).await;
+        listmngr_archive::process(&db, &lease, 101).await.unwrap();
+    }
+    assert_eq!(thread_of(&db, hash("lonely")).await, hash("lonely"));
+    assert_eq!(thread_of(&db, hash("sibling")).await, hash("sibling"));
+    assert_eq!(thread_of(&db, hash("under-lonely")).await, hash("lonely"));
+    assert!(
+        db.archive()
+            .read(&list, None, Some(&hash("absent")), "", 100, 0)
+            .await
+            .unwrap()
+            .is_empty(),
+        "no thread is named after the absent parent"
+    );
+    let lease = enqueue(&db, "dev.example.invalid", "absent", "", "absent").await;
+    listmngr_archive::process(&db, &lease, 102).await.unwrap();
+    for id in ["absent", "lonely", "sibling", "under-lonely"] {
+        assert_eq!(thread_of(&db, hash(id)).await, hash("absent"), "{id}");
+    }
+    let rows = db
+        .archive()
+        .read(&list, None, Some(&hash("absent")), "", 100, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.len(),
+        4,
+        "the late parent took its orphans and their subtree in"
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
 async fn postgres_archive_thread_metadata_matrix() {
     let schema = listmngr_db::test_support::IsolatedSchema::create("archive_thread")
@@ -381,7 +441,8 @@ async fn postgres_archive_thread_metadata_matrix() {
     let db = Database::connect(&schema.url, 3).await.unwrap();
     let db = seeded_fixture(db).await;
     verify_malformed_thread_metadata(db.clone()).await;
-    verify_late_thread_parent(db).await;
+    verify_late_thread_parent(db.clone()).await;
+    verify_orphans_adopted_by_a_late_parent(db).await;
     schema.drop().await.unwrap();
 }
 

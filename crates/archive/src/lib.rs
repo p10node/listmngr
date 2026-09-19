@@ -65,7 +65,9 @@ pub struct Identity {
     /// The post's own Message-ID-Hash.
     pub hash: String,
     /// The provisional thread root: the first reference that hashes, else
-    /// the post itself. The repository resolves it to an indexed root.
+    /// the post itself. The repository resolves it the way `HyperKitty`
+    /// does — the thread of the first archived ancestor, else the post's
+    /// own — so no thread is ever named after a post nobody holds.
     pub thread: String,
     /// The post replied to: `In-Reply-To`, else the last `References`
     /// entry; never the post itself.

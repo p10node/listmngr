@@ -95,15 +95,15 @@ impl ArchiveRepo<'_> {
         importable(policy.as_deref())?;
         let mut outcome = Outcome::default();
         for item in items {
-            let root: Option<String> = sqlx::query_scalar(
-                "SELECT thread FROM archive_messages WHERE list_id=$1 AND hash=$2",
+            let thread = super::resolve_thread(
+                &mut tx,
+                list,
+                &item.hash,
+                &item.thread,
+                item.parent.as_deref(),
             )
-            .bind(list.as_str())
-            .bind(&item.thread)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_error)?;
-            let thread = root.as_deref().unwrap_or(&item.thread);
+            .await?;
+            let thread = thread.as_str();
             let inserted = sqlx::query("INSERT INTO archive_messages(list_id,hash,thread,subject,body,raw_b64,created_at,sender_name,sender_email,message_date,parent_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(list_id,hash) DO NOTHING")
                 .bind(list.as_str()).bind(&item.hash).bind(thread).bind(&item.subject).bind(&item.body)
                 .bind(base64::engine::general_purpose::STANDARD.encode(&item.raw)).bind(item.created_at)
@@ -120,14 +120,7 @@ impl ArchiveRepo<'_> {
                     .bind(&stored.filename).bind(&stored.content_type).bind(i64::try_from(stored.content.len()).unwrap_or(i64::MAX)).bind(&stored.content)
                     .execute(&mut *tx).await.map_err(db_error)?;
             }
-            // A parent arriving after its replies unifies their provisional root.
-            sqlx::query("UPDATE archive_messages SET thread=$1 WHERE list_id=$2 AND thread=$3")
-                .bind(thread)
-                .bind(list.as_str())
-                .bind(&item.hash)
-                .execute(&mut *tx)
-                .await
-                .map_err(db_error)?;
+            super::adopt_orphans(&mut tx, list, &item.hash, thread).await?;
         }
         Database::record_tx_with_context(
             &mut tx,
