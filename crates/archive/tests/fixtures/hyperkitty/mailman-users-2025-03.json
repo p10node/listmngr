@@ -1,0 +1,1875 @@
+{
+ "source": "https://lists.mailman3.org/archives/list/mailman-users@mailman3.org/ (export 2025-03-01..2025-03-31; API email/<hash>/ per message, fetched 2026-09-19)",
+ "messages": [
+  {
+   "message_id": "<26562.43422.507619.805152@ip-192-168-11-5.eu-west-1.compute.internal>",
+   "in_reply_to": [
+    "<000501db8a2f$c01047b0$4030d710$@skynet.be>"
+   ],
+   "references": [],
+   "date": "Sat, 01 Mar 2025 06:30:58 +0000",
+   "hyperkitty": {
+    "hash": "NH4EERK2HSXZGU4QJBMPPMY5NHVK73BE",
+    "thread": "OQX2OJJQF3UBME5ASRZVQS7IWTLUWHMI",
+    "parent": "N7FO3OZWFFZHTPYRKHQW7TLLNXMYMCKZ",
+    "date": "2025-03-01T06:30:58Z"
+   }
+  },
+  {
+   "message_id": "<174083783358.2102433.17108267109703360575@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Sat, 01 Mar 2025 14:03:53 +0000",
+   "hyperkitty": {
+    "hash": "YD4KRXRXFAEQSNEBMVL2MY6GHBUEAQZL",
+    "thread": "YD4KRXRXFAEQSNEBMVL2MY6GHBUEAQZL",
+    "parent": null,
+    "date": "2025-03-01T14:03:53Z"
+   }
+  },
+  {
+   "message_id": "<26563.12194.747229.450212@ip-192-168-11-5.eu-west-1.compute.internal>",
+   "in_reply_to": [
+    "<174083783358.2102433.17108267109703360575@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Sat, 01 Mar 2025 16:02:47 +0000",
+   "hyperkitty": {
+    "hash": "LPVUR5HMCZZLQRPH3TFKTMVVV2KZ32V2",
+    "thread": "YD4KRXRXFAEQSNEBMVL2MY6GHBUEAQZL",
+    "parent": "YD4KRXRXFAEQSNEBMVL2MY6GHBUEAQZL",
+    "date": "2025-03-01T16:02:47Z"
+   }
+  },
+  {
+   "message_id": "<97f892b3-3147-48c3-9d29-7e583a13e09b@msapiro.net>",
+   "in_reply_to": [
+    "<26563.12194.747229.450212@ip-192-168-11-5.eu-west-1.compute.internal>"
+   ],
+   "references": [],
+   "date": "Sat, 01 Mar 2025 10:00:32 -0800",
+   "hyperkitty": {
+    "hash": "NWOTXVTRPWDQVSUKTJELNVJCYFEKSYKA",
+    "thread": "YD4KRXRXFAEQSNEBMVL2MY6GHBUEAQZL",
+    "parent": "LPVUR5HMCZZLQRPH3TFKTMVVV2KZ32V2",
+    "date": "2025-03-01T18:00:32Z"
+   }
+  },
+  {
+   "message_id": "<174085530918.2169464.18061041402625938715@mail.mailman3.org>",
+   "in_reply_to": [
+    "<26563.12194.747229.450212@ip-192-168-11-5.eu-west-1.compute.internal>"
+   ],
+   "references": [],
+   "date": "Sat, 01 Mar 2025 18:55:09 +0000",
+   "hyperkitty": {
+    "hash": "5WL7NOO5CMQFHWFGRRJUWEWO3WZ7VLC3",
+    "thread": "YD4KRXRXFAEQSNEBMVL2MY6GHBUEAQZL",
+    "parent": "LPVUR5HMCZZLQRPH3TFKTMVVV2KZ32V2",
+    "date": "2025-03-01T18:55:09Z"
+   }
+  },
+  {
+   "message_id": "<174085721407.2169464.2139057869934578472@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174085530918.2169464.18061041402625938715@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Sat, 01 Mar 2025 19:26:54 +0000",
+   "hyperkitty": {
+    "hash": "6JT3ZQPNVRVYDM7LQOT6BWQTPLOYJCOD",
+    "thread": "YD4KRXRXFAEQSNEBMVL2MY6GHBUEAQZL",
+    "parent": "5WL7NOO5CMQFHWFGRRJUWEWO3WZ7VLC3",
+    "date": "2025-03-01T19:26:54Z"
+   }
+  },
+  {
+   "message_id": "<4ffbccf1ee4930daee7f44b324c6bdbc@posteo.net>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Sat, 01 Mar 2025 21:58:57 +0000",
+   "hyperkitty": {
+    "hash": "F57A2MH4ICA3QXFISTDKFP3TYYGSKCA4",
+    "thread": "F57A2MH4ICA3QXFISTDKFP3TYYGSKCA4",
+    "parent": null,
+    "date": "2025-03-01T21:58:57Z"
+   }
+  },
+  {
+   "message_id": "<40842296-55d8-4b62-8bf5-6e397fcf3aec@msapiro.net>",
+   "in_reply_to": [
+    "<4ffbccf1ee4930daee7f44b324c6bdbc@posteo.net>"
+   ],
+   "references": [],
+   "date": "Sat, 01 Mar 2025 15:04:26 -0800",
+   "hyperkitty": {
+    "hash": "E5PQM5CY7MPVAJBSLATDKQYFVS5P6IB5",
+    "thread": "F57A2MH4ICA3QXFISTDKFP3TYYGSKCA4",
+    "parent": "F57A2MH4ICA3QXFISTDKFP3TYYGSKCA4",
+    "date": "2025-03-01T23:04:26Z"
+   }
+  },
+  {
+   "message_id": "<a64fd48a82a488d89bc7c4eb37a3e14f@posteo.net>",
+   "in_reply_to": [
+    "<40842296-55d8-4b62-8bf5-6e397fcf3aec@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Sun, 02 Mar 2025 22:04:14 +0000",
+   "hyperkitty": {
+    "hash": "5S5EKQK2QPE6FPVTFHBFI26HJKR4G46U",
+    "thread": "F57A2MH4ICA3QXFISTDKFP3TYYGSKCA4",
+    "parent": "E5PQM5CY7MPVAJBSLATDKQYFVS5P6IB5",
+    "date": "2025-03-02T22:04:14Z"
+   }
+  },
+  {
+   "message_id": "<CAJWMQtAnAozmWK5NGdxXEGpBu-g+3Tog=eGn=3UUDrvOxO9K=Q@mail.gmail.com>",
+   "in_reply_to": [
+    "<23df7d17-998c-4b55-8b93-bc0939943306@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Mon, 03 Mar 2025 10:45:40 +0100",
+   "hyperkitty": {
+    "hash": "HB7KTX3XND5KU72NHXWU7MPAXW2OI5OK",
+    "thread": "AVABASBG6L3WBJLUYEGG64SF3BG24WSG",
+    "parent": "UPXK4Q5U4HTYLLEJQGURYBCBPNCNZCMF",
+    "date": "2025-03-03T09:45:40Z"
+   }
+  },
+  {
+   "message_id": "<174101479177.3100041.16345425650224956055@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 03 Mar 2025 15:13:11 +0000",
+   "hyperkitty": {
+    "hash": "RR5ZBNE3ASB7QHXIZYZRNRKEUD5LO3L2",
+    "thread": "RR5ZBNE3ASB7QHXIZYZRNRKEUD5LO3L2",
+    "parent": null,
+    "date": "2025-03-03T15:13:11Z"
+   }
+  },
+  {
+   "message_id": "<CAJWMQtCRe6bAH53=yiZtLVBW0OQui-0Ju9VmHoWasLoPiNUu4A@mail.gmail.com>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 03 Mar 2025 16:52:37 +0100",
+   "hyperkitty": {
+    "hash": "QQMAMNVJ26PA6PG563FM5WAUDNRXJACO",
+    "thread": "QQMAMNVJ26PA6PG563FM5WAUDNRXJACO",
+    "parent": null,
+    "date": "2025-03-03T15:52:37Z"
+   }
+  },
+  {
+   "message_id": "<77e8dcee-ba54-4ab4-988d-1765e1c34dfb@msapiro.net>",
+   "in_reply_to": [
+    "<CAJWMQtCRe6bAH53=yiZtLVBW0OQui-0Ju9VmHoWasLoPiNUu4A@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Mon, 03 Mar 2025 09:40:10 -0800",
+   "hyperkitty": {
+    "hash": "OUORZPB5XXMZ2UPUVBFEAYZNMY33MUUT",
+    "thread": "QQMAMNVJ26PA6PG563FM5WAUDNRXJACO",
+    "parent": "QQMAMNVJ26PA6PG563FM5WAUDNRXJACO",
+    "date": "2025-03-03T17:40:10Z"
+   }
+  },
+  {
+   "message_id": "<174104082031.3392807.588804291313004546@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 03 Mar 2025 22:27:00 +0000",
+   "hyperkitty": {
+    "hash": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "thread": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "parent": null,
+    "date": "2025-03-03T22:27:00Z"
+   }
+  },
+  {
+   "message_id": "<174104246869.3495211.5422944152370360594@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174104082031.3392807.588804291313004546@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Mon, 03 Mar 2025 22:54:28 +0000",
+   "hyperkitty": {
+    "hash": "45KIK4IH3ZKQ2NG3G5J2PX6KVJMQFLJV",
+    "thread": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "parent": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "date": "2025-03-03T22:54:28Z"
+   }
+  },
+  {
+   "message_id": "<b846d082-4fa7-4b6f-8116-84d11cf2009f@msapiro.net>",
+   "in_reply_to": [
+    "<174104082031.3392807.588804291313004546@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Mon, 03 Mar 2025 16:12:17 -0800",
+   "hyperkitty": {
+    "hash": "PAEWWL7F6VDD2LBNBJDXRWKBK56AO3SN",
+    "thread": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "parent": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "date": "2025-03-04T00:12:17Z"
+   }
+  },
+  {
+   "message_id": "<174108339412.3772755.5431210085159110238@mail.mailman3.org>",
+   "in_reply_to": [
+    "<7f64fc99-60c1-4a69-acdd-1537e2c26437@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 04 Mar 2025 10:16:34 +0000",
+   "hyperkitty": {
+    "hash": "5KE34UIOAPSGOV5KOMWCCS5EI6SLBVAS",
+    "thread": "ADWTZKJHXPC6DPD7H2CJBD5EMG6T6ZSR",
+    "parent": "TB7VDKJ2IYUXEH64Z4IGKE3YJVSESW4Z",
+    "date": "2025-03-04T10:16:34Z"
+   }
+  },
+  {
+   "message_id": "<174109856352.3772755.1580452577252582637@mail.mailman3.org>",
+   "in_reply_to": [
+    "<b846d082-4fa7-4b6f-8116-84d11cf2009f@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 04 Mar 2025 14:29:23 +0000",
+   "hyperkitty": {
+    "hash": "4BJAKXZOUJ7NYMXTIFULAJTKO33LD72O",
+    "thread": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "parent": "PAEWWL7F6VDD2LBNBJDXRWKBK56AO3SN",
+    "date": "2025-03-04T14:29:23Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WOsvd=_GfMy4z5ZV0gS0wpVYbJm+9Ywy_5goRq0WR2UKw@mail.gmail.com>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Tue, 04 Mar 2025 17:41:30 +0300",
+   "hyperkitty": {
+    "hash": "AYE6EQSBWP6QYSFVWTCUUTEP4HBCBCVW",
+    "thread": "AYE6EQSBWP6QYSFVWTCUUTEP4HBCBCVW",
+    "parent": null,
+    "date": "2025-03-04T14:41:30Z"
+   }
+  },
+  {
+   "message_id": "<174110023804.3772755.11583304217343635326@mail.mailman3.org>",
+   "in_reply_to": [
+    "<b846d082-4fa7-4b6f-8116-84d11cf2009f@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 04 Mar 2025 14:57:18 +0000",
+   "hyperkitty": {
+    "hash": "3XWVHNECWWF7ZCAL73PRTOPQQIY4YV6D",
+    "thread": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "parent": "PAEWWL7F6VDD2LBNBJDXRWKBK56AO3SN",
+    "date": "2025-03-04T14:57:18Z"
+   }
+  },
+  {
+   "message_id": "<174111400047.3973220.6285076436960638202@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174110023804.3772755.11583304217343635326@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 04 Mar 2025 18:46:40 +0000",
+   "hyperkitty": {
+    "hash": "MMGOEZTJY4KX6HN5U63RZGMLENK3JKZT",
+    "thread": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "parent": "3XWVHNECWWF7ZCAL73PRTOPQQIY4YV6D",
+    "date": "2025-03-04T18:46:40Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WO8X17NKP8yVAkYSdZd+anuqbJoWFzYtAu9UbOYZ_UN0A@mail.gmail.com>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Wed, 05 Mar 2025 14:13:07 +0300",
+   "hyperkitty": {
+    "hash": "WIV2EGTA4DJHUIQQMMWSDMY6WQTTFJEA",
+    "thread": "WIV2EGTA4DJHUIQQMMWSDMY6WQTTFJEA",
+    "parent": null,
+    "date": "2025-03-05T11:13:07Z"
+   }
+  },
+  {
+   "message_id": "<a33c7bd3-4621-4ad9-96c3-6b8fb63fe448@uni-konstanz.de>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Wed, 05 Mar 2025 14:14:20 +0100",
+   "hyperkitty": {
+    "hash": "NTJYC6XBKABYWAYBNEC475MIAUPNZYSQ",
+    "thread": "NTJYC6XBKABYWAYBNEC475MIAUPNZYSQ",
+    "parent": null,
+    "date": "2025-03-05T13:14:20Z"
+   }
+  },
+  {
+   "message_id": "<CAM05vAde_=6Moy+51XaYUxD=RvuQMxjmSNDVXnZ4RjmuBKyqPw@mail.gmail.com>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Wed, 05 Mar 2025 08:55:44 -0500",
+   "hyperkitty": {
+    "hash": "ICQIHFMK53XVS4K5UQ7DVAVNK2JLC2UU",
+    "thread": "ICQIHFMK53XVS4K5UQ7DVAVNK2JLC2UU",
+    "parent": null,
+    "date": "2025-03-05T13:55:44Z"
+   }
+  },
+  {
+   "message_id": "<26568.22814.929612.695918@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<a33c7bd3-4621-4ad9-96c3-6b8fb63fe448@uni-konstanz.de>"
+   ],
+   "references": [],
+   "date": "Wed, 05 Mar 2025 14:01:10 +0000",
+   "hyperkitty": {
+    "hash": "MDFD7LHQGG7DMHANC3G4TBZ4O7HMNKAQ",
+    "thread": "NTJYC6XBKABYWAYBNEC475MIAUPNZYSQ",
+    "parent": "NTJYC6XBKABYWAYBNEC475MIAUPNZYSQ",
+    "date": "2025-03-05T14:01:10Z"
+   }
+  },
+  {
+   "message_id": "<174118747194.209002.12108085166523557831@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174104082031.3392807.588804291313004546@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Wed, 05 Mar 2025 15:11:11 +0000",
+   "hyperkitty": {
+    "hash": "XWMIUDYFBO7AFONSDUCJUAOIXAYWAVB5",
+    "thread": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "parent": "DRPVEOHE75XFZ5QW6XAKOCMDJHXCXBZZ",
+    "date": "2025-03-05T15:11:11Z"
+   }
+  },
+  {
+   "message_id": "<26568.33584.275387.723701@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<CAM05vAde_=6Moy+51XaYUxD=RvuQMxjmSNDVXnZ4RjmuBKyqPw@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Wed, 05 Mar 2025 17:00:35 +0000",
+   "hyperkitty": {
+    "hash": "IEP7PNKIJGEUX42RJUVVXWFYYSOX7JZG",
+    "thread": "ICQIHFMK53XVS4K5UQ7DVAVNK2JLC2UU",
+    "parent": "ICQIHFMK53XVS4K5UQ7DVAVNK2JLC2UU",
+    "date": "2025-03-05T17:00:35Z"
+   }
+  },
+  {
+   "message_id": "<CAM05vAeN72OaJ+zKJEXLMv6K-CyOt8sF2NddxZxtiQR22E4F-A@mail.gmail.com>",
+   "in_reply_to": [
+    "<26568.33584.275387.723701@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Wed, 05 Mar 2025 13:32:04 -0500",
+   "hyperkitty": {
+    "hash": "WTERCNUY66H6KVMIUVKSRI3K2RAKZ53N",
+    "thread": "ICQIHFMK53XVS4K5UQ7DVAVNK2JLC2UU",
+    "parent": "IEP7PNKIJGEUX42RJUVVXWFYYSOX7JZG",
+    "date": "2025-03-05T18:32:04Z"
+   }
+  },
+  {
+   "message_id": "<26568.42478.57107.701901@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<CAM05vAeN72OaJ+zKJEXLMv6K-CyOt8sF2NddxZxtiQR22E4F-A@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Wed, 05 Mar 2025 19:28:49 +0000",
+   "hyperkitty": {
+    "hash": "BF5FYNWGEKKLDREOFUAYREFBRF23GJJH",
+    "thread": "ICQIHFMK53XVS4K5UQ7DVAVNK2JLC2UU",
+    "parent": "WTERCNUY66H6KVMIUVKSRI3K2RAKZ53N",
+    "date": "2025-03-05T19:28:49Z"
+   }
+  },
+  {
+   "message_id": "<545e45e7-4e16-4f88-9247-21305e9e54d9@msapiro.net>",
+   "in_reply_to": [
+    "<CAAdA2WO8X17NKP8yVAkYSdZd+anuqbJoWFzYtAu9UbOYZ_UN0A@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Thu, 06 Mar 2025 07:51:29 +0700",
+   "hyperkitty": {
+    "hash": "4MHZFGU3SCDCAQBRPGI76YCTNPQYWB45",
+    "thread": "WIV2EGTA4DJHUIQQMMWSDMY6WQTTFJEA",
+    "parent": "WIV2EGTA4DJHUIQQMMWSDMY6WQTTFJEA",
+    "date": "2025-03-06T00:51:29Z"
+   }
+  },
+  {
+   "message_id": "<a23d80d7-a58f-4b87-861b-f5c1d70377d4@msapiro.net>",
+   "in_reply_to": [
+    "<CAM05vAde_=6Moy+51XaYUxD=RvuQMxjmSNDVXnZ4RjmuBKyqPw@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Thu, 06 Mar 2025 08:12:48 +0700",
+   "hyperkitty": {
+    "hash": "JSBG6ZDNR62OL5HWNPOAMB44CR3MEHLM",
+    "thread": "ICQIHFMK53XVS4K5UQ7DVAVNK2JLC2UU",
+    "parent": "ICQIHFMK53XVS4K5UQ7DVAVNK2JLC2UU",
+    "date": "2025-03-06T01:12:48Z"
+   }
+  },
+  {
+   "message_id": "<b89875a1-dda1-493f-9f18-3811803a92aa@msapiro.net>",
+   "in_reply_to": [
+    "<174101479177.3100041.16345425650224956055@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Thu, 06 Mar 2025 11:23:00 +0700",
+   "hyperkitty": {
+    "hash": "5JOPN45RDL7LF477OYIHBVJ6IMVB7KOK",
+    "thread": "RR5ZBNE3ASB7QHXIZYZRNRKEUD5LO3L2",
+    "parent": "RR5ZBNE3ASB7QHXIZYZRNRKEUD5LO3L2",
+    "date": "2025-03-06T04:23:00Z"
+   }
+  },
+  {
+   "message_id": "<18296359-47e9-409b-a0b2-a9fba6c6aad9@uni-konstanz.de>",
+   "in_reply_to": [
+    "<26568.22814.929612.695918@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Thu, 06 Mar 2025 08:24:00 +0100",
+   "hyperkitty": {
+    "hash": "LB7X6CSXEDVKMXXPRFJU7DSFV2X353DB",
+    "thread": "NTJYC6XBKABYWAYBNEC475MIAUPNZYSQ",
+    "parent": "MDFD7LHQGG7DMHANC3G4TBZ4O7HMNKAQ",
+    "date": "2025-03-06T07:24:00Z"
+   }
+  },
+  {
+   "message_id": "<81712b40-7a44-4ae1-a1c5-070fb13d4626@msapiro.net>",
+   "in_reply_to": [
+    "<18296359-47e9-409b-a0b2-a9fba6c6aad9@uni-konstanz.de>"
+   ],
+   "references": [],
+   "date": "Thu, 06 Mar 2025 15:34:28 +0700",
+   "hyperkitty": {
+    "hash": "A55JS5V3KZQRN6LCZNI5SDTKD7P5JXTG",
+    "thread": "NTJYC6XBKABYWAYBNEC475MIAUPNZYSQ",
+    "parent": "LB7X6CSXEDVKMXXPRFJU7DSFV2X353DB",
+    "date": "2025-03-06T08:34:28Z"
+   }
+  },
+  {
+   "message_id": "<174135532566.1287678.8893259954597949111@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Fri, 07 Mar 2025 13:48:45 +0000",
+   "hyperkitty": {
+    "hash": "5IJZUBWNZIO5UD3MVBVOSQHM2KEU4YGS",
+    "thread": "5IJZUBWNZIO5UD3MVBVOSQHM2KEU4YGS",
+    "parent": null,
+    "date": "2025-03-07T13:48:45Z"
+   }
+  },
+  {
+   "message_id": "<015d162a-26c9-4011-8748-cee74145be71@msapiro.net>",
+   "in_reply_to": [
+    "<174135532566.1287678.8893259954597949111@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Sat, 08 Mar 2025 08:51:56 +0700",
+   "hyperkitty": {
+    "hash": "LZRELLIF3IUHRXNJ4U56RS6H2DQY7K4V",
+    "thread": "5IJZUBWNZIO5UD3MVBVOSQHM2KEU4YGS",
+    "parent": "5IJZUBWNZIO5UD3MVBVOSQHM2KEU4YGS",
+    "date": "2025-03-08T01:51:56Z"
+   }
+  },
+  {
+   "message_id": "<3863ee95-f15b-4f59-a596-3a1f893572a2@lahnakoski.com>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Sun, 09 Mar 2025 13:24:23 -0400",
+   "hyperkitty": {
+    "hash": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "thread": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "parent": null,
+    "date": "2025-03-09T17:24:23Z"
+   }
+  },
+  {
+   "message_id": "<ff5db9ca-31c8-4dea-87a8-894ba019c9cc@msapiro.net>",
+   "in_reply_to": [
+    "<3863ee95-f15b-4f59-a596-3a1f893572a2@lahnakoski.com>"
+   ],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 07:37:45 +0700",
+   "hyperkitty": {
+    "hash": "WJIO5UOBC6T4FM43PGFN3REZQMM5K5QU",
+    "thread": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "parent": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "date": "2025-03-10T00:37:45Z"
+   }
+  },
+  {
+   "message_id": "<174157504884.2793708.3560827720117179427@mail.mailman3.org>",
+   "in_reply_to": [
+    "<ff5db9ca-31c8-4dea-87a8-894ba019c9cc@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 02:50:48 +0000",
+   "hyperkitty": {
+    "hash": "U5UCOTY6JRV5RARGVVE24UVCO5RPOSL7",
+    "thread": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "parent": "WJIO5UOBC6T4FM43PGFN3REZQMM5K5QU",
+    "date": "2025-03-10T02:50:48Z"
+   }
+  },
+  {
+   "message_id": "<26574.26857.495750.772904@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<3863ee95-f15b-4f59-a596-3a1f893572a2@lahnakoski.com>"
+   ],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 04:22:04 +0000",
+   "hyperkitty": {
+    "hash": "UWXLRS4MYN6PAZQMLWXR6KEHT5LYJMU7",
+    "thread": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "parent": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "date": "2025-03-10T04:22:04Z"
+   }
+  },
+  {
+   "message_id": "<174160511468.2715442.8901230770816589086@mail.mailman3.org>",
+   "in_reply_to": [
+    "<015d162a-26c9-4011-8748-cee74145be71@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 11:11:54 +0000",
+   "hyperkitty": {
+    "hash": "WYEZEOVHUWA67YMEFOHU6KNFO76NEQLZ",
+    "thread": "5IJZUBWNZIO5UD3MVBVOSQHM2KEU4YGS",
+    "parent": "LZRELLIF3IUHRXNJ4U56RS6H2DQY7K4V",
+    "date": "2025-03-10T11:11:54Z"
+   }
+  },
+  {
+   "message_id": "<cb7b917b07344ffcbc0a0fca13d1a41f@uni-wuerzburg.de>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 11:53:49 +0000",
+   "hyperkitty": {
+    "hash": "YMBCXJPNYESC56HLGN7VC64SLVH7ST2N",
+    "thread": "YMBCXJPNYESC56HLGN7VC64SLVH7ST2N",
+    "parent": null,
+    "date": "2025-03-10T11:53:49Z"
+   }
+  },
+  {
+   "message_id": "<26575.488.859767.551924@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<cb7b917b07344ffcbc0a0fca13d1a41f@uni-wuerzburg.de>"
+   ],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 15:14:52 +0000",
+   "hyperkitty": {
+    "hash": "YVLGKPNKH5BTRV2J527H2BJKIRSRRMIV",
+    "thread": "YMBCXJPNYESC56HLGN7VC64SLVH7ST2N",
+    "parent": "YMBCXJPNYESC56HLGN7VC64SLVH7ST2N",
+    "date": "2025-03-10T15:14:52Z"
+   }
+  },
+  {
+   "message_id": "<f8c37c1d-d34e-47e2-8b8e-76f1832a949c@lahnakoski.com>",
+   "in_reply_to": [
+    "<174157504884.2793708.3560827720117179427@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 17:30:31 -0400",
+   "hyperkitty": {
+    "hash": "UJYRVFJGOL7FJYX32R5EGNOKDV6YM7S6",
+    "thread": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "parent": "U5UCOTY6JRV5RARGVVE24UVCO5RPOSL7",
+    "date": "2025-03-10T21:30:31Z"
+   }
+  },
+  {
+   "message_id": "<CAHth+46vb8Ws-YJDNDTeGWC7_iaRAy-Hq7LJt7U2aw=waOWSVw@mail.gmail.com>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 17:06:08 -0700",
+   "hyperkitty": {
+    "hash": "32GMLRDG3QFRVT2IC76KY7ND5K4EQ5C2",
+    "thread": "32GMLRDG3QFRVT2IC76KY7ND5K4EQ5C2",
+    "parent": null,
+    "date": "2025-03-11T00:06:08Z"
+   }
+  },
+  {
+   "message_id": "<174165175040.3352438.2706566939020927115@mail.mailman3.org>",
+   "in_reply_to": [
+    "<CAKNGWttjSF=kqMG39j17o=thw89VjuaF6x7J8tqJHBN4kdDSsQ@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Tue, 11 Mar 2025 00:09:10 +0000",
+   "hyperkitty": {
+    "hash": "OTP6I4LYXPI5H6VQSEEERNSB66KSKSZI",
+    "thread": "BEDLQUIKJ7MB3KES4LFMKJV4PNNTGBLT",
+    "parent": "BFBWHCZYAXPM37JFC6JUTNS3222DJS3D",
+    "date": "2025-03-11T00:09:10Z"
+   }
+  },
+  {
+   "message_id": "<9acc3137-0e60-4c33-ad1b-5e30a37d350a@lahnakoski.com>",
+   "in_reply_to": [
+    "<26574.26857.495750.772904@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 21:35:15 -0400",
+   "hyperkitty": {
+    "hash": "TPXHU54QMVTHHNK2IFZH64UAUO5OHGTR",
+    "thread": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "parent": "UWXLRS4MYN6PAZQMLWXR6KEHT5LYJMU7",
+    "date": "2025-03-11T01:35:15Z"
+   }
+  },
+  {
+   "message_id": "<bb418aad-e07b-4390-a2a6-b4bc04c1408e@msapiro.net>",
+   "in_reply_to": [
+    "<f8c37c1d-d34e-47e2-8b8e-76f1832a949c@lahnakoski.com>"
+   ],
+   "references": [],
+   "date": "Tue, 11 Mar 2025 08:44:27 +0700",
+   "hyperkitty": {
+    "hash": "J5KLVXOOZXEJ5RZHKIK527JKIEC2ABWR",
+    "thread": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "parent": "UJYRVFJGOL7FJYX32R5EGNOKDV6YM7S6",
+    "date": "2025-03-11T01:44:27Z"
+   }
+  },
+  {
+   "message_id": "<9875304f-bf9a-4237-a8fc-1b3bc8966545@msapiro.net>",
+   "in_reply_to": [
+    "<CAHth+46vb8Ws-YJDNDTeGWC7_iaRAy-Hq7LJt7U2aw=waOWSVw@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Tue, 11 Mar 2025 08:56:57 +0700",
+   "hyperkitty": {
+    "hash": "LIZJJIBQXLMSLZ4K3MEZVJRZ4CR377IV",
+    "thread": "32GMLRDG3QFRVT2IC76KY7ND5K4EQ5C2",
+    "parent": "32GMLRDG3QFRVT2IC76KY7ND5K4EQ5C2",
+    "date": "2025-03-11T01:56:57Z"
+   }
+  },
+  {
+   "message_id": "<46bda2fd-c817-409d-afd8-1f35d0ae2214@msapiro.net>",
+   "in_reply_to": [
+    "<174165175040.3352438.2706566939020927115@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 11 Mar 2025 09:09:20 +0700",
+   "hyperkitty": {
+    "hash": "JLWXYTQK4I7IQSHKMU2C72DEBWLAEKUL",
+    "thread": "BEDLQUIKJ7MB3KES4LFMKJV4PNNTGBLT",
+    "parent": "OTP6I4LYXPI5H6VQSEEERNSB66KSKSZI",
+    "date": "2025-03-11T02:09:20Z"
+   }
+  },
+  {
+   "message_id": "<f57c21a6-71fb-4c58-886a-8ad9c369b906@lahnakoski.com>",
+   "in_reply_to": [
+    "<9acc3137-0e60-4c33-ad1b-5e30a37d350a@lahnakoski.com>"
+   ],
+   "references": [],
+   "date": "Mon, 10 Mar 2025 22:11:43 -0400",
+   "hyperkitty": {
+    "hash": "BJVBGFMFZ6QE6MO2RK6A2OSB6WQ7K23Y",
+    "thread": "C2F3YZF4YCKVAA4K7ZYHWGWRH4WX4LGS",
+    "parent": "TPXHU54QMVTHHNK2IFZH64UAUO5OHGTR",
+    "date": "2025-03-11T02:11:43Z"
+   }
+  },
+  {
+   "message_id": "<2042749.6T7YWBWY5Q@bulli>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Tue, 11 Mar 2025 10:25:28 +0100",
+   "hyperkitty": {
+    "hash": "HAEJKGGCEAVPSRIAKTHUOD5RMJUUH324",
+    "thread": "HAEJKGGCEAVPSRIAKTHUOD5RMJUUH324",
+    "parent": null,
+    "date": "2025-03-11T09:25:28Z"
+   }
+  },
+  {
+   "message_id": "<26576.3713.254534.424655@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<26575.45462.238743.224737@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Tue, 11 Mar 2025 10:20:52 +0000",
+   "hyperkitty": {
+    "hash": "B2WKKBMQ5MTQZFMTXVXBILIJS3PTSU2F",
+    "thread": "B2WKKBMQ5MTQZFMTXVXBILIJS3PTSU2F",
+    "parent": null,
+    "date": "2025-03-11T10:20:52Z"
+   }
+  },
+  {
+   "message_id": "<CAHth+47t+O5dZja9T04b+yYqdh7-L1ZeNW3VOFN0tTm7uh+fjQ@mail.gmail.com>",
+   "in_reply_to": [
+    "<9875304f-bf9a-4237-a8fc-1b3bc8966545@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 11 Mar 2025 11:48:09 -0700",
+   "hyperkitty": {
+    "hash": "7IYCZHZLCH2EKDXONVS6Q5QY5PBJPLVB",
+    "thread": "32GMLRDG3QFRVT2IC76KY7ND5K4EQ5C2",
+    "parent": "LIZJJIBQXLMSLZ4K3MEZVJRZ4CR377IV",
+    "date": "2025-03-11T18:48:09Z"
+   }
+  },
+  {
+   "message_id": "<174176254659.3877056.12350812236722687651@mail.mailman3.org>",
+   "in_reply_to": [
+    "<CAPDq0P0v4S4yWnt72p3ABA84M8yRG6ppwagL1SW7y_xafAZOBQ@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Wed, 12 Mar 2025 06:55:46 +0000",
+   "hyperkitty": {
+    "hash": "P7CRDOU33VJJKVFVYCM3XUHIQCP6QO5M",
+    "thread": "4C25Z2U6W6FCORCM2WCRL4WUZ4ZNZQO5",
+    "parent": "4C25Z2U6W6FCORCM2WCRL4WUZ4ZNZQO5",
+    "date": "2025-03-12T06:55:46Z"
+   }
+  },
+  {
+   "message_id": "<5b3f56a2-6d12-4a37-ad74-5e9ba448e4e7@uni-konstanz.de>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Thu, 13 Mar 2025 08:54:40 +0100",
+   "hyperkitty": {
+    "hash": "L3SKUFO7ZK3W7JO6HOKHOULTMCUGWW5L",
+    "thread": "L3SKUFO7ZK3W7JO6HOKHOULTMCUGWW5L",
+    "parent": null,
+    "date": "2025-03-13T07:54:40Z"
+   }
+  },
+  {
+   "message_id": "<9ecba86f-5ba3-4196-8481-c7e11bd2ea25@msapiro.net>",
+   "in_reply_to": [
+    "<5b3f56a2-6d12-4a37-ad74-5e9ba448e4e7@uni-konstanz.de>"
+   ],
+   "references": [],
+   "date": "Thu, 13 Mar 2025 20:12:13 +0700",
+   "hyperkitty": {
+    "hash": "U5MY3XJW2KGGK6EUFDAEXMU7ERA5YYRL",
+    "thread": "L3SKUFO7ZK3W7JO6HOKHOULTMCUGWW5L",
+    "parent": "L3SKUFO7ZK3W7JO6HOKHOULTMCUGWW5L",
+    "date": "2025-03-13T13:12:13Z"
+   }
+  },
+  {
+   "message_id": "<CAJWMQtByE_d147Kd12X9jWEY+UqPyx-YZ-A=8AjDsgv2Pj556A@mail.gmail.com>",
+   "in_reply_to": [
+    "<77e8dcee-ba54-4ab4-988d-1765e1c34dfb@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Thu, 13 Mar 2025 21:55:33 +0100",
+   "hyperkitty": {
+    "hash": "I5YKNKXMUGQNXCX374WUKISSWLPPMP7V",
+    "thread": "QQMAMNVJ26PA6PG563FM5WAUDNRXJACO",
+    "parent": "OUORZPB5XXMZ2UPUVBFEAYZNMY33MUUT",
+    "date": "2025-03-13T20:55:33Z"
+   }
+  },
+  {
+   "message_id": "<7aecedf8-a2a0-45aa-bf1a-69d25a8c7b52@msapiro.net>",
+   "in_reply_to": [
+    "<CAJWMQtByE_d147Kd12X9jWEY+UqPyx-YZ-A=8AjDsgv2Pj556A@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Fri, 14 Mar 2025 08:15:30 +0700",
+   "hyperkitty": {
+    "hash": "EWAGALOILP767WPPCAQIR3M4SUMITY2A",
+    "thread": "QQMAMNVJ26PA6PG563FM5WAUDNRXJACO",
+    "parent": "I5YKNKXMUGQNXCX374WUKISSWLPPMP7V",
+    "date": "2025-03-14T01:15:30Z"
+   }
+  },
+  {
+   "message_id": "<1802402.Y9tcYoSY6N@bulli>",
+   "in_reply_to": [
+    "<26576.3713.254534.424655@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Fri, 14 Mar 2025 11:13:44 +0100",
+   "hyperkitty": {
+    "hash": "PNDCKHXB4TBODFTYBAW6AO6SUPVAA54H",
+    "thread": "B2WKKBMQ5MTQZFMTXVXBILIJS3PTSU2F",
+    "parent": "B2WKKBMQ5MTQZFMTXVXBILIJS3PTSU2F",
+    "date": "2025-03-14T10:13:44Z"
+   }
+  },
+  {
+   "message_id": "<4674105.M86zZuR9JI@bulli>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 17 Mar 2025 12:11:56 +0100",
+   "hyperkitty": {
+    "hash": "TF33XE74IX6C743SBBY3SCFSNHM7NW7L",
+    "thread": "TF33XE74IX6C743SBBY3SCFSNHM7NW7L",
+    "parent": null,
+    "date": "2025-03-17T11:11:56Z"
+   }
+  },
+  {
+   "message_id": "<174221201377.2690589.8941800537176153334@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 17 Mar 2025 11:46:53 +0000",
+   "hyperkitty": {
+    "hash": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "thread": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "parent": null,
+    "date": "2025-03-17T11:46:53Z"
+   }
+  },
+  {
+   "message_id": "<26584.8767.306633.428736@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<174221201377.2690589.8941800537176153334@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Mon, 17 Mar 2025 13:23:14 +0000",
+   "hyperkitty": {
+    "hash": "LRGUNYFKG3JYJXKT5GND3R6MX5NP6EY6",
+    "thread": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "parent": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "date": "2025-03-17T13:23:14Z"
+   }
+  },
+  {
+   "message_id": "<ad72f732-a5a4-4a74-8f2c-aba715224207@msapiro.net>",
+   "in_reply_to": [
+    "<174221201377.2690589.8941800537176153334@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Mon, 17 Mar 2025 20:23:23 +0700",
+   "hyperkitty": {
+    "hash": "QSYS7NU4VT4ZZJ37AET2IUKR74JNIAZ5",
+    "thread": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "parent": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "date": "2025-03-17T13:23:23Z"
+   }
+  },
+  {
+   "message_id": "<ac28cc71-500a-4b55-b7d5-9e83cd701181@msapiro.net>",
+   "in_reply_to": [
+    "<4674105.M86zZuR9JI@bulli>"
+   ],
+   "references": [],
+   "date": "Mon, 17 Mar 2025 20:41:40 +0700",
+   "hyperkitty": {
+    "hash": "WH5SKVLALQMJCS657GVUE7NCKTOIV4SM",
+    "thread": "TF33XE74IX6C743SBBY3SCFSNHM7NW7L",
+    "parent": "TF33XE74IX6C743SBBY3SCFSNHM7NW7L",
+    "date": "2025-03-17T13:41:40Z"
+   }
+  },
+  {
+   "message_id": "<174228719225.3417945.1305717647781933942@mail.mailman3.org>",
+   "in_reply_to": [
+    "<ad72f732-a5a4-4a74-8f2c-aba715224207@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 18 Mar 2025 08:39:52 +0000",
+   "hyperkitty": {
+    "hash": "7KAOLBTAJWDMIOJXRLUMRPYASGONJSPT",
+    "thread": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "parent": "QSYS7NU4VT4ZZJ37AET2IUKR74JNIAZ5",
+    "date": "2025-03-18T08:39:52Z"
+   }
+  },
+  {
+   "message_id": "<174228748636.3417945.15902322363538203963@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174228719225.3417945.1305717647781933942@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 18 Mar 2025 08:44:46 +0000",
+   "hyperkitty": {
+    "hash": "G6IO3X2W4FHDMKOAC43DORN3NYH2DWNQ",
+    "thread": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "parent": "7KAOLBTAJWDMIOJXRLUMRPYASGONJSPT",
+    "date": "2025-03-18T08:44:46Z"
+   }
+  },
+  {
+   "message_id": "<cc7b6d75-7cda-4357-b2e0-a209e0656a49@msapiro.net>",
+   "in_reply_to": [
+    "<174228719225.3417945.1305717647781933942@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 18 Mar 2025 15:59:06 +0700",
+   "hyperkitty": {
+    "hash": "JQD67HXKEWJPKIPW4TBEHNBVWHDIGH2K",
+    "thread": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "parent": "7KAOLBTAJWDMIOJXRLUMRPYASGONJSPT",
+    "date": "2025-03-18T08:59:06Z"
+   }
+  },
+  {
+   "message_id": "<174228840645.3417945.14756697449019543410@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174228748636.3417945.15902322363538203963@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 18 Mar 2025 09:00:06 +0000",
+   "hyperkitty": {
+    "hash": "TQFDYFRFDBDPNRQQOGNCMGQP5QZ5D6SS",
+    "thread": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "parent": "G6IO3X2W4FHDMKOAC43DORN3NYH2DWNQ",
+    "date": "2025-03-18T09:00:06Z"
+   }
+  },
+  {
+   "message_id": "<174228973932.3466568.3056916213224746660@mail.mailman3.org>",
+   "in_reply_to": [
+    "<cc7b6d75-7cda-4357-b2e0-a209e0656a49@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 18 Mar 2025 09:22:19 +0000",
+   "hyperkitty": {
+    "hash": "OPNBW5FV5XQK6IRSKQOGSNAF7X3OAVIW",
+    "thread": "TBZVAZMK3XAZNC26GTXE5XP5HIXO6K3O",
+    "parent": "JQD67HXKEWJPKIPW4TBEHNBVWHDIGH2K",
+    "date": "2025-03-18T09:22:19Z"
+   }
+  },
+  {
+   "message_id": "<3530746.DEyM4MejCs@bulli>",
+   "in_reply_to": [
+    "<ac28cc71-500a-4b55-b7d5-9e83cd701181@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 18 Mar 2025 11:40:32 +0100",
+   "hyperkitty": {
+    "hash": "A75OOECDPDSUUPGGCMBXEH37QBW5LNAZ",
+    "thread": "TF33XE74IX6C743SBBY3SCFSNHM7NW7L",
+    "parent": "WH5SKVLALQMJCS657GVUE7NCKTOIV4SM",
+    "date": "2025-03-18T10:40:32Z"
+   }
+  },
+  {
+   "message_id": "<174230309661.3478578.4211490295895328867@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Tue, 18 Mar 2025 13:04:56 +0000",
+   "hyperkitty": {
+    "hash": "K2AKAUQYUHOV6CHVQUGJ63JR4LUJ6RDQ",
+    "thread": "K2AKAUQYUHOV6CHVQUGJ63JR4LUJ6RDQ",
+    "parent": null,
+    "date": "2025-03-18T13:04:56Z"
+   }
+  },
+  {
+   "message_id": "<f81f6da2-9a61-411e-a8af-54e6718b4656@msapiro.net>",
+   "in_reply_to": [
+    "<174230309661.3478578.4211490295895328867@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 18 Mar 2025 20:37:09 +0700",
+   "hyperkitty": {
+    "hash": "RZ5ANOEEYXZ33DQB7OWHZZOBCZJOGV4W",
+    "thread": "K2AKAUQYUHOV6CHVQUGJ63JR4LUJ6RDQ",
+    "parent": "K2AKAUQYUHOV6CHVQUGJ63JR4LUJ6RDQ",
+    "date": "2025-03-18T13:37:09Z"
+   }
+  },
+  {
+   "message_id": "<d13fcdd6-ddbd-4f97-a489-fba1c54c2188@uni-konstanz.de>",
+   "in_reply_to": [
+    "<9ecba86f-5ba3-4196-8481-c7e11bd2ea25@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Fri, 21 Mar 2025 10:15:57 +0100",
+   "hyperkitty": {
+    "hash": "ZH5GVSVKO33KLOMRKZ4SX53YVS6HRZV5",
+    "thread": "L3SKUFO7ZK3W7JO6HOKHOULTMCUGWW5L",
+    "parent": "U5MY3XJW2KGGK6EUFDAEXMU7ERA5YYRL",
+    "date": "2025-03-21T09:15:57Z"
+   }
+  },
+  {
+   "message_id": "<174255191737.994067.1945990140725258555@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Fri, 21 Mar 2025 10:11:57 +0000",
+   "hyperkitty": {
+    "hash": "QWDEDOBJ6F7F4PQTFJWEZ3RSDPAVK5WT",
+    "thread": "QWDEDOBJ6F7F4PQTFJWEZ3RSDPAVK5WT",
+    "parent": null,
+    "date": "2025-03-21T10:11:57Z"
+   }
+  },
+  {
+   "message_id": "<174255358470.994067.18235715239293661282@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174255191737.994067.1945990140725258555@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Fri, 21 Mar 2025 10:39:44 +0000",
+   "hyperkitty": {
+    "hash": "PQBYZZCC6UWHFZC4TGYC5H2UBZDHV55Y",
+    "thread": "QWDEDOBJ6F7F4PQTFJWEZ3RSDPAVK5WT",
+    "parent": "QWDEDOBJ6F7F4PQTFJWEZ3RSDPAVK5WT",
+    "date": "2025-03-21T10:39:44Z"
+   }
+  },
+  {
+   "message_id": "<26589.32301.738858.740876@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<d13fcdd6-ddbd-4f97-a489-fba1c54c2188@uni-konstanz.de>"
+   ],
+   "references": [],
+   "date": "Fri, 21 Mar 2025 14:56:48 +0000",
+   "hyperkitty": {
+    "hash": "HRNF2T24376AB45AW4HKEZVX5GGDBDEA",
+    "thread": "L3SKUFO7ZK3W7JO6HOKHOULTMCUGWW5L",
+    "parent": "ZH5GVSVKO33KLOMRKZ4SX53YVS6HRZV5",
+    "date": "2025-03-21T14:56:48Z"
+   }
+  },
+  {
+   "message_id": "<26589.36768.952082.263586@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<174255191737.994067.1945990140725258555@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Fri, 21 Mar 2025 16:11:15 +0000",
+   "hyperkitty": {
+    "hash": "HKHVPWJU6Z6YBMTZ4NWSG6O46DLUZWZK",
+    "thread": "QWDEDOBJ6F7F4PQTFJWEZ3RSDPAVK5WT",
+    "parent": "QWDEDOBJ6F7F4PQTFJWEZ3RSDPAVK5WT",
+    "date": "2025-03-21T16:11:15Z"
+   }
+  },
+  {
+   "message_id": "<20250322153111.GU22084@mails.ayous.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Sat, 22 Mar 2025 16:31:11 +0100",
+   "hyperkitty": {
+    "hash": "SNV67NLPQRDOKS7PKUIJH7CKOUJG5N6L",
+    "thread": "SNV67NLPQRDOKS7PKUIJH7CKOUJG5N6L",
+    "parent": null,
+    "date": "2025-03-22T15:31:11Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WOcDA3t8Hwi8Geruua3GFLGzaoP01KGSwhfUv-95PFJ0g@mail.gmail.com>",
+   "in_reply_to": [
+    "<20250322153111.GU22084@mails.ayous.org>"
+   ],
+   "references": [],
+   "date": "Sat, 22 Mar 2025 18:59:42 +0300",
+   "hyperkitty": {
+    "hash": "A5GJHNVGWXZSJJVRSPE2VDYLHQFFHB45",
+    "thread": "SNV67NLPQRDOKS7PKUIJH7CKOUJG5N6L",
+    "parent": "SNV67NLPQRDOKS7PKUIJH7CKOUJG5N6L",
+    "date": "2025-03-22T15:59:42Z"
+   }
+  },
+  {
+   "message_id": "<20250322160215.GV22084@mails.ayous.org>",
+   "in_reply_to": [
+    "<CAAdA2WOcDA3t8Hwi8Geruua3GFLGzaoP01KGSwhfUv-95PFJ0g@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Sat, 22 Mar 2025 17:02:15 +0100",
+   "hyperkitty": {
+    "hash": "POYS3EWPARK5APIFDRW4ZVQGFY7Q7NFN",
+    "thread": "SNV67NLPQRDOKS7PKUIJH7CKOUJG5N6L",
+    "parent": "A5GJHNVGWXZSJJVRSPE2VDYLHQFFHB45",
+    "date": "2025-03-22T16:02:15Z"
+   }
+  },
+  {
+   "message_id": "<174280549085.2502494.12567616929117520955@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 24 Mar 2025 08:38:10 +0000",
+   "hyperkitty": {
+    "hash": "VDNRB6HEYJR4KKIZV4BFDP5DOTLIAVIO",
+    "thread": "VDNRB6HEYJR4KKIZV4BFDP5DOTLIAVIO",
+    "parent": null,
+    "date": "2025-03-24T08:38:10Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WP3Gawk+mvFBuon+tyzDY3g9P2pZEMHxozQqOpc6JBWtw@mail.gmail.com>",
+   "in_reply_to": [
+    "<174280549085.2502494.12567616929117520955@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Mon, 24 Mar 2025 11:59:04 +0300",
+   "hyperkitty": {
+    "hash": "6RGW4FMMKE6Q46BHGPYFO427USYBU3DS",
+    "thread": "VDNRB6HEYJR4KKIZV4BFDP5DOTLIAVIO",
+    "parent": "VDNRB6HEYJR4KKIZV4BFDP5DOTLIAVIO",
+    "date": "2025-03-24T08:59:04Z"
+   }
+  },
+  {
+   "message_id": "<705B2780-BA82-4F27-A3E2-997349FBE959@msapiro.net>",
+   "in_reply_to": [
+    "<174280549085.2502494.12567616929117520955@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Mon, 24 Mar 2025 16:17:12 +0700",
+   "hyperkitty": {
+    "hash": "EFXFJVW7JA4N6DLWC3U5SXCKMAOYDZXI",
+    "thread": "VDNRB6HEYJR4KKIZV4BFDP5DOTLIAVIO",
+    "parent": "VDNRB6HEYJR4KKIZV4BFDP5DOTLIAVIO",
+    "date": "2025-03-24T09:17:12Z"
+   }
+  },
+  {
+   "message_id": "<174283446180.2582794.11580604646612723535@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 24 Mar 2025 16:41:01 +0000",
+   "hyperkitty": {
+    "hash": "NBPZB4NCBXIHM2XS7IODHPEPVZNIFVNO",
+    "thread": "NBPZB4NCBXIHM2XS7IODHPEPVZNIFVNO",
+    "parent": null,
+    "date": "2025-03-24T16:41:01Z"
+   }
+  },
+  {
+   "message_id": "<26593.39767.463197.815134@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<174283446180.2582794.11580604646612723535@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Mon, 24 Mar 2025 17:50:18 +0000",
+   "hyperkitty": {
+    "hash": "WVHMO6ZY2AMJ5BAWWHY4C6HYI6YAAH5H",
+    "thread": "NBPZB4NCBXIHM2XS7IODHPEPVZNIFVNO",
+    "parent": "NBPZB4NCBXIHM2XS7IODHPEPVZNIFVNO",
+    "date": "2025-03-24T17:50:18Z"
+   }
+  },
+  {
+   "message_id": "<174284042282.2573091.6697193667744224855@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 24 Mar 2025 18:20:22 +0000",
+   "hyperkitty": {
+    "hash": "RHJCL3IIRESXPKAEABLDOXGHO6LEFLOY",
+    "thread": "RHJCL3IIRESXPKAEABLDOXGHO6LEFLOY",
+    "parent": null,
+    "date": "2025-03-24T18:20:22Z"
+   }
+  },
+  {
+   "message_id": "<174284624592.2868319.5659649002629726367@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Mon, 24 Mar 2025 19:57:25 +0000",
+   "hyperkitty": {
+    "hash": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": null,
+    "date": "2025-03-24T19:57:25Z"
+   }
+  },
+  {
+   "message_id": "<738080FF-5628-4139-9225-38D4C6AEF191@msapiro.net>",
+   "in_reply_to": [
+    "<174284042282.2573091.6697193667744224855@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 06:16:15 +0700",
+   "hyperkitty": {
+    "hash": "54MO2VVQQ2KYBU4RDOVMBS5GHZ3WEAI4",
+    "thread": "RHJCL3IIRESXPKAEABLDOXGHO6LEFLOY",
+    "parent": "RHJCL3IIRESXPKAEABLDOXGHO6LEFLOY",
+    "date": "2025-03-24T23:16:15Z"
+   }
+  },
+  {
+   "message_id": "<3BD2375B-976C-4503-A8E6-CE2AF7AF7CF1@msapiro.net>",
+   "in_reply_to": [
+    "<174284624592.2868319.5659649002629726367@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 06:23:24 +0700",
+   "hyperkitty": {
+    "hash": "W7FX3SUOX7DEDJAY6DKGDALV3K7VR2U2",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "date": "2025-03-24T23:23:24Z"
+   }
+  },
+  {
+   "message_id": "<4635f027-4767-4dd1-89a9-aaec14e1c4ed@uni-konstanz.de>",
+   "in_reply_to": [
+    "<26589.32301.738858.740876@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 07:41:33 +0100",
+   "hyperkitty": {
+    "hash": "PMDW4P56S6K524ITBBOVXOZYLBPUPZ7O",
+    "thread": "L3SKUFO7ZK3W7JO6HOKHOULTMCUGWW5L",
+    "parent": "HRNF2T24376AB45AW4HKEZVX5GGDBDEA",
+    "date": "2025-03-25T06:41:33Z"
+   }
+  },
+  {
+   "message_id": "<174289789380.3199208.1776805536000353205@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 10:18:13 +0000",
+   "hyperkitty": {
+    "hash": "V5B64BWU4IJ4EUWWKA7FSLEYYA2BTSYS",
+    "thread": "V5B64BWU4IJ4EUWWKA7FSLEYYA2BTSYS",
+    "parent": null,
+    "date": "2025-03-25T10:18:13Z"
+   }
+  },
+  {
+   "message_id": "<201E183E-34AA-4DB8-8061-B74FE137FF4E@msapiro.net>",
+   "in_reply_to": [
+    "<174289789380.3199208.1776805536000353205@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 18:17:28 +0700",
+   "hyperkitty": {
+    "hash": "A5DVUUEJ2L4UEW3SOUYOQFXVUA5YDET3",
+    "thread": "V5B64BWU4IJ4EUWWKA7FSLEYYA2BTSYS",
+    "parent": "V5B64BWU4IJ4EUWWKA7FSLEYYA2BTSYS",
+    "date": "2025-03-25T11:17:28Z"
+   }
+  },
+  {
+   "message_id": "<174290175140.3227589.1113753982400108064@mail.mailman3.org>",
+   "in_reply_to": [
+    "<201E183E-34AA-4DB8-8061-B74FE137FF4E@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 11:22:31 +0000",
+   "hyperkitty": {
+    "hash": "VR42ISA2UBVMLSOWY5KK5UXXTFXYGZYC",
+    "thread": "V5B64BWU4IJ4EUWWKA7FSLEYYA2BTSYS",
+    "parent": "A5DVUUEJ2L4UEW3SOUYOQFXVUA5YDET3",
+    "date": "2025-03-25T11:22:31Z"
+   }
+  },
+  {
+   "message_id": "<174290245938.3199208.6498720552963992413@mail.mailman3.org>",
+   "in_reply_to": [
+    "<738080FF-5628-4139-9225-38D4C6AEF191@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 11:34:19 +0000",
+   "hyperkitty": {
+    "hash": "KNCRNPGVQE6R6CQNIM6WQ5O7XBGAOEBY",
+    "thread": "RHJCL3IIRESXPKAEABLDOXGHO6LEFLOY",
+    "parent": "54MO2VVQQ2KYBU4RDOVMBS5GHZ3WEAI4",
+    "date": "2025-03-25T11:34:19Z"
+   }
+  },
+  {
+   "message_id": "<174290332691.3320021.14061117509109223729@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 11:48:46 +0000",
+   "hyperkitty": {
+    "hash": "JCXN62INUJYM762YUPFLUZ256UECL234",
+    "thread": "JCXN62INUJYM762YUPFLUZ256UECL234",
+    "parent": null,
+    "date": "2025-03-25T11:48:46Z"
+   }
+  },
+  {
+   "message_id": "<174290528674.3227589.8181665370073057379@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174290332691.3320021.14061117509109223729@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 12:21:26 +0000",
+   "hyperkitty": {
+    "hash": "DEZSLXRQZKSN6WYR7MY4CUZ5FZW5J35N",
+    "thread": "JCXN62INUJYM762YUPFLUZ256UECL234",
+    "parent": "JCXN62INUJYM762YUPFLUZ256UECL234",
+    "date": "2025-03-25T12:21:26Z"
+   }
+  },
+  {
+   "message_id": "<174290646126.3199208.6046909370635057767@mail.mailman3.org>",
+   "in_reply_to": [
+    "<CAAdA2WP3Gawk+mvFBuon+tyzDY3g9P2pZEMHxozQqOpc6JBWtw@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 12:41:01 +0000",
+   "hyperkitty": {
+    "hash": "YZDN2JNIGSCNLLUMDPN4YD4QHPNGNYI4",
+    "thread": "VDNRB6HEYJR4KKIZV4BFDP5DOTLIAVIO",
+    "parent": "6RGW4FMMKE6Q46BHGPYFO427USYBU3DS",
+    "date": "2025-03-25T12:41:01Z"
+   }
+  },
+  {
+   "message_id": "<174291146033.3320021.10498473666125514766@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174290175140.3227589.1113753982400108064@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 14:04:20 +0000",
+   "hyperkitty": {
+    "hash": "R67Y5XYYV233BZU2ODNTYKF4SKRRB67S",
+    "thread": "V5B64BWU4IJ4EUWWKA7FSLEYYA2BTSYS",
+    "parent": "VR42ISA2UBVMLSOWY5KK5UXXTFXYGZYC",
+    "date": "2025-03-25T14:04:20Z"
+   }
+  },
+  {
+   "message_id": "<f5d1d933-2d61-4413-a1b8-473c35f2dc8c@hhu.de>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 16:06:03 +0100",
+   "hyperkitty": {
+    "hash": "CYLEH6RNVGL6NYV6PSHCBO5JHAUGZSBA",
+    "thread": "CYLEH6RNVGL6NYV6PSHCBO5JHAUGZSBA",
+    "parent": null,
+    "date": "2025-03-25T15:06:03Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WP_nWGhgw3A=KO-zuSJ3juDgu7G5bnnXZT9egfNxcqxQA@mail.gmail.com>",
+   "in_reply_to": [
+    "<f5d1d933-2d61-4413-a1b8-473c35f2dc8c@hhu.de>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 18:13:12 +0300",
+   "hyperkitty": {
+    "hash": "JC3FQL2EM2JFXBIDV7B4XA4XVUKN2P5Y",
+    "thread": "CYLEH6RNVGL6NYV6PSHCBO5JHAUGZSBA",
+    "parent": "CYLEH6RNVGL6NYV6PSHCBO5JHAUGZSBA",
+    "date": "2025-03-25T15:13:12Z"
+   }
+  },
+  {
+   "message_id": "<174292512076.3272663.15811769576216225750@mail.mailman3.org>",
+   "in_reply_to": [
+    "<3BD2375B-976C-4503-A8E6-CE2AF7AF7CF1@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 17:52:00 +0000",
+   "hyperkitty": {
+    "hash": "4MEVMMWFEAR4SBWWEDR46KTHXORWZ3XQ",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "W7FX3SUOX7DEDJAY6DKGDALV3K7VR2U2",
+    "date": "2025-03-25T17:52:00Z"
+   }
+  },
+  {
+   "message_id": "<174293016369.3444047.6624793495677496140@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174292512076.3272663.15811769576216225750@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 19:16:03 +0000",
+   "hyperkitty": {
+    "hash": "UVG5SO2HZWLNB7LZJRLASNZS4JZ6VYNJ",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "4MEVMMWFEAR4SBWWEDR46KTHXORWZ3XQ",
+    "date": "2025-03-25T19:16:03Z"
+   }
+  },
+  {
+   "message_id": "<174293450724.3444047.5427438447619023027@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 20:28:27 +0000",
+   "hyperkitty": {
+    "hash": "P3IDZZR6LHLN3UMKLNSCMF6FIFRGUPL7",
+    "thread": "P3IDZZR6LHLN3UMKLNSCMF6FIFRGUPL7",
+    "parent": null,
+    "date": "2025-03-25T20:28:27Z"
+   }
+  },
+  {
+   "message_id": "<174294180308.3439204.14203179088615995419@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174293016369.3444047.6624793495677496140@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 22:30:03 +0000",
+   "hyperkitty": {
+    "hash": "ZXA5JSLUJJXPLZ5SJSQIJRZGLY43DOAZ",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "UVG5SO2HZWLNB7LZJRLASNZS4JZ6VYNJ",
+    "date": "2025-03-25T22:30:03Z"
+   }
+  },
+  {
+   "message_id": "<174294640779.3444047.14772130048293387456@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174294180308.3439204.14203179088615995419@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Tue, 25 Mar 2025 23:46:47 +0000",
+   "hyperkitty": {
+    "hash": "VFI5CHJDZP3G77NJOBZZSOLVPFMS53ZO",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "ZXA5JSLUJJXPLZ5SJSQIJRZGLY43DOAZ",
+    "date": "2025-03-25T23:46:47Z"
+   }
+  },
+  {
+   "message_id": "<174294779820.3272663.7830036089373565691@mail.mailman3.org>",
+   "in_reply_to": [
+    "<174294640779.3444047.14772130048293387456@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 00:09:58 +0000",
+   "hyperkitty": {
+    "hash": "IRSODUBIVGUIAPMA7S2YX7QYQLLHDYKU",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "VFI5CHJDZP3G77NJOBZZSOLVPFMS53ZO",
+    "date": "2025-03-26T00:09:58Z"
+   }
+  },
+  {
+   "message_id": "<3E424F8A-9665-4FFF-AC06-12AADA28F942@msapiro.net>",
+   "in_reply_to": [
+    "<174293450724.3444047.5427438447619023027@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 09:52:47 +0700",
+   "hyperkitty": {
+    "hash": "K3UJ36XZLPH4M7V35JPNO3F6C6O7WZNM",
+    "thread": "P3IDZZR6LHLN3UMKLNSCMF6FIFRGUPL7",
+    "parent": "P3IDZZR6LHLN3UMKLNSCMF6FIFRGUPL7",
+    "date": "2025-03-26T02:52:47Z"
+   }
+  },
+  {
+   "message_id": "<26595.41021.142720.980361@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<f5d1d933-2d61-4413-a1b8-473c35f2dc8c@hhu.de>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 06:35:44 +0000",
+   "hyperkitty": {
+    "hash": "KJJ2DUJ6MUPDGB4NG34MLWGT5KOBTQEB",
+    "thread": "CYLEH6RNVGL6NYV6PSHCBO5JHAUGZSBA",
+    "parent": "CYLEH6RNVGL6NYV6PSHCBO5JHAUGZSBA",
+    "date": "2025-03-26T06:35:44Z"
+   }
+  },
+  {
+   "message_id": "<26595.42503.851812.764303@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<174294779820.3272663.7830036089373565691@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 07:00:26 +0000",
+   "hyperkitty": {
+    "hash": "MXO5U46H35A6QHQRECAXNOZ4YOI7UQEG",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "IRSODUBIVGUIAPMA7S2YX7QYQLLHDYKU",
+    "date": "2025-03-26T07:00:26Z"
+   }
+  },
+  {
+   "message_id": "<a8845e61-ce2a-4a60-8fbf-1bec3149e503@msapiro.net>",
+   "in_reply_to": [
+    "<174294180308.3439204.14203179088615995419@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 16:59:25 +0700",
+   "hyperkitty": {
+    "hash": "VXVCB4EWZOC6EBYYFLHP2I7O3AJZQDH6",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "ZXA5JSLUJJXPLZ5SJSQIJRZGLY43DOAZ",
+    "date": "2025-03-26T09:59:25Z"
+   }
+  },
+  {
+   "message_id": "<1f058450-4dc7-423c-9beb-828c0d703661@msapiro.net>",
+   "in_reply_to": [
+    "<174292512076.3272663.15811769576216225750@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 17:02:43 +0700",
+   "hyperkitty": {
+    "hash": "7XJTAQE5P5CWBEEGDOY4ORAUAEDVTMGJ",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "4MEVMMWFEAR4SBWWEDR46KTHXORWZ3XQ",
+    "date": "2025-03-26T10:02:43Z"
+   }
+  },
+  {
+   "message_id": "<1271262a-0e50-4824-bb2b-7c4f4d8ca2dd@msapiro.net>",
+   "in_reply_to": [
+    "<174294640779.3444047.14772130048293387456@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 17:04:20 +0700",
+   "hyperkitty": {
+    "hash": "INAKN7UJT3KHGK3ZKM4AULDREJHNVD5M",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "VFI5CHJDZP3G77NJOBZZSOLVPFMS53ZO",
+    "date": "2025-03-26T10:04:20Z"
+   }
+  },
+  {
+   "message_id": "<086b010a-67cf-4a8c-84d5-adefcbdd3973@msapiro.net>",
+   "in_reply_to": [
+    "<174290646126.3199208.6046909370635057767@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 17:15:37 +0700",
+   "hyperkitty": {
+    "hash": "UDHKZ5OVHUPKKXR4QFRHBQM3E2VPTPWK",
+    "thread": "VDNRB6HEYJR4KKIZV4BFDP5DOTLIAVIO",
+    "parent": "YZDN2JNIGSCNLLUMDPN4YD4QHPNGNYI4",
+    "date": "2025-03-26T10:15:37Z"
+   }
+  },
+  {
+   "message_id": "<174299224784.3856205.17090959424176715026@mail.mailman3.org>",
+   "in_reply_to": [
+    "<26593.39767.463197.815134@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 12:30:47 +0000",
+   "hyperkitty": {
+    "hash": "IX53NAQFA2LEAN7CQPEGG4UNW5IXNCIH",
+    "thread": "NBPZB4NCBXIHM2XS7IODHPEPVZNIFVNO",
+    "parent": "WVHMO6ZY2AMJ5BAWWHY4C6HYI6YAAH5H",
+    "date": "2025-03-26T12:30:47Z"
+   }
+  },
+  {
+   "message_id": "<c42f815d-c052-48f6-b438-ae2c684b1b15@gmail.com>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 16:09:06 +0100",
+   "hyperkitty": {
+    "hash": "NTYURZHSURODNUISUBBDHWIBWYNGQAV6",
+    "thread": "NTYURZHSURODNUISUBBDHWIBWYNGQAV6",
+    "parent": null,
+    "date": "2025-03-26T15:09:06Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WOmOgQ0H74hFe+8+Qcqaz4BG=c7KDH0ePSKCvJHGH=ejw@mail.gmail.com>",
+   "in_reply_to": [
+    "<c42f815d-c052-48f6-b438-ae2c684b1b15@gmail.com>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 18:23:55 +0300",
+   "hyperkitty": {
+    "hash": "RSJ5Z53MCALJO772XZYEQOUFZCUHLD7C",
+    "thread": "NTYURZHSURODNUISUBBDHWIBWYNGQAV6",
+    "parent": "NTYURZHSURODNUISUBBDHWIBWYNGQAV6",
+    "date": "2025-03-26T15:23:55Z"
+   }
+  },
+  {
+   "message_id": "<174300989338.26629.313328848190777645@mail.mailman3.org>",
+   "in_reply_to": [
+    "<3E424F8A-9665-4FFF-AC06-12AADA28F942@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 17:24:53 +0000",
+   "hyperkitty": {
+    "hash": "VIITWHAQ6YC5W6BJGQ6IDSTF2LIWQ22U",
+    "thread": "P3IDZZR6LHLN3UMKLNSCMF6FIFRGUPL7",
+    "parent": "K3UJ36XZLPH4M7V35JPNO3F6C6O7WZNM",
+    "date": "2025-03-26T17:24:53Z"
+   }
+  },
+  {
+   "message_id": "<174301685616.25533.18181307980554847719@mail.mailman3.org>",
+   "in_reply_to": [
+    "<1f058450-4dc7-423c-9beb-828c0d703661@msapiro.net>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 19:20:56 +0000",
+   "hyperkitty": {
+    "hash": "AYQXLKKCP2FKH6S7MS7T5VKKVAZBVEQX",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "7XJTAQE5P5CWBEEGDOY4ORAUAEDVTMGJ",
+    "date": "2025-03-26T19:20:56Z"
+   }
+  },
+  {
+   "message_id": "<174301924029.26629.4785076867965916126@mail.mailman3.org>",
+   "in_reply_to": [
+    "<26595.42503.851812.764303@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 20:00:40 +0000",
+   "hyperkitty": {
+    "hash": "RBWPXYNH4ALKE4CFT6GEP7M2Z44J4VDQ",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "MXO5U46H35A6QHQRECAXNOZ4YOI7UQEG",
+    "date": "2025-03-26T20:00:40Z"
+   }
+  },
+  {
+   "message_id": "<e6e8b0e7-1efb-46a9-a8cb-02b687c57da6@bearcircle.net>",
+   "in_reply_to": [
+    "<26593.39767.463197.815134@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Wed, 26 Mar 2025 17:25:21 -0400",
+   "hyperkitty": {
+    "hash": "7H4HI42BFOVT5ZBP7JOJTWATQ6RNNNIN",
+    "thread": "NBPZB4NCBXIHM2XS7IODHPEPVZNIFVNO",
+    "parent": "WVHMO6ZY2AMJ5BAWWHY4C6HYI6YAAH5H",
+    "date": "2025-03-26T21:25:21Z"
+   }
+  },
+  {
+   "message_id": "<C86437E1-10AA-4894-B278-557CF1F73929@msapiro.net>",
+   "in_reply_to": [
+    "<174301685616.25533.18181307980554847719@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 08:09:45 +0700",
+   "hyperkitty": {
+    "hash": "G3ZAMQDCNOEG6Q4TREB6ZER2BTE2KZWY",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "AYQXLKKCP2FKH6S7MS7T5VKKVAZBVEQX",
+    "date": "2025-03-27T01:09:45Z"
+   }
+  },
+  {
+   "message_id": "<f7699a7a-f172-41e2-abfb-d264adb09099@gmail.com>",
+   "in_reply_to": [
+    "<CAAdA2WOmOgQ0H74hFe+8+Qcqaz4BG=c7KDH0ePSKCvJHGH=ejw@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 10:08:14 +0100",
+   "hyperkitty": {
+    "hash": "AV47PZHRGPFO2PTX3V7MWFX26AWK65L6",
+    "thread": "NTYURZHSURODNUISUBBDHWIBWYNGQAV6",
+    "parent": "RSJ5Z53MCALJO772XZYEQOUFZCUHLD7C",
+    "date": "2025-03-27T09:08:14Z"
+   }
+  },
+  {
+   "message_id": "<26597.9979.561873.9922@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<174300989338.26629.313328848190777645@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 10:22:54 +0000",
+   "hyperkitty": {
+    "hash": "D5HOSXHJLK3XZ3SZ4GU24OTU5BFPQPG3",
+    "thread": "P3IDZZR6LHLN3UMKLNSCMF6FIFRGUPL7",
+    "parent": "VIITWHAQ6YC5W6BJGQ6IDSTF2LIWQ22U",
+    "date": "2025-03-27T10:22:54Z"
+   }
+  },
+  {
+   "message_id": "<26597.14438.493547.985657@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<174301924029.26629.4785076867965916126@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 11:37:13 +0000",
+   "hyperkitty": {
+    "hash": "PZQHRDLKTTLAND4WNRNAVS726D7KINWG",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "RBWPXYNH4ALKE4CFT6GEP7M2Z44J4VDQ",
+    "date": "2025-03-27T11:37:13Z"
+   }
+  },
+  {
+   "message_id": "<26597.15504.855710.661837@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<e6e8b0e7-1efb-46a9-a8cb-02b687c57da6@bearcircle.net>"
+   ],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 11:54:59 +0000",
+   "hyperkitty": {
+    "hash": "KY2DLTR7AHCCHZBQGLLBYY53PR6M4JI4",
+    "thread": "NBPZB4NCBXIHM2XS7IODHPEPVZNIFVNO",
+    "parent": "7H4HI42BFOVT5ZBP7JOJTWATQ6RNNNIN",
+    "date": "2025-03-27T11:54:59Z"
+   }
+  },
+  {
+   "message_id": "<174309517908.576754.2728642761675980889@mail.mailman3.org>",
+   "in_reply_to": [
+    "<26597.14438.493547.985657@StephennoMacBook-Pro.local>"
+   ],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 17:06:19 +0000",
+   "hyperkitty": {
+    "hash": "E2EITDZADWNDGVQCBCW33FC6H3K3R46C",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "PZQHRDLKTTLAND4WNRNAVS726D7KINWG",
+    "date": "2025-03-27T17:06:19Z"
+   }
+  },
+  {
+   "message_id": "<174310548952.637218.4511349353884468722@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 19:58:09 +0000",
+   "hyperkitty": {
+    "hash": "OTCQP5NP5VNCDSRH2OFLX4VTL6GCVXCE",
+    "thread": "OTCQP5NP5VNCDSRH2OFLX4VTL6GCVXCE",
+    "parent": null,
+    "date": "2025-03-27T19:58:09Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WMzX+=3bom=Aex=spSuFCUpO2mdttA+xHpgN8AkUkTdbg@mail.gmail.com>",
+   "in_reply_to": [
+    "<174310548952.637218.4511349353884468722@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 23:21:43 +0300",
+   "hyperkitty": {
+    "hash": "3L7KI572MDSONW5T2ZIGPWMF7AR3QR56",
+    "thread": "OTCQP5NP5VNCDSRH2OFLX4VTL6GCVXCE",
+    "parent": "OTCQP5NP5VNCDSRH2OFLX4VTL6GCVXCE",
+    "date": "2025-03-27T20:21:43Z"
+   }
+  },
+  {
+   "message_id": "<174310955867.692834.3657594337458553779@mail.mailman3.org>",
+   "in_reply_to": [
+    "<CAAdA2WMzX+=3bom=Aex=spSuFCUpO2mdttA+xHpgN8AkUkTdbg@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Thu, 27 Mar 2025 21:05:58 +0000",
+   "hyperkitty": {
+    "hash": "R7TLZFSQKMY5IGKFSZKXMK7N4X3IEMUQ",
+    "thread": "OTCQP5NP5VNCDSRH2OFLX4VTL6GCVXCE",
+    "parent": "3L7KI572MDSONW5T2ZIGPWMF7AR3QR56",
+    "date": "2025-03-27T21:05:58Z"
+   }
+  },
+  {
+   "message_id": "<2248F48B-E17B-425B-AE8B-404F95445C3F@msapiro.net>",
+   "in_reply_to": [
+    "<174309517908.576754.2728642761675980889@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Fri, 28 Mar 2025 07:55:13 +0700",
+   "hyperkitty": {
+    "hash": "4ZT5W4VC4VHPT3NY5LSTXRET6LWDJMVX",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "E2EITDZADWNDGVQCBCW33FC6H3K3R46C",
+    "date": "2025-03-28T00:55:13Z"
+   }
+  },
+  {
+   "message_id": "<26598.15941.747973.941050@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<174310955867.692834.3657594337458553779@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Fri, 28 Mar 2025 06:14:32 +0000",
+   "hyperkitty": {
+    "hash": "35CM3EDQEUU4RKKSIVSYQSCBVQBYUZGG",
+    "thread": "OTCQP5NP5VNCDSRH2OFLX4VTL6GCVXCE",
+    "parent": "R7TLZFSQKMY5IGKFSZKXMK7N4X3IEMUQ",
+    "date": "2025-03-28T06:14:32Z"
+   }
+  },
+  {
+   "message_id": "<26598.17479.197155.349048@StephennoMacBook-Pro.local>",
+   "in_reply_to": [
+    "<174309517908.576754.2728642761675980889@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Fri, 28 Mar 2025 06:40:10 +0000",
+   "hyperkitty": {
+    "hash": "3XBQVSUDFEARPZZLWX7VSOHIFLYBBGEU",
+    "thread": "4UTLBFJS2NYA4CH32LOY7FAGCTFWHW5G",
+    "parent": "E2EITDZADWNDGVQCBCW33FC6H3K3R46C",
+    "date": "2025-03-28T06:40:10Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WMYmCj0PeD38s30T5VKcw1cHCXg=jcPJWtvdb5_e4ouNg@mail.gmail.com>",
+   "in_reply_to": [
+    "<174310955867.692834.3657594337458553779@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Fri, 28 Mar 2025 09:40:55 +0300",
+   "hyperkitty": {
+    "hash": "TPZRH7YD4754RKDVZRWRAKLBIAUSTREY",
+    "thread": "OTCQP5NP5VNCDSRH2OFLX4VTL6GCVXCE",
+    "parent": "R7TLZFSQKMY5IGKFSZKXMK7N4X3IEMUQ",
+    "date": "2025-03-28T06:40:55Z"
+   }
+  },
+  {
+   "message_id": "<174334525406.2017800.648874002065986239@mail.mailman3.org>",
+   "in_reply_to": [],
+   "references": [],
+   "date": "Sun, 30 Mar 2025 14:34:14 +0000",
+   "hyperkitty": {
+    "hash": "3BRKE54V2MZMRHB3HYOO5VMQKWGJ5NX3",
+    "thread": "3BRKE54V2MZMRHB3HYOO5VMQKWGJ5NX3",
+    "parent": null,
+    "date": "2025-03-30T14:34:14Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WPXpFNtGMdgZgvaHJ88vaec1gvjDw-3MGVFxpd_4i7Www@mail.gmail.com>",
+   "in_reply_to": [
+    "<174334525406.2017800.648874002065986239@mail.mailman3.org>"
+   ],
+   "references": [],
+   "date": "Sun, 30 Mar 2025 17:43:00 +0300",
+   "hyperkitty": {
+    "hash": "Q2I53C2GKBBWYKBT2YRYHA6HF6UMYQDN",
+    "thread": "3BRKE54V2MZMRHB3HYOO5VMQKWGJ5NX3",
+    "parent": "3BRKE54V2MZMRHB3HYOO5VMQKWGJ5NX3",
+    "date": "2025-03-30T14:43:00Z"
+   }
+  },
+  {
+   "message_id": "<AFCD6873-81F4-4274-8934-88D283DB505D@gmail.com>",
+   "in_reply_to": [
+    "<CAAdA2WPXpFNtGMdgZgvaHJ88vaec1gvjDw-3MGVFxpd_4i7Www@mail.gmail.com>"
+   ],
+   "references": [],
+   "date": "Sun, 30 Mar 2025 10:04:07 -0500",
+   "hyperkitty": {
+    "hash": "UP3ZB3DKK2T34FZPPUNC5HBLACM65HS2",
+    "thread": "3BRKE54V2MZMRHB3HYOO5VMQKWGJ5NX3",
+    "parent": "Q2I53C2GKBBWYKBT2YRYHA6HF6UMYQDN",
+    "date": "2025-03-30T15:04:07Z"
+   }
+  },
+  {
+   "message_id": "<CAAdA2WPAfmFgm3UtmM30GLgSY48M2yqicJtvNdCBUvP8OwGMmA@mail.gmail.com>",
+   "in_reply_to": [
+    "<AFCD6873-81F4-4274-8934-88D283DB505D@gmail.com>"
+   ],
+   "references": [],
+   "date": "Sun, 30 Mar 2025 18:23:46 +0300",
+   "hyperkitty": {
+    "hash": "FMZXBJTVQBWIGPT4KLTOSXFETC6WUUPZ",
+    "thread": "3BRKE54V2MZMRHB3HYOO5VMQKWGJ5NX3",
+    "parent": "UP3ZB3DKK2T34FZPPUNC5HBLACM65HS2",
+    "date": "2025-03-30T15:23:46Z"
+   }
+  }
+ ]
+}

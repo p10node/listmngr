@@ -1,5 +1,39 @@
 # Architecture
 
+## Phase 5 acceptance — bounded local acceptance verified
+
+`crates/archive/tests/hyperkitty_parity.rs` is the external check the
+phase asked for. Its fixture,
+`crates/archive/tests/fixtures/hyperkitty/mailman-users-2025-03.json`, was
+built from HyperKitty's own mbox export of `mailman-users@mailman3.org`
+for March 2025 (the reference headers of each message) joined with the
+record HyperKitty's REST API returns at `/api/list/<list>/email/<hash>/`
+for the hash this archive computed (the answers: `message_id_hash`, the
+thread, the parent). `every_message_id_hash_agrees_with_hyperkitty` checks
+`listmngr_mail::message_id_hash` against all 138;
+`threading_agrees_with_hyperkitty_after_a_real_import` rebuilds the month
+as an mbox with stub bodies, imports it through `mbox::import`, reads it
+back through `read_browser` and compares each post's thread and visible
+parent, counting a difference as explained only when HyperKitty's root or
+parent is a February post the month does not hold.
+
+The divergence it found is closed by two helpers in
+`crates/db/src/archive.rs` shared by `ArchiveRepo::complete` (the runner)
+and `import_batch` (the importer). `resolve_thread` returns the thread of
+the first archived candidate among the provisional root and the parent,
+else the provisional root when posts are already filed under it (data
+archived before this change), else the post's own hash. `adopt_orphans`
+runs after the insert: two `UPDATE`s move to the new post's thread every
+row filed under its hash as a provisional root (`archive_thread`) and
+every row whose thread is the hash of a reply to it that had been its
+own root (`archive_parent`, then `archive_thread`) — that reply's whole
+subtree, since a self-rooted thread's rows all carry its hash. They are
+two statements because one `OR` between the two conditions made SQLite
+scan the table per archived post, which turned the hundred-thousand-post
+import from seconds into more than the ten minutes the phase allows.
+`crates/archive/tests/archive.rs::verify_orphans_adopted_by_a_late_parent`
+pins the rule on both backends.
+
 ## Remote archivers — bounded local acceptance verified
 
 `ArchiversConfig` (`[archive] archivers`: `mail_archive_address`,

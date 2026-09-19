@@ -1,5 +1,51 @@
 # listmngr
 
+## Phase 5 acceptance (`P5-ACCEPTANCE`) — bounded local acceptance verified
+
+The four acceptance criteria of Phase 5 in `docs/PLAN.md` §7, each with
+its evidence:
+
+1. **A 100 000-message mbox imports in under ten minutes** on a
+   development machine — `import_100k_posts_in_under_ten_minutes`
+   (`crates/cli/tests/archive_import.rs`, run by hand): 26.1 s for a
+   77 MiB mbox, re-measured on the threading rule below (the numbers of
+   the local run are in the ledger).
+2. **Search p95 under 100 ms** — `search_p95_is_under_100ms_over_100k_posts`
+   (`crates/archive/tests/search.rs`, run by hand): p95 8.4 ms over 200
+   queries against 100 000 indexed posts (ledger `P5-SEARCH`).
+3. **The Message-ID-Hash agrees with HyperKitty** for the same Message-ID —
+   `crates/archive/tests/hyperkitty_parity.rs` against a real HyperKitty:
+   every message of `mailman-users@mailman3.org` in March 2025 (138), the
+   hash this archive computes was used to fetch HyperKitty's own record
+   for the message, and the record's `message_id` and `message_id_hash`
+   match in every case.
+4. **Threading agrees with HyperKitty's import of the same messages** —
+   the same fixture imported through `listmngr archive import`'s path:
+   133 of 138 parents and 132 of 138 threads are the ones HyperKitty
+   reports; the remaining 5 and 6 are replies to February, whose parent
+   and root HyperKitty holds and a month imported alone cannot.
+
+The fixture keeps only the reference headers (`Message-ID`, `In-Reply-To`,
+`References`, `Date`) and HyperKitty's answers (hash, thread, parent) —
+no body, name or address.
+
+Criterion 4 found one real divergence and it is fixed here: a reply whose
+referenced parent is archived nowhere used to be filed under the missing
+parent's hash — a thread named after a post nobody holds — where
+HyperKitty starts a new thread at the reply. The archive now resolves a
+post's thread the way HyperKitty does, in the runner and in the importer
+alike: the thread of its first archived ancestor (the provisional root,
+else the parent), otherwise the post itself; and a parent arriving after
+such replies takes them in with their subtrees, so out-of-order delivery
+still ends in one thread.
+
+Limits: the HyperKitty comparison covers one public list and one month
+(138 messages) fetched on 2026-09-19, and its REST records, not a HyperKitty
+database; a reply whose provisional root and parent are both absent but
+whose `References` names an archived ancestor in between still starts its
+own thread (HyperKitty walks the whole list); the two benchmarks measure
+SQLite in the dev profile on one machine.
+
 ## Remote archivers (`P5-REMOTE-ARCHIVERS`) — bounded local acceptance verified
 
 The three archivers a list can switch on in its settings now do something.
