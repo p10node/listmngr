@@ -1,5 +1,30 @@
 # listmngr
 
+## Subscription by mail, end to end (`P3-SUBSCRIPTION-E2E`) — bounded local acceptance verified
+
+`crates/cli/tests/mailpath_e2e.rs` now walks the subscription flow over
+mail on the real binary: a stranger writes `subscribe` to `dev-join@`
+through the LMTP socket; the server's challenge reaches the SMTP sink —
+`Subject: confirm TOKEN`, `Reply-To: dev-confirm@`, the token in the
+body, a null reverse path and `Auto-Submitted: auto-generated` like every
+generated notice — and the roster is still empty; the reply, subject
+intact, to `dev-confirm@` makes them a member, and the receipt and the
+welcome (`send_welcome_message`) arrive; their first post is delivered
+back to them with the list's prefix; `unsubscribe` to `dev-leave@` gets
+a fresh challenge with a new token; its reply ends the membership and the
+goodbye (`send_goodbye_message`) arrives; a replay of the spent join
+token is accepted at the socket, as any durable command is, and changes
+nothing and sends nothing.
+
+The flow found one thing in the way: the per-address hourly cooldown on
+requests counted every request of the last hour, so a member who had
+just confirmed a join by mail could not ask to leave by mail for an hour
+— the leave was dropped silently. The cooldown now counts only requests
+still waiting (their token unspent): an outstanding challenge or a
+moderator's queue row holds the address as before, an answered one does
+not. Mailman has no such cooldown at all; this one stays, bounded to what
+a stranger can produce for an address.
+
 ## Digest snapshot (`P3-DIGEST-SNAPSHOT`) — bounded local acceptance verified
 
 The two digest issues are now compared with what Mailman 3.3.10 itself
@@ -2180,7 +2205,8 @@ Banned join requests return the same generic success as ineligible requests,
 without a challenge notice, token or new mailbox cooldown. Confirmation rechecks
 the stored original mailbox: a ban added after the challenge blocks admission
 without consuming the token; removal allows retry within its original expiry.
-Leave remains available subject to the existing cooldown. Posting and join share
+Leave remains available subject to the cooldown, which since `P3-SUBSCRIPTION-E2E`
+counts only requests still waiting. Posting and join share
 canonical exact matching and original-case regex matching. Ban writes share the
 workflow transaction reservation. This does not change privileged member CRUD or
 imports, administer global bans, or evict existing members. See

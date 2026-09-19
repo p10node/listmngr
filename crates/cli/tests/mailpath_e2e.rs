@@ -1559,3 +1559,231 @@ async fn web_post_is_delivered_and_archived() {
     )
     .await;
 }
+
+/// The list's roster of one role through the compatibility API.
+async fn roster(fixture: &Fixture, role: &str) -> Vec<String> {
+    let response = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/3.1/lists/{}/roster/{role}",
+            fixture.web_port, fixture.list
+        ))
+        .bearer_auth(&fixture.admin_token)
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success(), "{}", response.status());
+    let body: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+    body["entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| entry["email"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// A mail command as a subscriber's mail client would send it.
+fn command(from: &str, local: &str, subject: &str) -> Vec<u8> {
+    format!(
+        "From: {from}\r\nTo: {local}@e2e.example.invalid\r\nMessage-ID: <{}@example.invalid>\r\nSubject: {subject}\r\n\r\n",
+        uuid::Uuid::now_v7()
+    )
+    .into_bytes()
+}
+
+/// Deliver one mail command over the real LMTP socket and require the
+/// durable acceptance.
+async fn send_command(fixture: &Fixture, from: &str, local: &str, subject: &str) {
+    let result = lmtp_deliver(
+        fixture.lmtp_port,
+        Some(from),
+        &[&format!("{local}@e2e.example.invalid")],
+        &command(from, local, subject),
+    )
+    .await;
+    assert!(
+        result.rcpt_replies[0].starts_with("250"),
+        "{local}: {:?}",
+        result.rcpt_replies
+    );
+    assert!(
+        result.data_replies[0].starts_with("250"),
+        "{local}: {:?}",
+        result.data_replies
+    );
+}
+
+/// The next mail to `to` whose subject starts with `subject`, counted
+/// from `seen` deliveries; the sink is real, so it is waited for.
+async fn next_mail_to(fixture: &Fixture, seen: usize, to: &str, subject: &str) -> Delivery {
+    let matches = |delivery: &Delivery| {
+        delivery.rcpt_to == [to.to_owned()]
+            && header(&delivery.data, "Subject").is_some_and(|s| s.starts_with(subject))
+    };
+    let found = wait_until(Duration::from_secs(15), || {
+        fixture.sink.deliveries().iter().skip(seen).any(matches)
+    })
+    .await;
+    let deliveries = fixture.sink.deliveries();
+    assert!(
+        found,
+        "no mail to {to} with subject {subject:?} after {seen}: {:?}",
+        deliveries.iter().map(mail_summary).collect::<Vec<_>>()
+    );
+    deliveries.into_iter().skip(seen).find(matches).unwrap()
+}
+
+/// (envelope sender, recipients, subject) of one delivery, for a failure.
+fn mail_summary(delivery: &Delivery) -> (Option<String>, Vec<String>, Option<String>) {
+    (
+        delivery.mail_from.clone(),
+        delivery.rcpt_to.clone(),
+        header(&delivery.data, "Subject"),
+    )
+}
+
+/// The confirmation challenge: `Subject: confirm TOKEN`, `Reply-To` the
+/// list's `-confirm` address, the token in the body, and — as every
+/// generated notice here — a null reverse path and `Auto-Submitted`;
+/// returns the token.
+fn challenge_token(challenge: &Delivery, to: &str) -> String {
+    let subject = header(&challenge.data, "Subject").unwrap();
+    let token = subject
+        .strip_prefix("confirm ")
+        .unwrap_or_else(|| panic!("not a challenge: {subject}"))
+        .to_owned();
+    assert_eq!(token.len(), 43, "one base64url token: {subject}");
+    assert_eq!(
+        header(&challenge.data, "Reply-To").as_deref(),
+        Some("dev-confirm@e2e.example.invalid")
+    );
+    assert_eq!(header(&challenge.data, "To").as_deref(), Some(to));
+    assert_eq!(
+        challenge.mail_from.as_deref(),
+        Some(""),
+        "a notice travels with the null reverse path"
+    );
+    assert_eq!(
+        header(&challenge.data, "Auto-Submitted").as_deref(),
+        Some("auto-generated")
+    );
+    let body = String::from_utf8_lossy(&challenge.data);
+    assert!(
+        body.contains(&format!("Token: {token}")),
+        "the body names the token: {body}"
+    );
+    token
+}
+
+/// Phase 3 acceptance: the subscription flow over mail, end to end. A
+/// stranger writes to `dev-join@`; the server mails a challenge whose
+/// subject is `confirm TOKEN` with `Reply-To: dev-confirm@`; the reply,
+/// subject intact, makes them a member and the welcome notice reaches
+/// them. Then `dev-leave@`: a fresh challenge, the reply removes them and
+/// the goodbye notice reaches them. A replay of a spent token changes
+/// nothing. Every mail crosses the real LMTP socket in and the real SMTP
+/// sink out.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn join_and_leave_by_mail_round_trip_their_confirmation_tokens() {
+    let fixture = Fixture::start().await;
+    fixture
+        .patch_config(serde_json::json!({
+            "send_welcome_message": true,
+            "send_goodbye_message": true
+        }))
+        .await;
+    let newbie = "newbie@e2e.example.invalid";
+
+    // -join: the challenge, and no membership yet.
+    send_command(&fixture, newbie, "dev-join", "subscribe").await;
+    let challenge = next_mail_to(&fixture, 0, newbie, "confirm ").await;
+    let join_token = challenge_token(&challenge, newbie);
+    assert!(
+        roster(&fixture, "member").await.is_empty(),
+        "no member before the confirmation"
+    );
+
+    // The reply to the challenge: membership, then the welcome.
+    let seen = fixture.sink.deliveries().len();
+    send_command(
+        &fixture,
+        newbie,
+        "dev-confirm",
+        &format!("Re: confirm {join_token}"),
+    )
+    .await;
+    let welcome = next_mail_to(
+        &fixture,
+        seen,
+        newbie,
+        "Welcome to the \"Dev\" mailing list",
+    )
+    .await;
+    assert_eq!(roster(&fixture, "member").await, vec![newbie.to_owned()]);
+    assert!(
+        String::from_utf8_lossy(&welcome.data).contains("dev@e2e.example.invalid"),
+        "the welcome names the list: {:?}",
+        String::from_utf8_lossy(&welcome.data)
+    );
+
+    // The new member's post is delivered to them like any member's.
+    let seen = fixture.sink.deliveries().len();
+    let result = lmtp_deliver(
+        fixture.lmtp_port,
+        Some(newbie),
+        &["dev@e2e.example.invalid"],
+        &post(newbie, "first post", "hello from a confirmed member"),
+    )
+    .await;
+    assert!(result.data_replies[0].starts_with("250"), "{result:?}");
+    let copy = next_mail_to(&fixture, seen, newbie, "[dev] first post").await;
+    assert!(String::from_utf8_lossy(&copy.data).contains("hello from a confirmed member"));
+
+    // -leave: a fresh challenge; the spent join token is not it.
+    let seen = fixture.sink.deliveries().len();
+    send_command(&fixture, newbie, "dev-leave", "unsubscribe").await;
+    let challenge = next_mail_to(&fixture, seen, newbie, "confirm ").await;
+    let leave_token = challenge_token(&challenge, newbie);
+    assert_ne!(leave_token, join_token, "a new token for a new request");
+    assert_eq!(roster(&fixture, "member").await, vec![newbie.to_owned()]);
+
+    // The reply: the membership ends, then the goodbye.
+    let seen = fixture.sink.deliveries().len();
+    send_command(
+        &fixture,
+        newbie,
+        "dev-confirm",
+        &format!("Re: confirm {leave_token}"),
+    )
+    .await;
+    next_mail_to(
+        &fixture,
+        seen,
+        newbie,
+        "You have been unsubscribed from the Dev mailing list",
+    )
+    .await;
+    assert!(roster(&fixture, "member").await.is_empty());
+
+    // A replay of the spent join token: accepted at the socket (it is a
+    // durable command), but no membership and no further mail.
+    let seen = fixture.sink.deliveries().len();
+    send_command(
+        &fixture,
+        newbie,
+        "dev-confirm",
+        &format!("Re: confirm {join_token}"),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(roster(&fixture, "member").await.is_empty());
+    assert_eq!(
+        fixture.sink.deliveries().len(),
+        seen,
+        "no mail answers a spent token: {:?}",
+        fixture.sink.deliveries()[seen..]
+            .iter()
+            .map(mail_summary)
+            .collect::<Vec<_>>()
+    );
+}
