@@ -189,7 +189,7 @@ impl Database {
         let Some(user) = session.user_id else {
             return Ok(false);
         };
-        let mut tx = self.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.write_tx().await?;
         if !policy_requires(&mut tx, user, required_roles).await? {
             return Ok(false);
         }

@@ -159,7 +159,7 @@ impl TaskRepo<'_> {
     async fn purge_with(&self, step: &str, value: i64, statements: &[&str]) -> Result<u64> {
         let mut total = 0;
         for _ in 0..MAX_BATCHES {
-            let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+            let mut tx = self.db.write_tx().await?;
             let mut deleted = 0;
             for sql in statements {
                 deleted = sqlx::query(sql)
@@ -188,7 +188,7 @@ impl TaskRepo<'_> {
     async fn collect_jobs(&self, now_ms: i64, cutoff: i64) -> Result<u64> {
         let mut total = 0;
         for _ in 0..MAX_BATCHES {
-            let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+            let mut tx = self.db.write_tx().await?;
             let ids: Vec<String> = sqlx::query_scalar(
                 "SELECT q.id FROM queue_jobs q WHERE q.state='done' AND q.run_after<=$1 AND NOT EXISTS(SELECT 1 FROM dsn_issuances d WHERE d.job_id=q.id AND d.expires_at>$2) ORDER BY q.run_after,q.id LIMIT $3",
             )
@@ -228,7 +228,7 @@ impl TaskRepo<'_> {
     async fn collect_messages(&self, cutoff: i64) -> Result<u64> {
         let mut total = 0;
         for _ in 0..MAX_BATCHES {
-            let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+            let mut tx = self.db.write_tx().await?;
             let rows = sqlx::query(
                 "SELECT m.id,m.store_key FROM messages m WHERE m.created_at<=$1 AND NOT EXISTS(SELECT 1 FROM queue_jobs q WHERE q.message_id=m.id) AND NOT EXISTS(SELECT 1 FROM held_messages h WHERE h.message_id=m.id) AND NOT EXISTS(SELECT 1 FROM dsn_issuances d WHERE d.message_id=m.id) ORDER BY m.created_at,m.id LIMIT $2",
             )
@@ -301,7 +301,7 @@ impl TaskRepo<'_> {
                 }
             }
             if !stale.is_empty() {
-                let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+                let mut tx = self.db.write_tx().await?;
                 for (id, received) in &stale {
                     // Fenced on the receipt read above: a bounce scored in
                     // between is a fresh score, not a stale one.
@@ -383,7 +383,7 @@ impl TaskRepo<'_> {
         if pending.total() == 0 {
             return Ok(false);
         }
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let recipients: Vec<String> = sqlx::query_scalar("SELECT a.original_email FROM addresses a WHERE EXISTS (SELECT 1 FROM members m WHERE m.address_id=a.id AND m.list_id=$1 AND m.role IN ('owner','moderator')) ORDER BY a.email")
             .bind(list.as_str()).fetch_all(&mut *tx).await.map_err(db_error)?;
         let snapshot = crate::notices::list_snapshot(&mut tx, list).await?;

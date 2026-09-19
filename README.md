@@ -1,5 +1,72 @@
 # listmngr
 
+## Real-client suite (`P3-CLIENT-SUITE`) — bounded local acceptance verified
+
+`scripts/test-mailmanclient.py` now runs, after the Phase 1 flow and the
+held flow, `tests/compat/mailmanclient_suite.py`: the mailmanclient 3.3.5
+doctest (`docs/using.rst`) section by section against a running listmngr
+— domains, lists and styles, membership with tokens and pagination, users
+and addresses, list settings (with one key per Postorius group), global and
+member preferences, pipelines and chains, owners and moderators with
+`find_lists`, subscription requests and their moderation, held messages
+through `Queue.inject`, site and list bans with pages, archivers, header
+matches, the configuration sections, templates on a list and a domain,
+and the digest counters. Every call the doctest makes is made, with the
+value the doctest prints; 232 checks in 18 sections. Where listmngr differs
+on purpose the suite says so and asserts listmngr's behaviour instead, and
+prints the list at the end — seven deviations, below.
+
+Closing the suite made the REST surface do what mailmanclient expects:
+a domain without a description answers `null`; a new list's display name
+is the list name capitalised (`Test-1`); `/lists/styles` carries the
+styles with their descriptions and the default; `?advertised=true` narrows
+a domain's lists; every `/lists/{id}/…` route takes the `fqdn_listname`
+as well as the list id; `GET /members` lists every membership; a member
+links its `user`; `DELETE …/roster/member` is the mass unsubscribe;
+users are created from a form and answered with a `Location`, addressed
+by id or email, patched with `cleartext_password`, and carry
+`self_link`, `user_id` and `created_on`; addresses are added to a user
+(created or adopted, `absorb_existing` to take one from another account),
+listed with `self_link` and `verified`, made preferred
+(`users/{id}/preferred_address`) and deleted; preferences and member
+patches accept forms with `True`/`False`; `lists/find` finds a
+subscriber's lists by role and host; `lists/{id}/{owner,moderator,
+nonmember}/{email}` read and remove a role; a member's
+`moderation_action` is patchable; a request carries `when`; the
+autoresponse action is spelt `respond_and_continue` as Mailman spells it;
+the system `hide_address` default is `true`; the two moderation rules hold
+with Mailman's own reasons ("The message is not from a list member", "The
+message comes from a moderated member"); pipelines, chains and the
+configuration index take Mailman's shapes; a list's archivers are a
+dictionary of switches, patchable; and deleting a list takes its held
+messages and moderation log with it.
+
+The gate also surfaced two robustness gaps, both closed: an internal error
+(500) minted a correlation id but logged nothing — it now logs the cause
+with the id; and on SQLite the runners' writes collided with the API's
+("database is locked") — every pooled connection now enforces foreign
+keys, waits five seconds for a lock and, for a file, uses write-ahead
+logging, and every repository write transaction is `BEGIN IMMEDIATE`
+(`Database::write_tx`), so a writer takes its reservation up front instead
+of being refused mid-transaction.
+
+Deviations the suite records: listmngr registers a user only when an
+account is made (CLI, REST `create_user`, or web signup), so a bare
+subscriber's member carries no `user` link and `client.users` lists
+accounts, not subscribers — an account made later adopts the subscriber's
+address; a bare `DELETE` on a member keeps the confirmation workflow, so
+an administrative removal states `pre_confirmed` and `pre_approved`; the
+password policy refuses the doctest's `somepass`; an account's first
+address becomes its preferred address at creation (the web account mails
+it); `user.password` is always `null` — the hash is never handed out; and
+a new list's archivers start off rather than on.
+
+Limits: the suite runs on SQLite (the gate's disposable server); no
+doctest section for the digest resource exists in mailmanclient, so the
+counters are checked through the raw connection; `absorb_existing` moves
+the address and leaves the other account in place rather than merging
+the accounts.
+
 ## Phase 5 acceptance (`P5-ACCEPTANCE`) — bounded local acceptance verified
 
 The four acceptance criteria of Phase 5 in `docs/PLAN.md` §7, each with

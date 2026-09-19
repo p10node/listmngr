@@ -101,7 +101,7 @@ impl<'a> ModerationRepo<'a> {
         reason: &str,
         now_ms: i64,
     ) -> Result<HeldMessage> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let queue = self.db.mail_queue();
         let queue = self.clock.map_or(queue, |clock| queue.with_clock(clock));
         let now_ms = queue.lock_time(&mut tx, lease, now_ms).await?;
@@ -237,7 +237,7 @@ impl<'a> ModerationRepo<'a> {
         max_attempts: i64,
         now_ms: i64,
     ) -> Result<(HeldMessage, QueueJob)> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let held = set_disposition(&mut tx, id, "accepted", moderator, now_ms).await?;
         let job = insert_child_job(
             &mut tx,
@@ -285,7 +285,7 @@ impl<'a> ModerationRepo<'a> {
         refusal: &PostRefusal<'_>,
         now_ms: i64,
     ) -> Result<()> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let queue = self.db.mail_queue();
         let queue = self.clock.map_or(queue, |clock| queue.with_clock(clock));
         let now_ms = queue.lock_time(&mut tx, lease, now_ms).await?;
@@ -527,7 +527,7 @@ impl<'a> ModerationRepo<'a> {
         reason: &str,
         now_ms: i64,
     ) -> Result<HeldMessage> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let held = set_disposition(&mut tx, id, disposition, moderator, now_ms).await?;
         if disposition == "rejected" {
             rejection_notice(&mut tx, self.db, &held, reason, now_ms).await?;

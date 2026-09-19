@@ -63,7 +63,7 @@ async fn a_list_that_answers_nothing_sends_nothing() {
 #[tokio::test]
 async fn the_owner_address_answers_once_per_grace_period_and_per_writer() {
     let (db, list) = fixture(json!({
-        "autorespond_owner": "respond",
+        "autorespond_owner": "respond_and_continue",
         "autoresponse_owner_text": "The $listname owners read mail weekly.",
         "autoresponse_grace_period": 2,
     }))
@@ -80,7 +80,7 @@ async fn the_owner_address_answers_once_per_grace_period_and_per_writer() {
     };
     assert_eq!(
         respond("writer@example.net", DAY_MS).await,
-        ResponseAction::Respond
+        ResponseAction::RespondAndContinue
     );
     let sent = bodies(&db).await;
     assert_eq!(sent.len(), 1);
@@ -99,19 +99,19 @@ async fn the_owner_address_answers_once_per_grace_period_and_per_writer() {
     // Inside the grace period the same writer is not answered again.
     assert_eq!(
         respond("writer@example.net", DAY_MS + DAY_MS).await,
-        ResponseAction::Respond
+        ResponseAction::RespondAndContinue
     );
     assert_eq!(bodies(&db).await.len(), 1);
     // Another writer is answered at once.
     assert_eq!(
         respond("other@example.net", DAY_MS).await,
-        ResponseAction::Respond
+        ResponseAction::RespondAndContinue
     );
     assert_eq!(bodies(&db).await.len(), 2);
     // Past the grace period the first writer is answered again.
     assert_eq!(
         respond("writer@example.net", DAY_MS + 3 * DAY_MS).await,
-        ResponseAction::Respond
+        ResponseAction::RespondAndContinue
     );
     assert_eq!(bodies(&db).await.len(), 3);
 }
@@ -148,8 +148,8 @@ async fn discarding_keeps_discarding_even_when_the_grace_period_is_quiet() {
 #[tokio::test]
 async fn a_zero_grace_period_answers_every_message_and_each_kind_counts_separately() {
     let (db, list) = fixture(json!({
-        "autorespond_postings": "respond",
-        "autorespond_owner": "respond",
+        "autorespond_postings": "respond_and_continue",
+        "autorespond_owner": "respond_and_continue",
         "autoresponse_grace_period": 0,
     }))
     .await;
@@ -159,7 +159,7 @@ async fn a_zero_grace_period_answers_every_message_and_each_kind_counts_separate
                 .respond(&list, ResponseKind::Postings, "writer@example.net", DAY_MS)
                 .await
                 .unwrap(),
-            ResponseAction::Respond
+            ResponseAction::RespondAndContinue
         );
     }
     assert_eq!(bodies(&db).await.len(), 3);
@@ -169,7 +169,7 @@ async fn a_zero_grace_period_answers_every_message_and_each_kind_counts_separate
             .respond(&list, ResponseKind::Owner, "writer@example.net", DAY_MS)
             .await
             .unwrap(),
-        ResponseAction::Respond
+        ResponseAction::RespondAndContinue
     );
     assert_eq!(bodies(&db).await.len(), 4);
     // With no grace period every record is already stale: the table is

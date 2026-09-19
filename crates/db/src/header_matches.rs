@@ -279,7 +279,7 @@ impl HeaderMatchRepo<'_> {
         position: Option<usize>,
         edit: impl FnOnce(&mut Vec<HeaderMatchRow>) -> Result<()>,
     ) -> Result<Vec<HeaderMatchRow>> {
-        let mut tx = self.db.pool().begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let rows = Self::edit_tx(&mut tx, list, context, change, position, edit).await?;
         tx.commit().await.map_err(db_error)?;
         Ok(rows)

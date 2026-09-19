@@ -131,6 +131,8 @@ pub struct Database {
     /// `site.base_url`: the public web origin the mail layer may point at
     /// (`List-Archive`, `Archived-At`). Empty when unknown.
     base_url: String,
+    /// Whether the pool is `SQLite`, decided once from the URL.
+    sqlite: bool,
     /// `[archive] archivers.mail_archive_address`: where a public list's
     /// copy goes when its `mail-archive` archiver is on. Empty when the
     /// archiver is not configured, which switches it off.
@@ -164,19 +166,39 @@ impl Database {
         security: &SecurityConfig,
     ) -> Result<Self> {
         INSTALL_DRIVERS.call_once(sqlx::any::install_default_drivers);
-        let pool = AnyPoolOptions::new()
-            .max_connections(max_connections)
-            .connect(url)
-            .await
-            .map_err(db_error)?;
-        if url.starts_with("sqlite:") {
-            sqlx::query("PRAGMA foreign_keys = ON")
-                .execute(&pool)
-                .await
-                .map_err(db_error)?;
+        let sqlite = url.starts_with("sqlite:");
+        let file_backed = sqlite && !url.contains(":memory:") && !url.contains("mode=ro");
+        let mut options = AnyPoolOptions::new().max_connections(max_connections);
+        if sqlite {
+            // The pragmas are per connection, so every pooled connection
+            // runs them: foreign keys enforced; a writer waiting up to five
+            // seconds for the lock instead of failing at once; and, for a
+            // file, write-ahead logging so the runners' writes never block
+            // the API's reads — they share one file.
+            options = options.after_connect(move |connection, _| {
+                Box::pin(async move {
+                    sqlx::query("PRAGMA foreign_keys = ON")
+                        .execute(&mut *connection)
+                        .await?;
+                    sqlx::query("PRAGMA busy_timeout = 5000")
+                        .execute(&mut *connection)
+                        .await?;
+                    if file_backed {
+                        // A file that cannot take WAL (a read-only mount,
+                        // a network share) keeps its journal; the
+                        // connection is still good.
+                        let _ = sqlx::query("PRAGMA journal_mode = WAL")
+                            .execute(&mut *connection)
+                            .await;
+                    }
+                    Ok(())
+                })
+            });
         }
+        let pool = options.connect(url).await.map_err(db_error)?;
         Ok(Self {
             pool,
+            sqlite,
             argon2: security.argon2.clone(),
             password_min_score: security.password_min_score,
             default_language: "en".into(),
@@ -229,6 +251,27 @@ impl Database {
         base_url.trim().clone_into(&mut self.base_url);
         self
     }
+    /// Begin a transaction that will write. On `SQLite` it is `BEGIN
+    /// IMMEDIATE`: the writer reservation is taken up front and waited for
+    /// (`busy_timeout`), where a deferred `BEGIN` that reads first and
+    /// writes later is refused at once when another writer got in between
+    /// — the runners and the API share one file. On `PostgreSQL` it is an
+    /// ordinary transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns the database error when no connection or lock can be had.
+    pub async fn write_tx(&self) -> Result<Transaction<'_, Any>> {
+        if self.sqlite {
+            self.pool
+                .begin_with("BEGIN IMMEDIATE")
+                .await
+                .map_err(db_error)
+        } else {
+            self.pool.begin().await.map_err(db_error)
+        }
+    }
+
     /// The site's public base URL, when configured.
     #[must_use]
     pub fn base_url(&self) -> Option<&str> {
@@ -414,9 +457,12 @@ pub struct AuditEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct NewUser {
+    #[serde(default)]
     pub display_name: String,
     pub email: String,
     pub password: String,
+    /// Absent on `mailmanclient`'s `create_user` form.
+    #[serde(default)]
     pub server_owner: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -528,7 +574,7 @@ impl DomainRepo<'_> {
     ) -> Result<()> {
         let domain = self.get(host).await?;
         self.db.users().get(user).await?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         sqlx::query("INSERT INTO domain_owners(domain_id,user_id) VALUES($1,$2)")
             .bind(domain.id.to_string())
             .bind(user.to_string())
@@ -559,7 +605,7 @@ impl DomainRepo<'_> {
         context: &AuditContext,
     ) -> Result<()> {
         let domain = self.get(host).await?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::remove_owner_tx(&mut tx, &domain, user, context).await?;
         tx.commit().await.map_err(db_error)
     }
@@ -634,7 +680,7 @@ impl DomainRepo<'_> {
             alias_domain: alias.map(str::to_owned),
             created_at: Utc::now(),
         };
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         sqlx::query("INSERT INTO domains(id,mail_host,description,alias_domain,created_at) VALUES($1,$2,$3,$4,$5)")
             .bind(domain.id.to_string()).bind(&domain.mail_host).bind(&domain.description).bind(&domain.alias_domain)
             .bind(domain.created_at.to_rfc3339()).execute(&mut *tx).await.map_err(db_error)?;
@@ -688,7 +734,7 @@ impl DomainRepo<'_> {
         if count != 0 {
             return Err(Error::Conflict("domain owns lists".into()));
         }
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let changed = sqlx::query("DELETE FROM domains WHERE mail_host=$1")
             .bind(host.to_ascii_lowercase())
             .execute(&mut *tx)
@@ -759,7 +805,21 @@ impl UserRepo<'_> {
     /// Returns an error for invalid credentials or fields, conflicting records, or database/audit transaction failure.
     pub async fn create_with_context(&self, new: NewUser, context: &AuditContext) -> Result<User> {
         self.validate_password(&new.password)?;
-        let address = Address::new(&new.email, new.display_name.clone())?;
+        let mut address = Address::new(&new.email, new.display_name.clone())?;
+        // An address already known but nobody's — a bare subscriber — is
+        // adopted by the new account, as Mailman's user creation adopts it;
+        // an address that belongs to an account stays a conflict.
+        let adopted = match self.db.addresses().get(&address.email).await {
+            Ok(existing) if existing.user_id.is_none() => {
+                address.id = existing.id;
+                address.registered_on = existing.registered_on;
+                address.verified_on = existing.verified_on;
+                true
+            }
+            Ok(_) => return Err(Error::Conflict("address belongs to another user".into())),
+            Err(Error::NotFound(_)) => false,
+            Err(error) => return Err(error),
+        };
         let pref = PreferencesId::new();
         let user = User {
             id: UserId::new(),
@@ -776,7 +836,7 @@ impl UserRepo<'_> {
             .hash_password(new.password.as_bytes(), &salt)
             .map_err(db_error)?
             .to_string();
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         sqlx::query("INSERT INTO preferences(id) VALUES($1)")
             .bind(pref.to_string())
             .execute(&mut *tx)
@@ -793,8 +853,18 @@ impl UserRepo<'_> {
         .execute(&mut *tx)
         .await
         .map_err(db_error)?;
-        sqlx::query("INSERT INTO addresses(id,email,original_email,display_name,user_id,registered_on) VALUES($1,$2,$3,$4,$5,$6)")
-            .bind(address.id.to_string()).bind(&address.email).bind(&address.original_email).bind(&address.display_name).bind(user.id.to_string()).bind(address.registered_on.to_rfc3339()).execute(&mut *tx).await.map_err(db_error)?;
+        if adopted {
+            sqlx::query("UPDATE addresses SET user_id=$1,display_name=$2 WHERE id=$3")
+                .bind(user.id.to_string())
+                .bind(&address.display_name)
+                .bind(address.id.to_string())
+                .execute(&mut *tx)
+                .await
+                .map_err(db_error)?;
+        } else {
+            sqlx::query("INSERT INTO addresses(id,email,original_email,display_name,user_id,registered_on) VALUES($1,$2,$3,$4,$5,$6)")
+                .bind(address.id.to_string()).bind(&address.email).bind(&address.original_email).bind(&address.display_name).bind(user.id.to_string()).bind(address.registered_on.to_rfc3339()).execute(&mut *tx).await.map_err(db_error)?;
+        }
         sqlx::query("UPDATE users SET preferred_address_id=$1 WHERE id=$2")
             .bind(address.id.to_string())
             .bind(user.id.to_string())
@@ -812,6 +882,52 @@ impl UserRepo<'_> {
         .await?;
         tx.commit().await.map_err(db_error)?;
         Ok(user)
+    }
+    /// Mailman's `users/{id}/preferred_address`: the address the account
+    /// prefers, linked to it first when it was nobody's; `None` unsets it.
+    /// # Errors
+    /// `NotFound` for an unknown address, `Validation` for one that
+    /// belongs to another account, database failures.
+    pub async fn set_preferred_address_with_context(
+        &self,
+        id: UserId,
+        email: Option<&str>,
+        context: &AuditContext,
+    ) -> Result<()> {
+        self.get(id).await?;
+        let address = match email {
+            Some(email) => {
+                let address = self.db.addresses().get(email).await?;
+                if address.user_id.is_some_and(|owner| owner != id) {
+                    return Err(Error::Validation("address belongs to another user".into()));
+                }
+                if address.user_id.is_none() {
+                    self.db
+                        .addresses()
+                        .link_with_context(email, Some(id), context)
+                        .await?;
+                }
+                Some(address.id)
+            }
+            None => None,
+        };
+        let mut tx = self.db.write_tx().await?;
+        sqlx::query("UPDATE users SET preferred_address_id=$1 WHERE id=$2")
+            .bind(address.map(|value| value.to_string()))
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        Database::record_tx_with_context(
+            &mut tx,
+            context,
+            "user.preferred_address",
+            "user",
+            &id.to_string(),
+            serde_json::json!({"email": email}),
+        )
+        .await?;
+        tx.commit().await.map_err(db_error)
     }
     /// # Errors
     ///
@@ -902,7 +1018,7 @@ impl UserRepo<'_> {
             timezone: timezone.clone(),
         }
         .validate()?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         sqlx::query("UPDATE users SET display_name=$1,locale=$2,timezone=$3 WHERE id=$4")
             .bind(display_name)
             .bind(locale)
@@ -947,7 +1063,7 @@ impl UserRepo<'_> {
             .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
             .map_err(db_error)?
             .to_string();
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let changed = sqlx::query(
             "UPDATE user_credentials SET password_hash=$1,password_updated_at=$2 WHERE user_id=$3",
         )
@@ -1002,7 +1118,7 @@ impl UserRepo<'_> {
     ///
     /// Returns an error if the user is missing or referenced, or if the database/audit transaction fails.
     pub async fn delete_with_context(&self, id: UserId, context: &AuditContext) -> Result<()> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let preferences_id: Option<String> =
             sqlx::query_scalar("SELECT preferences_id FROM users WHERE id=$1")
                 .bind(id.to_string())
@@ -1123,7 +1239,7 @@ impl AddressRepo<'_> {
         context: &AuditContext,
     ) -> Result<Address> {
         let value = verified.then(now);
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let changed = sqlx::query("UPDATE addresses SET verified_on=$1 WHERE email=$2")
             .bind(value)
             .bind(email.to_ascii_lowercase())
@@ -1168,7 +1284,7 @@ impl AddressRepo<'_> {
         user: Option<UserId>,
         context: &AuditContext,
     ) -> Result<Address> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let changed = sqlx::query("UPDATE addresses SET user_id=$1 WHERE email=$2")
             .bind(user.map(|v| v.to_string()))
             .bind(email.to_ascii_lowercase())
@@ -1208,6 +1324,91 @@ impl AddressRepo<'_> {
         .await?;
         tx.commit().await.map_err(db_error)?;
         self.get(email).await
+    }
+}
+impl AddressRepo<'_> {
+    /// Mailman's `POST users/{id}/addresses`: an address for the user —
+    /// created when unknown, adopted when nobody's, taken from another
+    /// account only with `absorb` (Mailman's `absorb_existing`).
+    /// # Errors
+    /// `Validation` for an address that belongs to another account when
+    /// not absorbing, or a malformed address; database failures.
+    pub async fn add_to_user_with_context(
+        &self,
+        email: &str,
+        user: UserId,
+        absorb: bool,
+        context: &AuditContext,
+    ) -> Result<Address> {
+        match self.get(email).await {
+            Ok(existing) => {
+                if existing.user_id.is_some_and(|owner| owner != user) && !absorb {
+                    return Err(Error::Validation("address belongs to another user".into()));
+                }
+                if existing.user_id == Some(user) {
+                    return Ok(existing);
+                }
+                self.link_with_context(email, Some(user), context).await
+            }
+            Err(Error::NotFound(_)) => {
+                let address = Address::new(email, String::new())?;
+                let mut tx = self.db.write_tx().await?;
+                sqlx::query("INSERT INTO addresses(id,email,original_email,display_name,user_id,registered_on) VALUES($1,$2,$3,$4,$5,$6)")
+                    .bind(address.id.to_string()).bind(&address.email).bind(&address.original_email).bind(&address.display_name).bind(user.to_string()).bind(address.registered_on.to_rfc3339())
+                    .execute(&mut *tx).await.map_err(db_error)?;
+                Database::record_tx_with_context(
+                    &mut tx,
+                    context,
+                    "address.link",
+                    "address",
+                    &address.email,
+                    serde_json::json!({"user_id": user, "created": true}),
+                )
+                .await?;
+                tx.commit().await.map_err(db_error)?;
+                self.get(email).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Mailman's `DELETE addresses/{email}`: the address goes, unless a
+    /// membership still uses it.
+    /// # Errors
+    /// `NotFound` for an unknown address, `Conflict` for one with
+    /// memberships, database failures.
+    pub async fn delete_with_context(&self, email: &str, context: &AuditContext) -> Result<()> {
+        let address = self.get(email).await?;
+        let mut tx = self.db.write_tx().await?;
+        let memberships: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM members WHERE address_id=$1")
+                .bind(address.id.to_string())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_error)?;
+        if memberships > 0 {
+            return Err(Error::Conflict("address has memberships".into()));
+        }
+        sqlx::query("UPDATE users SET preferred_address_id=NULL WHERE preferred_address_id=$1")
+            .bind(address.id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        sqlx::query("DELETE FROM addresses WHERE id=$1")
+            .bind(address.id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        Database::record_tx_with_context(
+            &mut tx,
+            context,
+            "address.delete",
+            "address",
+            &address.email,
+            serde_json::json!({"user_id": address.user_id}),
+        )
+        .await?;
+        tx.commit().await.map_err(db_error)
     }
 }
 fn address_from_row(row: &sqlx::any::AnyRow) -> Result<Address> {
@@ -1263,7 +1464,7 @@ impl ListRepo<'_> {
         new: NewList,
         context: &AuditContext,
     ) -> Result<MailingList> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let list = Self::create_tx(&mut tx, new, context).await?;
         tx.commit().await.map_err(db_error)?;
         Ok(list)
@@ -1373,7 +1574,7 @@ impl ListRepo<'_> {
             Some(value) => self.moderator_password_change(value)?,
             None => PasswordChange::Unchanged,
         };
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let list = Self::update_tx_with_password(&mut tx, id, patch, context, password).await?;
         tx.commit().await.map_err(db_error)?;
         Ok(list)
@@ -1478,13 +1679,13 @@ impl ListRepo<'_> {
                 list.forward_unrecognized_bounces_to = parse_enum(key, value)?;
             }
             "autorespond_owner" => {
-                list.automatic_responses.autorespond_owner = parse_enum(key, value)?;
+                list.automatic_responses.autorespond_owner = parse_response_action(key, value)?;
             }
             "autorespond_postings" => {
-                list.automatic_responses.autorespond_postings = parse_enum(key, value)?;
+                list.automatic_responses.autorespond_postings = parse_response_action(key, value)?;
             }
             "autorespond_requests" => {
-                list.automatic_responses.autorespond_requests = parse_enum(key, value)?;
+                list.automatic_responses.autorespond_requests = parse_response_action(key, value)?;
             }
             "autoresponse_owner_text"
             | "autoresponse_postings_text"
@@ -1750,11 +1951,11 @@ impl ListRepo<'_> {
             .map_err(db_error)?;
         let responses = &list.automatic_responses;
         sqlx::query("UPDATE mailing_lists SET autorespond_owner=$1,autoresponse_owner_text=$2,autorespond_postings=$3,autoresponse_postings_text=$4,autorespond_requests=$5,autoresponse_request_text=$6,autoresponse_grace_period=$7 WHERE list_id=$8")
-            .bind(responses.autorespond_owner.as_str())
+            .bind(stored_response_action(responses.autorespond_owner))
             .bind(&responses.autoresponse_owner_text)
-            .bind(responses.autorespond_postings.as_str())
+            .bind(stored_response_action(responses.autorespond_postings))
             .bind(&responses.autoresponse_postings_text)
-            .bind(responses.autorespond_requests.as_str())
+            .bind(stored_response_action(responses.autorespond_requests))
             .bind(&responses.autoresponse_request_text)
             .bind(i64::from(responses.autoresponse_grace_period))
             .bind(list.id.as_str())
@@ -1993,7 +2194,7 @@ impl ListRepo<'_> {
     ///
     /// Returns an error if the list is missing or any database/audit transaction step fails.
     pub async fn delete_with_context(&self, id: &ListId, context: &AuditContext) -> Result<()> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::delete_tx(&mut tx, self.db, id, context).await?;
         tx.commit().await.map_err(db_error)
     }
@@ -2030,6 +2231,19 @@ impl ListRepo<'_> {
             .map_err(db_error)?;
 
         digests::delete_list(tx, id).await?;
+        // The list's moderation history goes with it (both tables restrict
+        // the cascade on purpose, so the delete is explicit here); the queue
+        // messages the held rows pointed at stay for the sweep.
+        sqlx::query("DELETE FROM moderation_log WHERE held_id IN (SELECT id FROM held_messages WHERE list_id=$1)")
+            .bind(id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        sqlx::query("DELETE FROM held_messages WHERE list_id=$1")
+            .bind(id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
         for table in ["list_archivers", "header_matches", "bans"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE list_id=$1"))
                 .bind(id.as_str())
@@ -2094,7 +2308,7 @@ impl ListRepo<'_> {
         context: &AuditContext,
     ) -> Result<()> {
         self.get(id).await?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::set_archiver_tx(&mut tx, id, name, enabled, context).await?;
         tx.commit().await.map_err(db_error)
     }
@@ -2232,13 +2446,13 @@ fn automatic_responses_from_row(
     row: &sqlx::any::AnyRow,
 ) -> Result<listmngr_core::AutomaticResponses> {
     Ok(listmngr_core::AutomaticResponses {
-        autorespond_owner: enum_column(row, "autorespond_owner")?,
+        autorespond_owner: response_action_column(row, "autorespond_owner")?,
         autoresponse_owner_text: row.try_get("autoresponse_owner_text").map_err(db_error)?,
-        autorespond_postings: enum_column(row, "autorespond_postings")?,
+        autorespond_postings: response_action_column(row, "autorespond_postings")?,
         autoresponse_postings_text: row
             .try_get("autoresponse_postings_text")
             .map_err(db_error)?,
-        autorespond_requests: enum_column(row, "autorespond_requests")?,
+        autorespond_requests: response_action_column(row, "autorespond_requests")?,
         autoresponse_request_text: row.try_get("autoresponse_request_text").map_err(db_error)?,
         autoresponse_grace_period: i32::try_from(
             row.try_get::<i64, _>("autoresponse_grace_period")
@@ -2499,6 +2713,61 @@ fn parse_topics(value: &serde_json::Value) -> Result<Vec<listmngr_core::Topic>> 
 }
 
 /// One of a `string_enum`'s wire values, as a JSON string.
+/// The row keeps migration 0037's spelling (`respond`, under its CHECK
+/// constraint); the wire carries Mailman's `respond_and_continue`.
+const fn stored_response_action(action: listmngr_core::ResponseAction) -> &'static str {
+    match action {
+        listmngr_core::ResponseAction::RespondAndContinue => "respond",
+        other => other.as_str(),
+    }
+}
+
+fn response_action_column(
+    row: &sqlx::any::AnyRow,
+    column: &str,
+) -> Result<listmngr_core::ResponseAction> {
+    let stored: String = row.try_get(column).map_err(db_error)?;
+    response_action_from_stored(&stored).map_err(|_| Error::Validation(format!("corrupt {column}")))
+}
+
+/// A `ResponseAction` from the row's spelling (`respond`) or the wire's.
+pub(crate) fn response_action_from_stored(text: &str) -> Result<listmngr_core::ResponseAction> {
+    match text {
+        "respond" => Ok(listmngr_core::ResponseAction::RespondAndContinue),
+        other => other.parse(),
+    }
+}
+
+/// A `ResponseAction` as Mailman spells it, with the row's spelling
+/// (`respond`) still accepted from a client.
+fn parse_response_action(
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<listmngr_core::ResponseAction> {
+    match value.as_str() {
+        Some("respond") => Ok(listmngr_core::ResponseAction::RespondAndContinue),
+        _ => parse_enum(key, value),
+    }
+}
+
+/// Mailman's `moderation_action` on a member patch: an action, or empty
+/// (`null` in JSON, `""` on a form) to fall back to the list's; absent
+/// keeps the current one.
+fn patched_moderation_action(
+    value: Option<&serde_json::Value>,
+    current: Option<listmngr_core::ModerationAction>,
+) -> Result<Option<listmngr_core::ModerationAction>> {
+    match value {
+        None => Ok(current),
+        Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => match value.as_str() {
+            Some("") => Ok(None),
+            Some(text) => Ok(Some(text.parse::<listmngr_core::ModerationAction>()?)),
+            None => Err(Error::Validation("moderation_action".into())),
+        },
+    }
+}
+
 fn parse_enum<T: std::str::FromStr<Err = Error>>(
     key: &str,
     value: &serde_json::Value,
@@ -2820,7 +3089,7 @@ impl MemberRepo<'_> {
     ) -> Result<MemberMassResult> {
         self.db.lists().get(list).await?;
         let addresses = validate_mass_input(operation, emails)?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let existing = load_role_members(&mut tx, list, role).await?;
         preflight_mass_operation(operation, &addresses, &existing)?;
 
@@ -2898,7 +3167,7 @@ impl MemberRepo<'_> {
             last_bounce_received: None,
             created_at: Utc::now(),
         };
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         if insert_address {
             sqlx::query("INSERT INTO addresses(id,email,original_email,display_name,registered_on) VALUES($1,$2,$3,$4,$5)").bind(address.id.to_string()).bind(&address.email).bind(&address.original_email).bind(&address.display_name).bind(address.registered_on.to_rfc3339()).execute(&mut *tx).await.map_err(db_error)?;
         }
@@ -2961,6 +3230,19 @@ impl MemberRepo<'_> {
         let rows=sqlx::query("SELECT m.* FROM members m JOIN addresses a ON a.id=m.address_id WHERE a.email=$1 ORDER BY m.list_id,m.role,m.id").bind(email.to_ascii_lowercase()).fetch_all(&self.db.pool).await.map_err(db_error)?;
         rows.iter().map(member_from_row).collect()
     }
+    /// Every membership on the server, by list and then in subscription
+    /// order, as Mailman's `/members` lists them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when memberships cannot be queried or decoded.
+    pub async fn all(&self) -> Result<Vec<Member>> {
+        let rows = sqlx::query("SELECT m.* FROM members m ORDER BY m.list_id,m.id")
+            .fetch_all(&self.db.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(member_from_row).collect()
+    }
     /// Finds members whose normalized address contains a literal substring.
     ///
     /// # Errors
@@ -3004,13 +3286,20 @@ impl MemberRepo<'_> {
         if object.keys().any(|key| {
             !matches!(
                 key.as_str(),
-                "display_name" | "role" | "subscription_mode" | "delivery_mode" | "delivery_status"
+                "display_name"
+                    | "role"
+                    | "subscription_mode"
+                    | "delivery_mode"
+                    | "delivery_status"
+                    | "moderation_action"
             )
         }) {
             return Err(Error::Validation(
                 "read-only or unknown member field".into(),
             ));
         }
+        let moderation_action =
+            patched_moderation_action(object.get("moderation_action"), current.moderation_action)?;
         let display_name = object.get("display_name").map_or_else(
             || Ok(current.display_name.clone()),
             |v| {
@@ -3055,12 +3344,13 @@ impl MemberRepo<'_> {
                     .parse()?,
             );
         }
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
-        sqlx::query("UPDATE members SET display_name=$1,role=$2,subscription_mode=$3 WHERE id=$4")
+        let mut tx = self.db.write_tx().await?;
+        sqlx::query("UPDATE members SET display_name=$1,role=$2,subscription_mode=$3,moderation_action=$5 WHERE id=$4")
             .bind(display_name)
             .bind(role.to_string())
             .bind(mode.to_string())
             .bind(id.to_string())
+            .bind(moderation_action.map(|action| action.to_string()))
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
@@ -3097,7 +3387,7 @@ impl MemberRepo<'_> {
     ///
     /// Returns an error if the member is missing or the database/audit transaction fails.
     pub async fn delete_with_context(&self, id: MemberId, context: &AuditContext) -> Result<()> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let preferences_id: Option<String> =
             sqlx::query_scalar("SELECT preferences_id FROM members WHERE id=$1")
                 .bind(id.to_string())
@@ -3187,7 +3477,7 @@ impl PreferencesRepo<'_> {
         Ok(())
     }
     async fn set(&self, id: PreferencesId, p: &Preferences, context: &AuditContext) -> Result<()> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         Self::set_tx(&mut tx, id, p).await?;
         Database::record_tx_with_context(
             &mut tx,
@@ -3297,7 +3587,7 @@ impl PreferencesRepo<'_> {
         context: &AuditContext,
     ) -> Result<()> {
         let address = self.db.addresses().get(email).await?;
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let existing: Option<String> =
             sqlx::query_scalar("UPDATE addresses SET preferences_id=preferences_id WHERE id=$1 RETURNING preferences_id")
                 .bind(address.id.to_string())
@@ -3548,7 +3838,7 @@ impl TokenRepo<'_> {
                 return Err(Error::Validation("list is outside token domain".into()));
             }
         }
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let issued = insert_token_tx(&mut tx, &input, context).await?;
         tx.commit().await.map_err(db_error)?;
         Ok(issued)
@@ -3641,7 +3931,7 @@ impl TokenRepo<'_> {
     /// # Errors
     /// Returns a missing-token or database/audit error.
     pub async fn revoke_with_context(&self, id: TokenId, context: &AuditContext) -> Result<()> {
-        let mut tx = self.db.pool.begin().await.map_err(db_error)?;
+        let mut tx = self.db.write_tx().await?;
         let changed =
             sqlx::query("UPDATE api_tokens SET revoked_at=$1 WHERE id=$2 AND revoked_at IS NULL")
                 .bind(now())

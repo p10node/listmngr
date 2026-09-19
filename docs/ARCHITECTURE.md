@@ -1,5 +1,53 @@
 # Architecture
 
+## Real-client suite — bounded local acceptance verified
+
+`tests/compat/mailmanclient_suite.py` is a straight-line script — the
+doctest's calls in the doctest's order, each `check(label, actual,
+expected)` counted, each place listmngr differs a `deviation(...)` that
+asserts listmngr's behaviour and is printed at the end — run by
+`scripts/test-mailmanclient.py` after the Phase 1 flow and the held flow
+(the held flow counts deliveries on the SMTP sink, so it goes first). The
+gate keeps the fixture server's stderr in the temporary directory and
+prints its tail when a flow fails.
+
+On the compatibility flavour the REST layer gained, in
+`crates/api/src/lib.rs`: `user_value`, `address_value` and
+`resolve_user_id` (an id or an address); `JsonOrForm` on `users`,
+`users/{id}` PATCH (with `cleartext_password` set through
+`set_password_with_context`), `users/{id}/addresses` POST, every
+preferences writer, `lists/{id}/config/{attr}` and `members/{id}`, with
+`preference_bool` reading `True`/`False`; `members_list`,
+`roster_mass_unsubscribe` (`mass_unsubscribe_emails` reads the repeated
+form key or a JSON list), `lists_find`, the `role_routes!` handlers for
+owner, moderator and nonmember, `list_archivers_set`,
+`user_preferred_address{,_set,_unset}` and `address_delete`; Mailman's
+shapes for styles, pipelines, chains, the configuration index and the
+archivers; and `domain_lists` honouring `?advertised`. `crates/api/src/
+requests.rs` adds `when`. In the database crate: `AddressRepo::
+add_to_user_with_context` (create, adopt, or absorb) and
+`delete_with_context` (a conflict while memberships use the address);
+`UserRepo::set_preferred_address_with_context` and `create_with_context`
+adopting a bare subscriber's address; `MemberRepo::all` and a patchable
+`moderation_action`; `ListRepo::delete_tx` removing the list's
+`moderation_log` and `held_messages`; and `ResponseAction` renamed to
+Mailman's `RespondAndContinue` on the wire while the row keeps migration
+0037's `respond` under its CHECK constraint (`stored_response_action`,
+`response_action_from_stored`). `listmngr_pipeline::rules` names the two
+moderation reasons as constants with Mailman's texts.
+
+Two general repairs came out of the gate. `ApiError`'s response for a
+server error now logs `correlation_id` and the error before answering, so
+the id a client is told to quote leads somewhere. And SQLite contention:
+`Database::connect_with_security` runs `PRAGMA foreign_keys = ON`, `PRAGMA
+busy_timeout = 5000` and, for a file, `PRAGMA journal_mode = WAL` on every
+pooled connection through `after_connect` (the pragmas are per connection;
+before, only the connection that happened to run them had foreign keys
+on), and `Database::write_tx` — now behind every repository transaction —
+issues `BEGIN IMMEDIATE` on SQLite, as `browser_write_tx` already did,
+because a deferred `BEGIN` that reads and then writes is refused at once
+when another writer committed in between, however long the busy timeout.
+
 ## Phase 5 acceptance — bounded local acceptance verified
 
 `crates/archive/tests/hyperkitty_parity.rs` is the external check the
