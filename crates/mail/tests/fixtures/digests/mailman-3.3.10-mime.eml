@@ -1,0 +1,99 @@
+Content-Type: multipart/mixed; boundary="===============6500400005629605790=="
+MIME-Version: 1.0
+From: news-request@example.invalid
+Subject: News Digest, Vol 2, Issue 3
+To: news@example.invalid
+Reply-To: news@example.invalid
+Date: Sun, 20 Sep 2026 05:22:01 +0700
+Message-ID: <178985652177.71698.9552591365925101731@1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa>
+
+--===============6500400005629605790==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Description: News Digest, Vol 2, Issue 3
+
+Send News mailing list submissions to
+	news@example.invalid
+
+To subscribe or unsubscribe via email, send a message with subject or
+body 'help' to
+	news-request@example.invalid
+
+You can reach the person managing the list at
+	news-owner@example.invalid
+
+When replying, please edit your Subject line so it is more specific
+than "Re: Contents of News digest..."
+--===============6500400005629605790==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Description: Digest Header
+
+Read the list rules before replying.
+
+--===============6500400005629605790==
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+Content-Description: Today's Topics (2 messages)
+
+VG9kYXkncyBUb3BpY3M6CgogICAxLiBYaW4gY2jDoG8gKEFuIE5ndXnhu4VuKQogICAyLiBSZTog
+U2Vjb25kIChiQGV4YW1wbGUuaW52YWxpZCkK
+
+--===============6500400005629605790==
+Content-Type: multipart/digest; boundary="===============2448506834302947831=="
+MIME-Version: 1.0
+
+--===============2448506834302947831==
+Content-Type: message/rfc822
+MIME-Version: 1.0
+
+Message-ID: <a1@example.invalid>
+From: =?utf-8?b?QW4gTmd1eeG7hW4gPGFAZXhhbXBsZS5pbnZhbGlkPg==?=
+To: news@example.invalid
+Date: Mon, 01 Jan 2024 10:00:00 +0000
+Subject: =?utf-8?q?=5BNews=5D_Xin_ch=C3=A0o?=
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+Message: 1
+
+Nội dung đầu tiên.
+
+--===============2448506834302947831==
+Content-Type: message/rfc822
+MIME-Version: 1.0
+
+Message-ID: <b1@example.invalid>
+From: b@example.invalid
+To: news@example.invalid
+Date: Mon, 01 Jan 2024 11:00:00 +0000
+Subject: Re: [News] Second
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="part"
+Message: 2
+
+--part
+Content-Type: text/plain; charset=us-ascii
+
+Different body
+--part
+Content-Type: application/octet-stream; name="notes.bin"
+Content-Disposition: attachment; filename="notes.bin"
+Content-Transfer-Encoding: base64
+
+AAECAw==
+--part--
+
+--===============2448506834302947831==--
+
+--===============6500400005629605790==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Description: Digest Footer
+
+News mailing list -- news@example.invalid
+
+--===============6500400005629605790==--

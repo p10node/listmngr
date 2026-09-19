@@ -1,5 +1,48 @@
 # listmngr
 
+## Digest snapshot (`P3-DIGEST-SNAPSHOT`) — bounded local acceptance verified
+
+The two digest issues are now compared with what Mailman 3.3.10 itself
+writes. `tests/compat/generate_mailman_digest.py` runs Mailman core's own
+`RFC1153Digester` and `MIMEDigester` under Mailman's test configuration
+over fixed inputs — a list `news@example.invalid` with a header and a
+footer template, volume 2, issue 3, a UTF-8 Vietnamese post and a post
+with a binary attachment — and keeps the results as
+`crates/mail/tests/fixtures/digests/mailman-3.3.10-{plain,mime}.eml` with
+the inputs in `inputs.json`. `crates/mail/tests/digest_snapshot.rs`
+builds the same issue from the same inputs and asserts the same text: the
+plain issue line for line, the MIME issue part for part (each
+`Content-Description` and text, then every post inside the
+`multipart/digest` with its `Message: n` header), and `wrap` against
+Mailman's `wrap` on four texts.
+
+To agree with Mailman the renderer changed shape. The plain issue is the
+masthead wrapped at seventy columns, the header template, `Today's
+Topics:` with each post's subject without the list's prefix (also behind
+a `Re:`) and its author's display name (the address when there is none),
+seventy hyphens, then each post as `Message: n` followed by Mailman's
+kept headers in Mailman's order (`Date`, `From`, `Subject`, `To`, `Cc`,
+`Message-ID`, `Keywords`, `Content-Type`; decoded, unfolded, wrapped at
+seventy columns with tab-indented continuations) and its scrubbed body —
+every `text/plain` part's text, every other part replaced by Mailman's
+note (`Name`, `Type`, `Size`, `Desc`), joined by the `next part` line —
+behind thirty hyphens, the footer as `Subject: Digest Footer`, and `End
+of … Digest, Vol X, Issue Y` underlined to its own length. The MIME issue
+is the masthead (described by the issue's title), `Digest Header`,
+`Today's Topics (n messages)`, the `multipart/digest` of the whole posts
+each with a `Message: n` header, and `Digest Footer`; there is no closing
+part any more, as Mailman's postamble never reaches the wire. The digest
+is `From` the `-request` address with `Reply-To` the list.
+
+Three Mailman quirks are named in the test and not reproduced: its
+scrubber mangles an 8-bit UTF-8 body (`N\u1ed9i dung …`) where this
+renderer keeps the text; it glues the `next part` line onto the last body
+line where this renderer starts a new line; and it re-encodes an 8-bit
+`From` as one RFC 2047 word holding the name and the address together.
+Limits: the fixtures are one list, one language (`en`, whose masthead
+Mailman encodes as `us-ascii`, so the fixture list's name is ASCII) and
+two posts; the kept-header lists are Mailman's defaults, not configurable.
+
 ## Real-client suite (`P3-CLIENT-SUITE`) — bounded local acceptance verified
 
 `scripts/test-mailmanclient.py` now runs, after the Phase 1 flow and the
@@ -1356,16 +1399,18 @@ pending posts that trigger an issue; `0` never), `digest_send_periodic`
 since the last issue advances the volume and restarts the issue numbers at 1,
 audited as `digest.bump`).
 
-The plain-text issue now follows RFC 1153 as Mailman writes it: the list's
-`list:member:digest:masthead`, `Today's Topics:` with each subject and
-author, the `list:member:digest:header`, each message under a numbered
+The plain-text issue follows RFC 1153 as Mailman writes it: the list's
+`list:member:digest:masthead`, the `list:member:digest:header`, `Today's
+Topics:` with each subject and author, each message under a numbered
 `Message: N` block behind a line of thirty hyphens, the
 `list:member:digest:footer` as `Subject: Digest Footer`, and `End of … Digest,
-Vol X, Issue Y` with its underline. The MIME issue keeps the posts whole and
-carries the same three templates as their own text parts (empty templates are
-omitted). `summary_digests` remains Mailman's MIME alias. Templates are
-resolved for the list's language with `$volume` and `$issue` added to the
-usual placeholders. See `P3-DIGEST-SETTINGS` in `docs/FEATURE_PARITY.md`.
+Vol X, Issue Y` with its underline (the exact layout is compared with
+Mailman's own output under `P3-DIGEST-SNAPSHOT`, above). The MIME issue
+keeps the posts whole and carries the same three templates as their own
+text parts (empty header and footer templates are omitted).
+`summary_digests` remains Mailman's MIME alias. Templates are resolved for
+the list's language with `$volume` and `$issue` added to the usual
+placeholders. See `P3-DIGEST-SETTINGS` in `docs/FEATURE_PARITY.md`.
 
 Mailman's `/lists/{id}/digest` resource (`P3-DIGEST-REST`) is on both
 prefixes: `GET` returns the list's `volume` and `next_digest_number`; `POST`
