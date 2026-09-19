@@ -13,7 +13,12 @@ pub type SharedWriter = Arc<Mutex<Writer>>;
 const COMMIT_BATCH: usize = 100;
 const COMMIT_AGE: Duration = Duration::from_secs(2);
 
-pub async fn run(db: Database, index: Option<SharedWriter>, mut shutdown: watch::Receiver<bool>) {
+pub async fn run(
+    db: Database,
+    index: Option<SharedWriter>,
+    archivers: listmngr_archive::archivers::Settings,
+    mut shutdown: watch::Receiver<bool>,
+) {
     loop {
         if *shutdown.borrow() {
             if let Some(index) = &index {
@@ -32,7 +37,7 @@ pub async fn run(db: Database, index: Option<SharedWriter>, mut shutdown: watch:
             )
             .await
         {
-            Ok(Some(lease)) => archive_and_index(&db, index.as_ref(), &lease).await,
+            Ok(Some(lease)) => archive_and_index(&db, index.as_ref(), &archivers, &lease).await,
             Ok(None) => {
                 if let Some(index) = &index {
                     commit(index, false).await;
@@ -47,16 +52,70 @@ pub async fn run(db: Database, index: Option<SharedWriter>, mut shutdown: watch:
     }
 }
 
-/// Archive one leased post and, when it was stored, add it to the index.
+/// Archive one leased post and, when it was stored, add it to the index
+/// and hand it to the list's remote archivers.
 async fn archive_and_index(
     db: &Database,
     index: Option<&SharedWriter>,
+    archivers: &listmngr_archive::archivers::Settings,
     lease: &listmngr_db::mail_queue::Lease,
 ) {
-    if process(db, lease).await
-        && let Some(index) = index
-    {
-        index_message(db, index, lease.job.message_id).await;
+    if process(db, lease).await {
+        if let Some(index) = index {
+            index_message(db, index, lease.job.message_id).await;
+        }
+        forward_to_archivers(db, lease.job.message_id, archivers).await;
+    }
+}
+
+/// Hand one archived post to the list's enabled remote archivers that act
+/// outside the database; the names that ran.
+///
+/// This follows the archive transaction rather than joining it, so a
+/// crash between the two loses a forward and never the archived post. A
+/// post the archive did not store (an archive policy of `never`) and a
+/// list with every archiver off both forward nothing. `mail-archive` is
+/// not here: its copy is queued inside the archive's own transaction.
+pub async fn forward_to_archivers(
+    db: &Database,
+    message_id: listmngr_db::mail_queue::MessageId,
+    archivers: &listmngr_archive::archivers::Settings,
+) -> Vec<&'static str> {
+    let Some((list, hash)) = archived_post(db, message_id, archivers).await else {
+        return Vec::new();
+    };
+    match listmngr_archive::archivers::run(db, &list, &hash, archivers).await {
+        Ok(names) => names,
+        Err(error) => {
+            tracing::warn!(%error, list = %list, "archivers failed");
+            Vec::new()
+        }
+    }
+}
+
+/// The list and Message-ID-Hash of an archived post, when there is one
+/// and any archiver could act on it.
+async fn archived_post(
+    db: &Database,
+    message_id: listmngr_db::mail_queue::MessageId,
+    archivers: &listmngr_archive::archivers::Settings,
+) -> Option<(listmngr_core::ListId, String)> {
+    if archivers.is_empty() {
+        return None;
+    }
+    let row = match db.archive().index_row_for_message(message_id).await {
+        Ok(row) => row?,
+        Err(error) => {
+            tracing::warn!(%error, "archivers: archived post not readable");
+            return None;
+        }
+    };
+    match row.list.parse() {
+        Ok(list) => Some((list, row.hash)),
+        Err(error) => {
+            tracing::warn!(%error, "archivers: unreadable list id");
+            None
+        }
     }
 }
 

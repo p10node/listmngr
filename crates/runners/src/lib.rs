@@ -15,6 +15,8 @@ mod archive_index_tests;
 #[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]
+mod remote_archivers_tests;
+#[cfg(test)]
 mod web_post_tests;
 
 mod archive;
@@ -256,6 +258,11 @@ pub async fn serve_mail_role(
     // The `in` processor's future is large (chain, pipeline and templated
     // notices all inline); keep it on the heap rather than in this frame.
     let site_owner = config.site.site_owner.clone();
+    // Taken before the configuration moves into the `in` processor.
+    let archivers = listmngr_archive::archivers::Settings {
+        mhonarc: config.archive.archivers.mhonarc_command.clone(),
+        prototype: config.archive.archivers.prototype_path.clone(),
+    };
     // The search index follows the archive; without it the archive page
     // falls back to its substring search and `listmngr archive reindex`
     // repairs the index later.
@@ -311,7 +318,7 @@ pub async fn serve_mail_role(
         digest.await;
         Ok(())
     });
-    let archive = archive::run(db.clone(), search_writer, shutdown.clone());
+    let archive = archive::run(db.clone(), search_writer, archivers, shutdown.clone());
     tasks.spawn(async move {
         archive.await;
         Ok(())

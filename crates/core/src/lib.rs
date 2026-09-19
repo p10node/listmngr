@@ -1498,8 +1498,19 @@ config_struct!(AntispamConfig {
     header_checks: Vec<HeaderCheck> = Vec::new(),
     jump_chain: String = "hold".into()
 });
+// The remote archivers a list can switch on (`list_archivers`). Each is
+// off until the operator configures it here: an empty address, command or
+// path leaves that archiver off however a list is configured. The command
+// is an argument vector, never a shell line, so nothing in a message can
+// become a shell word.
+config_struct!(ArchiversConfig {
+    mail_archive_address: String = String::new(),
+    mhonarc_command: Vec<String> = Vec::new(),
+    prototype_path: String = String::new()
+});
 config_struct!(ArchiveConfig {
     enabled: bool = true,
+    archivers: ArchiversConfig = ArchiversConfig::default(),
     index_path: String = "data/index".into(),
     default_policy: ArchivePolicy = ArchivePolicy::Public,
     // Opt-in avatars: the archive shows a Gravatar for each sender, fetched
