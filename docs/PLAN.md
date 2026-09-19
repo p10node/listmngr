@@ -57,7 +57,7 @@ trong `scripts/test-postgres.sh`. Ngày 2026-09-14 tất cả PASS trong
 
 Chưa có: bộ test tương đương doctest mailmanclient (P3-CLIENT-SUITE), toàn bộ
 Phase 4–7 trừ các lát nêu trên (P4-SHELL, toàn bộ P4-ACCOUNT-*, P4-TOTP,
-P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS, P4-GDPR, P4-ACCEPTANCE đã đóng — Phase 4 hoàn tất theo ledger; Phase 5: P5-RENDER, P5-SEARCH, P5-UI, P5-INTERACTIONS, P5-WEB-POST, P5-MBOX, P5-ADMIN, P5-REMOTE-ARCHIVERS đã đóng — mọi work package Phase 5 xong, còn acceptance Phase 5 và tag phase). Chi tiết và thứ tự ở §7.
+P4-WEBAUTHN, P4-OIDC, P4-LIST-SETTINGS, P4-MEMBERS, P4-HELD-QUEUE, P4-LIST-CREATE-INDEX, P4-DOMAINS-USERS, P4-SYSTEM, P4-MODERATION-CROSS, P4-GDPR, P4-ACCEPTANCE đã đóng — Phase 4 hoàn tất theo ledger; Phase 5: P5-RENDER, P5-SEARCH, P5-UI, P5-INTERACTIONS, P5-WEB-POST, P5-MBOX, P5-ADMIN, P5-REMOTE-ARCHIVERS, P5-ACCEPTANCE đã đóng — Phase 5 hoàn tất theo ledger). Chi tiết và thứ tự ở §7.
 
 ## 0. Tóm tắt 1 phút
 
@@ -937,7 +937,7 @@ thích HyperKitty, `Archived-At`, archive đọc SSR cơ bản
 (`/web/lists/{id}/archive`, export mbox ≤ 20 message) — P2-ARCHIVE-AUTHORITY,
 P2-DSN-INSPECTION; P5-RENDER đã thêm sender/date/parent, cây thread, attachments
 lưu riêng, render text/markdown an toàn, obfuscate, reattach, gravatar proxy.
-P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/feed, P5-INTERACTIONS votes/tags/categories/favourites, P5-WEB-POST đăng bài từ web, P5-MBOX import/export mbox. P5-ADMIN đã thêm trang quản trị archive và P5-REMOTE-ARCHIVERS ba archiver từ xa. Mọi work package Phase 5 đã đóng; còn lại là acceptance Phase 5 và tag phase. UI theo cùng kiến trúc Phase 4 (askama + htmx).
+P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/feed, P5-INTERACTIONS votes/tags/categories/favourites, P5-WEB-POST đăng bài từ web, P5-MBOX import/export mbox. P5-ADMIN đã thêm trang quản trị archive và P5-REMOTE-ARCHIVERS ba archiver từ xa. P5-ACCEPTANCE đối chiếu hash và threading với HyperKitty thật; Phase 5 hoàn tất theo ledger. UI theo cùng kiến trúc Phase 4 (askama + htmx).
 
 | ID                  | Effort | Phạm vi                                                                                                                                                                                                                                            | Acceptance riêng                                  |
 |---------------------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|
@@ -950,7 +950,9 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
 | ~~P5-ADMIN~~ (xong) | S | owner ẩn/hiện và xoá hẳn một bài hoặc cả thread (migration `0051` thêm `archive_messages.hidden_at`; mọi đường đọc lọc `hidden_at IS NULL`; xoá bài nối replies vào cha và re-root thread khi mất gốc, mang theo tag/category/favourite/last-view); reattach đã có từ P5-RENDER; category CRUD trên `…/archive/admin` (trả nợ P4-LIST-SETTINGS và P5-INTERACTIONS) | ĐẠT: `crates/api/tests/webui/archive_admin.rs` + contract PostgreSQL; harness Chromium (thêm/xoá category, ẩn rồi hiện lại một bài) |
 | ~~P5-REMOTE-ARCHIVERS~~ (xong) | S | `[archive] archivers` (`mail_archive_address`, `mhonarc_command` dạng argv, `prototype_path`) + toggle `list_archivers` mới bật một archiver; `mail-archive` enqueue bản sao vào `Queue::Out` ngay trong transaction của `ArchiveRepo::complete` (chỉ list `public`), `mhonarc` pipe qua `tokio::process::Command` với `$listname`/`$hostname`/`$hash`, `prototype` ghi maildir `<root>/<list>/new/<hash>` (ghi `tmp/` rồi rename); bài bị ẩn hoặc `archive_policy=never` không chuyển tiếp | ĐẠT: `crates/runners/src/remote_archivers_tests.rs` + contract PostgreSQL |
 
-- Acceptance: import 100k msg mbox (Mailman list public) < 10 phút máy dev, search p95 < 100ms, URL hash trùng HyperKitty với cùng Message-ID, threading snapshot so với HyperKitty import cùng mbox.
+| ~~P5-ACCEPTANCE~~ (xong) | S | gom bốn tiêu chí acceptance Phase 5: benchmark import 100k và search p95 (số ở ledger), `crates/archive/tests/hyperkitty_parity.rs` đối chiếu hash và threading với HyperKitty thật (`mailman-users@mailman3.org`, 2025-03, 138 message, fixture chỉ giữ header/hash/quan hệ); sửa divergence tìm được — reply tới cha vắng mặt tự làm root như HyperKitty (`resolve_thread` + `adopt_orphans` dùng chung cho runner và importer) | ĐẠT: `hyperkitty_parity.rs` (138/138 hash; 133/138 parent, 132/138 thread — phần còn lại là root/cha tháng 2 ngoài fixture) + `archive.rs::verify_orphans_adopted_by_a_late_parent` + contract PostgreSQL |
+
+- Acceptance: import 100k msg mbox (Mailman list public) < 10 phút máy dev, search p95 < 100ms, URL hash trùng HyperKitty với cùng Message-ID, threading snapshot so với HyperKitty import cùng mbox — **đạt** qua P5-ACCEPTANCE (ledger); hash và threading đối chiếu với HyperKitty thật qua REST API, không phải import HyperKitty tại chỗ.
 
 ### Phase 6 — Advanced & migration (M)
 

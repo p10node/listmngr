@@ -102,18 +102,14 @@ async fn success(db: &Database, lease: &Lease, before: &Snapshot, never: bool) {
         assert_eq!(after.rows, before.rows);
     } else {
         assert_eq!(after.rows.len(), before.rows.len() + 1);
-        let parent = after
-            .rows
-            .iter()
-            .find(|r| r.0 == lease.job.id.0.to_string())
-            .unwrap();
+        // The provisional root "root" names no archived post, so the
+        // parent starts its own thread (HyperKitty's rule, P5-ACCEPTANCE)
+        // and the reply filed under its hash follows it there.
+        let own = lease.job.id.0.to_string();
+        let parent = after.rows.iter().find(|r| r.0 == own).unwrap();
         assert_eq!(
             (&parent.1, &parent.2, &parent.3),
-            (
-                &"root".to_string(),
-                &"[audit] parent".to_string(),
-                &"body".to_string()
-            )
+            (&own, &"[audit] parent".to_string(), &"body".to_string())
         );
         assert_eq!(
             after
@@ -122,7 +118,7 @@ async fn success(db: &Database, lease: &Lease, before: &Snapshot, never: bool) {
                 .find(|r| r.0 == format!("reply-{}", lease.job.id.0))
                 .unwrap()
                 .1,
-            "root"
+            own
         );
     }
     let job = db.mail_queue().job(lease.job.id).await.unwrap();
