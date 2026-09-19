@@ -1,5 +1,38 @@
 # Architecture
 
+## Remote archivers — bounded local acceptance verified
+
+`ArchiversConfig` (`[archive] archivers`: `mail_archive_address`,
+`mhonarc_command`, `prototype_path`) is empty by default, and an empty
+field switches its archiver off however `list_archivers` is set. The
+address is carried on the database handle by
+`Database::with_mail_archive_address`, beside `with_base_url`, and applied
+where the handle is built in `crates/cli/src/main.rs` and
+`crates/api/src/lib.rs`; the command and the path reach the archive runner
+as `listmngr_archive::archivers::Settings`, taken from the configuration in
+`serve_mail_role` before it moves into the `in` processor.
+
+`ArchiveRepo::complete` queues the `mail-archive` copy itself:
+`queue_mail_archive` checks `archiver_on` and, for a list whose policy is
+`public`, calls `insert_child_job` for `Queue::Out` with the configured
+address and records `archive.archiver` — both inside the transaction that
+stores the archived post and acks the lease, so the copy cannot exist
+without the post or the post without the copy.
+
+`listmngr_archive::archivers::run` covers the two that act outside the
+database. It reads the list's toggles through `Database::archivers` and the
+published bytes through the new `ArchiveRepo::archived_copy` (no policy,
+`hidden_at IS NULL`), then runs `mhonarc` — `tokio::process::Command` over
+the configured argv with `expand` substituting `$listname`, `$hostname` and
+`$hash` per argument, the message on standard input, output discarded,
+`kill_on_drop` — and `prototype`, which writes `<root>/<list>/tmp/<hash>`
+and renames it to `new/<hash>`. A failure of either is logged and reported
+as an archiver that did not run. The archive runner's `archive_and_index`
+calls `forward_to_archivers` after a post is stored and indexed;
+`archived_post` resolves the list and hash from the queue message through
+`index_row_for_message`, which already reports nothing for a post the
+archive did not store.
+
 ## Archive administration — bounded local acceptance verified
 
 Migration `0051_archive_admin` adds one nullable column,

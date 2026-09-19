@@ -1,5 +1,44 @@
 # listmngr
 
+## Remote archivers (`P5-REMOTE-ARCHIVERS`) — bounded local acceptance verified
+
+The three archivers a list can switch on in its settings now do something.
+Each needs both the list's toggle and the server's configuration under
+`[archive] archivers`; either one missing leaves the archiver off, and a
+list whose `archive_policy` is `never` forwards nothing at all.
+
+- **`mail-archive`** sends a copy of the archived post to
+  `archivers.mail_archive_address` (for example `archive@mail-archive.com`)
+  through the ordinary outbound queue. It is queued inside the archive's
+  own transaction, so the copy and the archived post commit together or
+  not at all, with an `archive.archiver` audit event. The service is
+  public, so a list whose archive is `private` never reaches it however
+  the toggle is set.
+- **`mhonarc`** pipes the archived post to
+  `archivers.mhonarc_command`. The command is an argument vector, not a
+  shell line, so nothing in a message can become a shell word; the server
+  substitutes `$listname`, `$hostname` and `$hash` in each argument and
+  writes the message to the command's standard input.
+- **`prototype`** drops the archived post into a maildir under
+  `archivers.prototype_path`, at `<path>/<list id>/new/<hash>`, written
+  into `tmp/` first and renamed, so a reader never sees half a message and
+  a replay overwrites rather than duplicates.
+
+`mhonarc` and `prototype` run after the post is stored, so a crash between
+the two loses a forward and never the archived post; neither failure fails
+the queue job, and both are logged. Every archiver forwards the copy the
+archive itself published — cooked, with the list's headers — so an
+anonymous list stays anonymous and a post hidden by `P5-ADMIN` is not
+forwarded at all.
+
+Limits: there is no per-list configuration of the command or the maildir
+(they are the server's, one setting for every list); no retry or dead-letter
+for `mhonarc` and `prototype` beyond the log, and no back-pressure if the
+command is slow; `mail-archive` sends the post without checking whether the
+service accepted it, and its permalink is not shown on the archive pages;
+there is no command-line way to replay a post to the archivers, only
+`listmngr archive export` and a manual feed.
+
 ## Archive administration (`P5-ADMIN`) — bounded local acceptance verified
 
 A list owner now administers the archive from `…/archive/admin`, linked

@@ -158,9 +158,9 @@ const PIPELINES: Options = &[
     ("default-posting-pipeline", "web-ls-pipeline-default"),
     ("virgin", "web-ls-pipeline-virgin"),
 ];
-/// Archivers the list can switch on; they take effect when remote
-/// archivers ship (`P5-REMOTE-ARCHIVERS`), the local archive follows
-/// `archive_policy`.
+/// Archivers the list can switch on. Each also needs the server to
+/// configure it under `[archive] archivers`, and `mail-archive` takes a
+/// public list only; the local archive follows `archive_policy`.
 const ARCHIVERS: Options = &[
     ("mail-archive", "web-ls-archiver-mail-archive"),
     ("mhonarc", "web-ls-archiver-mhonarc"),

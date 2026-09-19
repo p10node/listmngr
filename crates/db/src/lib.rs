@@ -131,6 +131,10 @@ pub struct Database {
     /// `site.base_url`: the public web origin the mail layer may point at
     /// (`List-Archive`, `Archived-At`). Empty when unknown.
     base_url: String,
+    /// `[archive] archivers.mail_archive_address`: where a public list's
+    /// copy goes when its `mail-archive` archiver is on. Empty when the
+    /// archiver is not configured, which switches it off.
+    mail_archive: String,
     /// `[mailman] bounce_probes`: probe at the threshold instead of
     /// disabling at once, and how long the probe's bounce counts. Off by
     /// default here; `serve` applies the configuration.
@@ -177,6 +181,7 @@ impl Database {
             password_min_score: security.password_min_score,
             default_language: "en".into(),
             base_url: String::new(),
+            mail_archive: String::new(),
             bounce_probes: None,
             verp_format: listmngr_core::verp::DEFAULT_FORMAT.into(),
             site_name: "Example Lists".into(),
@@ -228,6 +233,20 @@ impl Database {
     #[must_use]
     pub fn base_url(&self) -> Option<&str> {
         (!self.base_url.is_empty()).then_some(self.base_url.as_str())
+    }
+
+    /// Where a public list's `mail-archive` copy is sent. An empty
+    /// address leaves the archiver off however the list is configured.
+    #[must_use]
+    pub fn with_mail_archive_address(mut self, address: &str) -> Self {
+        address.trim().clone_into(&mut self.mail_archive);
+        self
+    }
+
+    /// The configured `mail-archive` address, when there is one.
+    #[must_use]
+    pub fn mail_archive_address(&self) -> Option<&str> {
+        (!self.mail_archive.is_empty()).then_some(self.mail_archive.as_str())
     }
     /// Carry `site.name` and `site.site_owner` for mail the site sends
     /// outside any list. The defaults mirror the configuration defaults.

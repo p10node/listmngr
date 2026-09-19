@@ -2176,6 +2176,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

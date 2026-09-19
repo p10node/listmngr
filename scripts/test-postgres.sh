@@ -117,6 +117,8 @@ cargo test --locked -p listmngr-api --test webui \
 cargo test --locked -p listmngr-api --test webui \
   archive_admin::postgres_archive_admin_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
+  remote_archivers_tests::postgres_remote_archivers_contract -- --ignored --exact
+cargo test --locked -p listmngr-runners --lib \
   outbound::dsn_issuance_tests::dsn_issuance_postgres -- --ignored --exact
 cargo test --locked -p listmngr-runners --lib \
   outbound::durability_tests::postgres_isolated_audit_failure_restart_never_replays_data -- --ignored --exact
