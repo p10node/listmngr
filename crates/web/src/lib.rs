@@ -61,9 +61,10 @@ pub use pages::{
     MembershipRow, OwnerRow,
 };
 pub use pages::{
-    ArchiveLinks, ArchiveOverview, ArchiveSender, ArchiveThreads, MonthRow, PosterRow, ThreadRow,
+    AdminCategory, ArchiveAdmin, ArchiveLinks, ArchiveOverview, ArchiveSender, ArchiveThreads,
+    HiddenRow, MonthRow, PosterRow, ThreadRow,
 };
-pub use pages::{ArchivePost, CategoryOption, TagLink, ThreadMetaView, VoteForm};
+pub use pages::{AdminForms, ArchivePost, CategoryOption, TagLink, ThreadMetaView, VoteForm};
 pub use pages::{AtomFeed, FeedEntry, RssFeed};
 pub use pages::{AuditPage, AuditRow, QueueRow, ReattachForm, SystemPage};
 pub use pages::{

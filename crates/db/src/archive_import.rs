@@ -180,7 +180,7 @@ impl ArchiveRepo<'_> {
             ExportSelection::Between { from_ms, until_ms } => ("", *from_ms, *until_ms),
         };
         let (created, hash) = after.map_or((i64::MIN, ""), |(c, h)| (*c, h.as_str()));
-        let rows = sqlx::query("SELECT hash, raw_b64, created_at FROM archive_messages WHERE list_id=$1 AND ($2='' OR thread=$2) AND COALESCE(message_date, created_at)>=$3 AND COALESCE(message_date, created_at)<$4 AND (created_at>$5 OR (created_at=$5 AND hash>$6)) ORDER BY created_at, hash LIMIT $7")
+        let rows = sqlx::query("SELECT hash, raw_b64, created_at FROM archive_messages WHERE list_id=$1 AND hidden_at IS NULL AND ($2='' OR thread=$2) AND COALESCE(message_date, created_at)>=$3 AND COALESCE(message_date, created_at)<$4 AND (created_at>$5 OR (created_at=$5 AND hash>$6)) ORDER BY created_at, hash LIMIT $7")
             .bind(list.as_str())
             .bind(thread)
             .bind(from)

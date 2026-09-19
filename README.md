@@ -1,5 +1,50 @@
 # listmngr
 
+## Archive administration (`P5-ADMIN`) — bounded local acceptance verified
+
+A list owner now administers the archive from `…/archive/admin`, linked
+from every archive page for an owner and for nobody else.
+
+- **Categories**: the page lists the list's categories with the threads
+  filed under each, and adds, renames and removes them. A name takes the
+  same shape as a tag — lowercase letters, digits and hyphens, at most
+  sixty characters — so it needs no escaping in the category page's
+  address; a name that normalises to nothing, one the list already has,
+  and a rename or removal of one it lacks are refused inline. Renaming
+  carries the filed threads over; removing unfiles them and leaves the
+  posts alone. This is the page `P4-LIST-SETTINGS` and `P5-INTERACTIONS`
+  said was still missing.
+- **Hiding**: "Hide this post" on every post and "Hide this thread" on
+  every thread take it off every reading surface at once — the archive
+  pages, the thread lists and the overview, the sender pages, the search
+  (index and database), the Atom and RSS feeds, the REST archive reads and
+  the mbox export and download — while the row, the stored bytes and the
+  post's place in the thread survive. The administration page is the only
+  surface that still names a hidden post, and only to show it again or
+  delete it. A reply whose parent is hidden no longer offers an "In reply
+  to" link to it.
+- **Deleting**: "Delete this post" removes the post with its attachments
+  and votes, splices its replies onto its parent, and, when the thread's
+  root goes, makes the oldest surviving post the new root — the thread's
+  tags, category, favourites and unread marks follow it. "Delete this
+  thread" removes every post of the thread and every mark on it. Deletion
+  cannot be undone, so the owner lands on the thread list afterwards.
+- **Reattaching** a post under another was already the owner's (from
+  `P5-RENDER`) and is unchanged.
+
+Every change is refused to anyone but an owner of the list, is checked
+against the live session inside the transaction that makes it, and commits
+with its audit event in that one transaction: `archive.hide`,
+`archive.unhide`, `archive.delete` and `archive.category`.
+
+Limits: hiding is per post or per thread, with no reason recorded and no
+notice to the author; a hidden post is hidden from the owner's reading
+pages too (the administration page is where they see it); deleting a post
+does not remove it from the search index until `listmngr archive reindex`,
+though a deleted or hidden post can never be shown because every hit is
+read back under the archive's policy; there is no command-line equivalent
+of these actions yet; a thread deletion takes at most five thousand posts.
+
 ## Archive import and export (`P5-MBOX`) — bounded local acceptance verified
 
 `listmngr archive import <list> <file>` reads an mbox in `mboxrd` form (a
@@ -94,8 +139,8 @@ reader of a public archive; a verified member of a private one):
   characters); the tagger or a list owner removes it. Thread lists show
   tags. Audited as `archive.tag`.
 - **Categories**: a list owner files a thread under one of the list's
-  categories (rows of `archive_categories`; the owner's page to manage them
-  comes with `P5-ADMIN`) or under none. Thread pages and lists show the
+  categories (rows of `archive_categories`, managed on the archive's
+  administration page) or under none. Thread pages and lists show the
   category as a link to `…/archive/categories/<name>`. Audited as
   `archive.category`.
 - **Favourites**: a signed-in reader keeps threads as favourites and sees
@@ -103,9 +148,9 @@ reader of a public archive; a verified member of a private one):
   in). Favourites are the reader's own bookmarks, like the last-view marks,
   and carry no audit event.
 
-Limits: no category management page yet (`P5-ADMIN`); votes are not
-summed into thread lists or the overview; tags and categories are per list
-and do not cross lists.
+Limits: the categories themselves are managed on the archive's
+administration page (`P5-ADMIN`); votes are not summed into thread lists
+or the overview; tags and categories are per list and do not cross lists.
 
 ## Archive browsing (`P5-UI`) — bounded local acceptance verified
 
