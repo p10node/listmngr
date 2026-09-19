@@ -1,0 +1,43 @@
+{
+ "mailman": "3.3.10",
+ "list_id": "news.example.invalid",
+ "display_name": "News",
+ "subject_prefix": "[News] ",
+ "volume": 2,
+ "number": 3,
+ "header": "Read the list rules before replying.\n",
+ "footer": "News mailing list -- news@example.invalid\n",
+ "plain_keep_headers": [
+  "Message",
+  "Date",
+  "From",
+  "Subject",
+  "To",
+  "Cc",
+  "Message-ID",
+  "Keywords",
+  "Content-Type"
+ ],
+ "mime_keep_headers": [
+  "Date",
+  "From",
+  "To",
+  "Cc",
+  "Subject",
+  "Message-ID",
+  "Keywords",
+  "In-Reply-To",
+  "References",
+  "Content-Type",
+  "MIME-Version",
+  "Content-Transfer-Encoding",
+  "Precedence",
+  "Reply-To",
+  "Message",
+  "List-Post"
+ ],
+ "posts": [
+  "Message-ID: <a1@example.invalid>\nFrom: An Nguyễn <a@example.invalid>\nTo: news@example.invalid\nDate: Mon, 01 Jan 2024 10:00:00 +0000\nSubject: [News] Xin chào\nContent-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: 8bit\n\nNội dung đầu tiên.\n",
+  "Message-ID: <b1@example.invalid>\nFrom: b@example.invalid\nTo: news@example.invalid\nDate: Mon, 01 Jan 2024 11:00:00 +0000\nSubject: Re: [News] Second\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"part\"\n\n--part\nContent-Type: text/plain; charset=us-ascii\n\nDifferent body\n--part\nContent-Type: application/octet-stream; name=\"notes.bin\"\nContent-Disposition: attachment; filename=\"notes.bin\"\nContent-Transfer-Encoding: base64\n\nAAECAw==\n--part--\n"
+ ]
+}

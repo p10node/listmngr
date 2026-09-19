@@ -6,6 +6,7 @@ fn input(mode: DeliveryMode) -> Digest<'static> {
     Digest {
         list: "news.example.invalid".parse().unwrap(),
         display_name: "Tin tức".into(),
+        subject_prefix: "[Tin tức] ".into(),
         volume: 2,
         number: 3,
         mode,
@@ -55,7 +56,8 @@ fn mime_digest_contains_both_complete_messages() {
 fn summary_is_mailman_mime_alias_and_regular_is_not_a_digest() {
     let raw = build(&input(DeliveryMode::SummaryDigests)).unwrap();
     let parsed = MessageParser::default().parse(&raw).unwrap();
-    let body = parsed.body_text(0).unwrap();
+    // The contents part follows the (here empty) masthead part.
+    let body = parsed.body_text(1).unwrap();
     assert!(body.contains("Xin chào") && body.contains("Second"));
     assert!(!body.contains("Different body"));
     assert_eq!(parsed.attachments().count(), 2);
@@ -110,7 +112,7 @@ fn a_plaintext_digest_follows_rfc_1153_with_the_list_templates() {
         "{body}"
     );
     assert!(
-        body.contains("\r\nMessage: 1\r\nFrom: a@example.invalid\r\nSubject: Xin chào\r\n"),
+        body.contains("\r\nMessage: 1\r\nFrom: a@example.invalid\r\nSubject: Xin chào\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nNội dung\r\n"),
         "{body}"
     );
     assert!(
@@ -118,7 +120,7 @@ fn a_plaintext_digest_follows_rfc_1153_with_the_list_templates() {
         "{body}"
     );
     assert!(body.contains("Nội dung") && body.contains("Different body"));
-    // The footer, then Mailman's closing line and its underline.
+    // The footer, then Mailman's closing line underlined to its length.
     assert!(
         body.contains(
             "\r\nSubject: Digest Footer\r\n\r\nTin tức mailing list -- news@example.invalid"
@@ -127,7 +129,7 @@ fn a_plaintext_digest_follows_rfc_1153_with_the_list_templates() {
     );
     assert!(
         body.ends_with(
-            "\r\nEnd of Tin tức Digest, Vol 2, Issue 3\r\n******************************\r\n"
+            "\r\nEnd of Tin tức Digest, Vol 2, Issue 3\r\n*************************************\r\n"
         ),
         "{body}"
     );
@@ -149,23 +151,14 @@ fn a_mime_digest_carries_the_templates_as_their_own_parts() {
         texts[0].contains("Send Tin tức mailing list submissions to"),
         "{texts:?}"
     );
-    assert!(texts[0].contains("Today's Topics:"), "{texts:?}");
-    assert!(
-        texts.iter().any(|t| t.contains("Read the list rules")),
-        "{texts:?}"
-    );
-    assert!(
-        texts.iter().any(|t| t.contains("Tin tức mailing list --")),
-        "{texts:?}"
-    );
+    // Mailman's order: masthead, header, contents, the posts, footer.
+    assert!(texts[1].contains("Read the list rules"), "{texts:?}");
+    assert!(texts[2].starts_with("Today's Topics:"), "{texts:?}");
+    assert!(texts[3].contains("Tin tức mailing list --"), "{texts:?}");
+    assert_eq!(texts.len(), 4, "{texts:?}");
     assert_eq!(parsed.attachments().count(), 2, "the two posts stay whole");
-    assert!(
-        texts
-            .last()
-            .unwrap()
-            .starts_with("End of Tin tức Digest, Vol 2, Issue 3")
-    );
-    // Empty templates leave no empty parts behind: contents and closing only.
+    // Empty templates leave no empty parts behind: the masthead part (an
+    // empty one, as Mailman attaches it) and the contents.
     let bare = build(&input(DeliveryMode::MimeDigests)).unwrap();
     let parsed = MessageParser::default().parse(&bare).unwrap();
     assert_eq!(
