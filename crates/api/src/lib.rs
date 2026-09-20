@@ -396,6 +396,20 @@ pub struct ListConfigInput {
     pub dmarc_wrapped_message_text: Option<String>,
     #[schema(default = "administrators")]
     pub forward_unrecognized_bounces_to: Option<listmngr_core::UnrecognizedBounceDisposition>,
+    /// Mailman's Usenet gateway: gate posts to the linked newsgroup.
+    #[schema(default = false)]
+    pub gateway_to_news: Option<bool>,
+    /// Gate the linked newsgroup's articles to the list.
+    #[schema(default = false)]
+    pub gateway_to_mail: Option<bool>,
+    /// The newsgroup the list gateways with; empty for none.
+    #[schema(default = "")]
+    pub linked_newsgroup: Option<String>,
+    /// Keep the subject prefix on posts gated to the newsgroup.
+    #[schema(default = true)]
+    pub nntp_prefix_subject_too: Option<bool>,
+    #[schema(default = "none")]
+    pub newsgroup_moderation: Option<listmngr_core::NewsgroupModeration>,
     #[schema(default = true)]
     pub digests_enabled: Option<bool>,
     /// KiB of pending posts that trigger an issue; 0 never does.
@@ -2260,6 +2274,7 @@ async fn list_config_write(
             "volume",
             "digest_last_sent_at",
             "style_name",
+            "usenet_watermark",
         ] {
             object.remove(read_only);
         }
@@ -2316,6 +2331,9 @@ fn normalize_list_config_form(value: &mut Value, headers: &HeaderMap) -> ApiResu
         "first_strip_reply_to",
         "include_sender_header",
         "topics_enabled",
+        "gateway_to_mail",
+        "gateway_to_news",
+        "nntp_prefix_subject_too",
     ] {
         if let Some(Value::String(text)) = value.get(field) {
             let enabled = text

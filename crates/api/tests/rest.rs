@@ -812,6 +812,102 @@ async fn dmarc_config_roundtrips_and_accepts_every_mailman_action() {
     }
 }
 
+/// Mailman's Usenet gateway settings on both prefixes, JSON and forms:
+/// the defaults, a write, `PUT` resetting what it omits, the watermark
+/// read but never written, and Mailman's vocabulary enforced.
+#[tokio::test]
+async fn usenet_config_roundtrips_and_the_watermark_is_read_only() {
+    let (app, token, _) = setup(&["admin"]).await;
+    create_configurable_list(&app, &token).await;
+    for prefix in ["/api/v1", "/3.1"] {
+        let uri = format!("{prefix}/lists/dev.example.com/config");
+        let value = json_body(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(value["gateway_to_mail"], false, "{prefix}");
+        assert_eq!(value["gateway_to_news"], false);
+        assert_eq!(value["linked_newsgroup"], "");
+        assert_eq!(value["nntp_prefix_subject_too"], true);
+        assert_eq!(value["newsgroup_moderation"], "none");
+        assert_eq!(value["usenet_watermark"], serde_json::Value::Null);
+        for (method, payload, status) in [
+            (
+                "PATCH",
+                r#"{"gateway_to_news":true,"linked_newsgroup":"comp.lang.rust.lists","newsgroup_moderation":"moderated","nntp_prefix_subject_too":false}"#,
+                StatusCode::OK,
+            ),
+            (
+                "PATCH",
+                r#"{"usenet_watermark":12}"#,
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "PATCH",
+                r#"{"newsgroup_moderation":"sometimes"}"#,
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "PATCH",
+                r#"{"linked_newsgroup":"not a newsgroup"}"#,
+                StatusCode::BAD_REQUEST,
+            ),
+        ] {
+            assert_eq!(
+                call(&app, method, &uri, Some(&token), Some(payload))
+                    .await
+                    .status(),
+                status,
+                "{prefix} {payload}"
+            );
+        }
+        let value = json_body(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(value["gateway_to_news"], true);
+        assert_eq!(value["linked_newsgroup"], "comp.lang.rust.lists");
+        assert_eq!(value["newsgroup_moderation"], "moderated");
+        assert_eq!(value["nntp_prefix_subject_too"], false);
+        assert_eq!(
+            call(
+                &app,
+                "GET",
+                &format!("{uri}/newsgroup_moderation"),
+                Some(&token),
+                None
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        // A form writes the same, with Mailman's `True`/`False`.
+        assert_eq!(
+            call_form(
+                &app,
+                "PATCH",
+                &uri,
+                &token,
+                "gateway_to_mail=True&linked_newsgroup=alt.test&newsgroup_moderation=open_moderated"
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let value = json_body(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(value["gateway_to_mail"], true);
+        assert_eq!(value["linked_newsgroup"], "alt.test");
+        assert_eq!(value["newsgroup_moderation"], "open_moderated");
+        // PUT resets what it omits; the watermark is not a setting.
+        assert_eq!(
+            call(&app, "PUT", &uri, Some(&token), Some("{}"))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        let value = json_body(call(&app, "GET", &uri, Some(&token), None).await).await;
+        assert_eq!(value["gateway_to_mail"], false);
+        assert_eq!(value["gateway_to_news"], false);
+        assert_eq!(value["linked_newsgroup"], "");
+        assert_eq!(value["nntp_prefix_subject_too"], true);
+        assert_eq!(value["newsgroup_moderation"], "none");
+    }
+}
+
 #[tokio::test]
 async fn message_size_config_roundtrips_and_put_resets_on_both_prefixes() {
     let (app, token, _) = setup(&["admin"]).await;
@@ -3023,6 +3119,7 @@ async fn assert_chain_projection_matches_the_engine(app: &axum::Router, token: &
             "implicit-dest",
             "max-recipients",
             "max-size",
+            "news-moderation",
             "no-subject",
             "suspicious-header",
             "any",

@@ -1,5 +1,26 @@
 # listmngr
 
+## Usenet gateway settings (`P6-NNTP-SETTINGS`) — bounded local acceptance verified
+
+Mailman's Usenet settings are list settings now, on both REST prefixes
+(JSON and forms): `gateway_to_news` and `gateway_to_mail` (both off),
+`linked_newsgroup` (a newsgroup name as Usenet spells it, or empty),
+`nntp_prefix_subject_too` (on: gated posts keep the subject prefix) and
+`newsgroup_moderation` (`none`, `open_moderated`, `moderated`); `PUT`
+resets what it omits. `usenet_watermark` — the last article number gated
+from the newsgroup — is read on the configuration and never written
+through it: only the gateway records it, with an audit event
+(`usenet.watermark`). Mailman's `news-moderation` rule joins the posting
+chain in Mailman's place (after `max-size`): a list gatewaying to a
+`moderated` newsgroup holds every post for a moderator, with Mailman's
+reason. The gateway itself — `to-usenet`, the `nntp` runner and
+`gatenews` — follows in its own packages; these settings decide nothing
+else yet.
+
+Limits: no settings page group in the browser (Postorius has none; the
+REST configuration and `listmngr lists` are the way in); the watermark
+has no writer until the gateway package.
+
 ## ARC sealing (`P6-ARC-SEAL`) — bounded local acceptance verified
 
 Mailman's `arc-sign`, as `[mta.arc]`: with it on, every post delivered to
@@ -1979,8 +2000,9 @@ order, and the archive copy carries the full `X-BeenThere` loop history. See
 Inbound posts run Mailman 3's built-in chain order: `no-senders`, `approved`,
 `emergency`, `loop`, `banned-address`, member/nonmember moderation, then the
 deferred `administrivia`, `implicit-dest`, `max-recipients`, `max-size`,
-`no-subject` and `suspicious-header` checks, a detour through the list's own
-header rules, and accept. When several deferred checks hit, the single held
+`news-moderation` (since `P6-NNTP-SETTINGS`), `no-subject` and
+`suspicious-header` checks, a detour through the list's own header rules,
+and accept. When several deferred checks hit, the single held
 message lists every reason. An explicit member or nonmember `accept` bypasses
 the deferred checks, exactly as in Mailman; emergency moderation and bans
 still apply. Owners and moderators post as explicitly accepted senders.

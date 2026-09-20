@@ -598,8 +598,7 @@ fn moderation_disposition(action: Option<ModerationAction>, reasons: &[String]) 
 
 /// The shipped rules and chains.
 ///
-/// The `default-posting-chain` reproduces Mailman 3's built-in chain, minus
-/// the `news-moderation` link whose rule does not exist yet.
+/// The `default-posting-chain` reproduces Mailman 3's built-in chain.
 /// `crates/pipeline/tests/policy_characterization.rs` holds the result to a
 /// transcription of that contract over the whole input domain.
 #[must_use]
@@ -627,6 +626,7 @@ pub fn builtin() -> &'static Registry {
                 Link::new("implicit-dest", LinkAction::Defer),
                 Link::new("max-recipients", LinkAction::Defer),
                 Link::new("max-size", LinkAction::Defer),
+                Link::new("news-moderation", LinkAction::Defer),
                 Link::new("no-subject", LinkAction::Defer),
                 Link::new("suspicious-header", LinkAction::Defer),
                 // Now if any of the above hit, jump to the moderation chain.

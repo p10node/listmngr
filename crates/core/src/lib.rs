@@ -307,6 +307,14 @@ string_enum!(ResponseAction { None => "none", RespondAndContinue => "respond_and
 string_enum!(SubscriptionPolicy { Open => "open", Confirm => "confirm", Moderate => "moderate", ConfirmThenModerate => "confirm_then_moderate" });
 string_enum!(RosterVisibility { Public => "public", Members => "members", Moderators => "moderators" });
 string_enum!(UnrecognizedBounceDisposition { Discard => "discard", SiteOwner => "site_owner", Administrators => "administrators" });
+// Mailman's `NewsgroupModeration`: whether the linked newsgroup is moderated,
+// and whether the list still posts to it openly.
+string_enum!(NewsgroupModeration { None => "none", OpenModerated => "open_moderated", Moderated => "moderated" });
+impl Default for NewsgroupModeration {
+    fn default() -> Self {
+        Self::None
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Preferences {
@@ -579,6 +587,59 @@ pub struct Topic {
     pub description: String,
 }
 
+/// Mailman's Usenet gateway settings, serialized as flat compatibility keys.
+///
+/// `gateway_to_mail`, `gateway_to_news`, `linked_newsgroup`,
+/// `nntp_prefix_subject_too` and `newsgroup_moderation` are the settings;
+/// `usenet_watermark` is what only the gateway writes: the last article
+/// number gated from the newsgroup, `None` before the first poll.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(default)]
+pub struct UsenetSettings {
+    #[schema(default = false)]
+    pub gateway_to_mail: bool,
+    #[schema(default = false)]
+    pub gateway_to_news: bool,
+    /// The newsgroup the list gateways with; empty when there is none.
+    #[schema(default = "")]
+    pub linked_newsgroup: String,
+    /// Keep the list's subject prefix on posts gated to the newsgroup.
+    #[schema(default = true)]
+    pub nntp_prefix_subject_too: bool,
+    #[schema(default = "none")]
+    pub newsgroup_moderation: NewsgroupModeration,
+    /// Read-only: the last article number gated from the newsgroup.
+    #[schema(read_only)]
+    pub usenet_watermark: Option<i64>,
+}
+
+impl Default for UsenetSettings {
+    fn default() -> Self {
+        Self {
+            gateway_to_mail: false,
+            gateway_to_news: false,
+            linked_newsgroup: String::new(),
+            nntp_prefix_subject_too: true,
+            newsgroup_moderation: NewsgroupModeration::None,
+            usenet_watermark: None,
+        }
+    }
+}
+
+/// A newsgroup name as Usenet spells it: dot-separated components of
+/// letters, digits, `+`, `-` and `_`, at most 255 bytes.
+#[must_use]
+pub fn is_newsgroup_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && name.split('.').all(|component| {
+            !component.is_empty()
+                && component
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"+-_".contains(&b))
+        })
+}
+
 /// Mailman's *Member Policy* settings. Serialized as flat compatibility keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(default)]
@@ -723,6 +784,8 @@ pub struct MailingList {
     pub alter_messages: AlterMessages,
     #[serde(flatten)]
     pub member_policy: MemberPolicy,
+    #[serde(flatten)]
+    pub usenet: UsenetSettings,
     /// Where bounces the detectors cannot attribute to a member are forwarded.
     #[serde(default = "default_unrecognized_bounces")]
     #[schema(default = "administrators")]
@@ -832,6 +895,7 @@ impl MailingList {
             admin_notify_mchanges: false,
             alter_messages: AlterMessages::default(),
             member_policy: MemberPolicy::default(),
+            usenet: UsenetSettings::default(),
             forward_unrecognized_bounces_to: default_unrecognized_bounces(),
             topics_enabled: false,
             topics_bodylines_limit: default_topics_bodylines_limit(),

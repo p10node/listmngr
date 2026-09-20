@@ -210,6 +210,21 @@ impl Rule for MaxRecipients {
     }
 }
 
+/// Mailman's `news-moderation`: a list gatewaying to a moderated newsgroup
+/// holds every post for a moderator, who approves it for both.
+#[derive(Debug)]
+pub struct NewsModeration;
+
+impl Rule for NewsModeration {
+    fn name(&self) -> &'static str {
+        "news-moderation"
+    }
+    fn check(&self, ctx: &PostingContext, _state: &mut EvalState) -> Option<String> {
+        (ctx.list.newsgroup_moderation == listmngr_core::NewsgroupModeration::Moderated)
+            .then(|| "Post to a moderated newsgroup gateway".to_owned())
+    }
+}
+
 /// Subject is absent or blank.
 #[derive(Debug)]
 pub struct NoSubject;
@@ -428,6 +443,7 @@ impl Rule for Any {
 pub fn builtin_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(DmarcMitigation),
+        Box::new(NewsModeration),
         Box::new(NoSenders),
         Box::new(Approved),
         Box::new(Emergency),
