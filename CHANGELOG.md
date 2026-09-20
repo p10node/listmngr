@@ -9,6 +9,7 @@
 - CLI hidden/stdin/Unix-FD password input, typed redacted exit categories, HTTP service status, and regression coverage for token persistence/revocation/expiry, IDNA lookup, and network probe boundaries.
 
 ### Added
+- News to mail (`P6-NNTP-GATENEWS`): Mailman's `gatenews` — the `nntp` runner polls every gatewayed list's newsgroup on `[nntp] gatenews_every_secs`, and `listmngr nntp gate` once by hand; a first poll catches up, later ones hand new articles (not the list's own) to the `in` queue as posts from Usenet, moving the audited `usenet_watermark` article by article.
 - Mail to news (`P6-NNTP-GATEWAY`): `[nntp]` configuration, the `to-usenet` handler queuing accepted posts of a gatewayed list, and the `nntp` runner preparing each as Mailman's `prepare_message` does and posting it over NNTP, replacing a refused `Message-ID` once and backing off from an unreachable server.
 - Usenet gateway settings (`P6-NNTP-SETTINGS`): `gateway_to_mail`, `gateway_to_news`, `linked_newsgroup`, `nntp_prefix_subject_too`, `newsgroup_moderation` and the read-only `usenet_watermark` on the list configuration (migration 0053), and Mailman's `news-moderation` rule in the posting chain.
 - ARC sealing (`P6-ARC-SEAL`): `[mta.arc]` seals every delivered post with the site's key after the list's DKIM signature, carrying the intake's `Authentication-Results` and extending or closing the chain the post arrived with, which the `in` runner now validates and the pipeline keeps; the sealing key's DNS record joins the domain page.

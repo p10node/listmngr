@@ -1,5 +1,31 @@
 # Architecture
 
+## News to mail — bounded local acceptance verified
+
+`listmngr_mail::nntp::Client` gained a session (`connect`: greeting,
+`MODE READER`, `AUTHINFO`) shared by `post` and by `reader()`, which
+returns a `Reader` (`group` → the `211` bounds, `head`/`article` → the
+multi-line block with its dot-stuffing undone as CRLF bytes, `quit`;
+every command under the client's timeout). `nntp::inbound(article,
+list)` is Mailman's per-article logic: `None` for an article whose
+`List-Id` ends with `<list_id>` or that has no `From` address;
+otherwise the article with `To` moved to `X-Originally-To` (any earlier
+`X-Originally-To` dropped) and `To` set to the posting address, plus the
+`From` address. `listmngr_runners::nntp::gate_news(db, config)` (public,
+`GateReport` per list with `to_json`): the lists with `gateway_to_mail`
+and a group, one reader session, `group` then `poll` — a `None`
+watermark catches up to the group's last, else `max(watermark + 1,
+first)..=last`, each `article` through `gate_article`
+(`MailQueueRepo::enqueue` on `Queue::In` with `{list_id,
+envelope_sender, fromusenet: true}`, `external_id` the article's
+`Message-ID` or a minted one) and `UsenetRepo::set_watermark` after every
+article; a read error skips the article and still moves the watermark;
+the server being unreachable or a group unknown lands in the entry's
+`error`. `nntp::run` calls `poll_and_log` at start and whenever
+`gatenews_every_secs` has elapsed between claims (`0` never); `listmngr
+nntp gate` (`crates/cli/src/nntp.rs`) refuses without a host and prints
+the report.
+
 ## Mail to news — bounded local acceptance verified
 
 `listmngr_core::NntpConfig` (`[nntp]`: `host`, `port`, `user`,

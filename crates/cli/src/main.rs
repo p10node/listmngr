@@ -5,6 +5,7 @@ mod archive;
 mod bounce;
 mod digests;
 mod errors;
+mod nntp;
 mod notify;
 mod queue;
 mod requests;
@@ -93,6 +94,11 @@ enum Command {
     },
     /// Remind owners and moderators of held messages and requests.
     Notify(notify::Options),
+    /// The news gateway: poll the newsgroups of gatewayed lists once.
+    Nntp {
+        #[command(subcommand)]
+        command: nntp::Command,
+    },
 }
 #[derive(Debug, Subcommand)]
 enum DomainCommand {
@@ -368,6 +374,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Digests { command } => digests::run(&db, command).await?,
         Command::Aliases { command } => aliases::run(&db, &config, command).await?,
         Command::Archive { command } => archive::run(&db, &config, command).await?,
+        Command::Nntp { command } => nntp::run(&db, &config, command).await?,
         Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
             bail!("command does not use database")
         }

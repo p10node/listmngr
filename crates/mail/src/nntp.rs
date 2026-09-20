@@ -305,58 +305,24 @@ impl Client {
     /// the error never carries the password.
     pub async fn post(&self, article: &[u8]) -> Result<Outcome> {
         let session = async {
-            let stream = TcpStream::connect((self.host.as_str(), self.port))
+            let mut session = self.connect().await?;
+            session
+                .write
+                .write_all(b"POST\r\n")
                 .await
                 .map_err(Error::Io)?;
-            let (read, mut write) = stream.into_split();
-            let mut read = BufReader::new(read);
-            let greeting = reply(&mut read).await?;
-            if !greeting.starts_with("20") {
-                return Err(io(&format!("news server refused the session: {greeting}")));
-            }
-            write
-                .write_all(b"MODE READER\r\n")
-                .await
-                .map_err(Error::Io)?;
-            // A server that does not know reader mode still posts.
-            let _ = reply(&mut read).await?;
-            if let (Some(user), Some(password)) = (&self.user, &self.password) {
-                write
-                    .write_all(format!("AUTHINFO USER {user}\r\n").as_bytes())
-                    .await
-                    .map_err(Error::Io)?;
-                let wants_password = reply(&mut read).await?;
-                if wants_password.starts_with("381") {
-                    write
-                        .write_all(format!("AUTHINFO PASS {password}\r\n").as_bytes())
-                        .await
-                        .map_err(Error::Io)?;
-                    let accepted = reply(&mut read).await?;
-                    if !accepted.starts_with("281") {
-                        return Err(io(&format!(
-                            "news server refused the credentials: {}",
-                            accepted.split_whitespace().next().unwrap_or("")
-                        )));
-                    }
-                } else if !wants_password.starts_with("281") {
-                    return Err(io(&format!(
-                        "news server refused the credentials: {}",
-                        wants_password.split_whitespace().next().unwrap_or("")
-                    )));
-                }
-            }
-            write.write_all(b"POST\r\n").await.map_err(Error::Io)?;
-            let go = reply(&mut read).await?;
+            let go = reply(&mut session.read).await?;
             if !go.starts_with("340") {
-                let _ = write.write_all(b"QUIT\r\n").await;
+                session.quit().await;
                 return Ok(Outcome::Refused(go));
             }
-            write
+            session
+                .write
                 .write_all(&dot_stuffed(article))
                 .await
                 .map_err(Error::Io)?;
-            let verdict = reply(&mut read).await?;
-            let _ = write.write_all(b"QUIT\r\n").await;
+            let verdict = reply(&mut session.read).await?;
+            session.quit().await;
             if verdict.starts_with("240") {
                 Ok(Outcome::Accepted)
             } else if verdict.starts_with('4') {
@@ -371,6 +337,243 @@ impl Client {
             .await
             .map_err(|_| io("news server timed out"))?
     }
+
+    /// Open a reader session: `GROUP`, `HEAD` and `ARTICLE` until `quit`.
+    /// # Errors
+    /// As [`Client::post`] for the connection and the credentials.
+    pub async fn reader(&self) -> Result<Reader> {
+        let session = tokio::time::timeout(self.timeout, self.connect())
+            .await
+            .map_err(|_| io("news server timed out"))??;
+        Ok(Reader {
+            session,
+            timeout: self.timeout,
+        })
+    }
+
+    /// Connect, enter reader mode, authenticate when configured.
+    async fn connect(&self) -> Result<Session> {
+        let stream = TcpStream::connect((self.host.as_str(), self.port))
+            .await
+            .map_err(Error::Io)?;
+        let (read, write) = stream.into_split();
+        let mut session = Session {
+            read: BufReader::new(read),
+            write,
+        };
+        let greeting = reply(&mut session.read).await?;
+        if !greeting.starts_with("20") {
+            return Err(io(&format!("news server refused the session: {greeting}")));
+        }
+        session
+            .write
+            .write_all(b"MODE READER\r\n")
+            .await
+            .map_err(Error::Io)?;
+        // A server that does not know reader mode still posts.
+        let _ = reply(&mut session.read).await?;
+        if let (Some(user), Some(password)) = (&self.user, &self.password) {
+            session
+                .write
+                .write_all(format!("AUTHINFO USER {user}\r\n").as_bytes())
+                .await
+                .map_err(Error::Io)?;
+            let wants_password = reply(&mut session.read).await?;
+            if wants_password.starts_with("381") {
+                session
+                    .write
+                    .write_all(format!("AUTHINFO PASS {password}\r\n").as_bytes())
+                    .await
+                    .map_err(Error::Io)?;
+                let accepted = reply(&mut session.read).await?;
+                if !accepted.starts_with("281") {
+                    return Err(refused_credentials(&accepted));
+                }
+            } else if !wants_password.starts_with("281") {
+                return Err(refused_credentials(&wants_password));
+            }
+        }
+        Ok(session)
+    }
+}
+
+fn refused_credentials(reply: &str) -> Error {
+    io(&format!(
+        "news server refused the credentials: {}",
+        reply.split_whitespace().next().unwrap_or("")
+    ))
+}
+
+/// An open connection in reader mode.
+struct Session {
+    read: BufReader<tokio::net::tcp::OwnedReadHalf>,
+    write: tokio::net::tcp::OwnedWriteHalf,
+}
+
+impl Session {
+    async fn quit(&mut self) {
+        let _ = self.write.write_all(b"QUIT\r\n").await;
+    }
+
+    /// A multi-line response (RFC 3977 §3.1.1): the lines up to the lone
+    /// dot, their dot-stuffing undone, as CRLF bytes.
+    async fn block(&mut self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        loop {
+            let mut line = Vec::new();
+            let n = self
+                .read
+                .read_until(b'\n', &mut line)
+                .await
+                .map_err(Error::Io)?;
+            if n == 0 {
+                return Err(io("news server closed the connection"));
+            }
+            let text = line.strip_suffix(b"\n").unwrap_or(&line);
+            let text = text.strip_suffix(b"\r").unwrap_or(text);
+            if text == b"." {
+                return Ok(out);
+            }
+            let start = usize::from(text.starts_with(b".."));
+            out.extend_from_slice(&text[start..]);
+            out.extend_from_slice(b"\r\n");
+        }
+    }
+}
+
+/// A reader session over the news server.
+pub struct Reader {
+    session: Session,
+    timeout: Duration,
+}
+
+impl std::fmt::Debug for Reader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reader").finish_non_exhaustive()
+    }
+}
+
+impl Reader {
+    /// Select `group` and return its first and last article numbers.
+    /// # Errors
+    /// Returns an I/O error for an unknown group or a broken session.
+    pub async fn group(&mut self, group: &str) -> Result<(u64, u64)> {
+        let answer = self.command(&format!("GROUP {group}")).await?;
+        // 211 <number> <low> <high> <group>
+        let mut words = answer.split_whitespace();
+        if words.next() != Some("211") {
+            return Err(io(&format!("news server has no group {group}: {answer}")));
+        }
+        let _count = words.next();
+        let first = words.next().and_then(|n| n.parse().ok());
+        let last = words.next().and_then(|n| n.parse().ok());
+        match (first, last) {
+            (Some(first), Some(last)) => Ok((first, last)),
+            _ => Err(io(&format!("news server answered GROUP with {answer}"))),
+        }
+    }
+
+    /// The headers of article `number` in the selected group.
+    /// # Errors
+    /// Returns an I/O error for a missing article or a broken session.
+    pub async fn head(&mut self, number: u64) -> Result<Vec<u8>> {
+        self.fetch("HEAD", number, "221").await
+    }
+
+    /// Article `number` whole (headers, blank line, body).
+    /// # Errors
+    /// Returns an I/O error for a missing article or a broken session.
+    pub async fn article(&mut self, number: u64) -> Result<Vec<u8>> {
+        self.fetch("ARTICLE", number, "220").await
+    }
+
+    /// Close the session.
+    pub async fn quit(mut self) {
+        self.session.quit().await;
+    }
+
+    async fn command(&mut self, command: &str) -> Result<String> {
+        tokio::time::timeout(self.timeout, async {
+            self.session
+                .write
+                .write_all(format!("{command}\r\n").as_bytes())
+                .await
+                .map_err(Error::Io)?;
+            reply(&mut self.session.read).await
+        })
+        .await
+        .map_err(|_| io("news server timed out"))?
+    }
+
+    async fn fetch(&mut self, verb: &str, number: u64, code: &str) -> Result<Vec<u8>> {
+        let answer = self.command(&format!("{verb} {number}")).await?;
+        if !answer.starts_with(code) {
+            return Err(io(&format!(
+                "news server has no article {number}: {answer}"
+            )));
+        }
+        tokio::time::timeout(self.timeout, self.session.block())
+            .await
+            .map_err(|_| io("news server timed out"))?
+    }
+}
+
+/// Mailman's `gatenews` on one article of the list's newsgroup.
+///
+/// `None` when the article is the list's own (its `List-Id` names the
+/// list) or has no `From` to post as; otherwise the article addressed to
+/// the list (`To` moved to `X-Originally-To`, `To` set to the posting
+/// address) and the address of its `From`, the sender the list admits it
+/// as.
+/// # Errors
+/// Returns `UnsafeHeaderContent` for a header block that cannot be read.
+pub fn inbound(raw: &[u8], list: &MailingList) -> Result<Option<(Vec<u8>, String)>> {
+    let (blank, body) = cook::header_body_split(raw).ok_or(Error::UnsafeHeaderContent)?;
+    let fields = fields(raw, blank)?;
+    let ours = format!("<{}>", list.id);
+    if fields
+        .iter()
+        .any(|field| field.lower == "list-id" && field.value.trim_end().ends_with(&ours))
+    {
+        return Ok(None);
+    }
+    let Some(sender) = mail_parser::MessageParser::default()
+        .parse(raw)
+        .and_then(|message| {
+            message
+                .from()
+                .and_then(|from| from.first())
+                .and_then(|address| address.address().map(str::to_owned))
+        })
+        .filter(|address| address.contains('@'))
+    else {
+        return Ok(None);
+    };
+    let eol: &[u8] = if raw[..body].contains(&b'\r') {
+        b"\r\n"
+    } else {
+        b"\n"
+    };
+    let mut output = Vec::with_capacity(raw.len() + 64);
+    for field in &fields {
+        match field.lower.as_str() {
+            "x-originally-to" => {}
+            "to" => {
+                if field.value.bytes().any(|b| b == b'\r' || b == b'\n') {
+                    return Err(Error::UnsafeHeaderContent);
+                }
+                output.extend_from_slice(b"X-Originally-To: ");
+                output.extend_from_slice(field.value.as_bytes());
+                output.extend_from_slice(eol);
+            }
+            _ => output.extend_from_slice(&field.raw),
+        }
+    }
+    output.extend_from_slice(b"To: ");
+    output.extend_from_slice(list.id.posting_address().as_bytes());
+    output.extend_from_slice(eol);
+    output.extend_from_slice(&raw[blank..]);
+    Ok(Some((output, sender)))
 }
 
 /// One reply line, without its line ending.

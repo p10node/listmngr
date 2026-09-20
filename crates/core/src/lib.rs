@@ -1640,6 +1640,10 @@ config_struct!(RunnerConfig {
 config_struct!(NntpConfig {
     host: String = String::new(),
     port: u16 = 119,
+    // Mailman's `gatenews_every`: how often the `nntp` runner polls the
+    // newsgroups of lists that gateway to mail; 0 leaves polling to
+    // `listmngr nntp gate`.
+    gatenews_every_secs: u32 = 300,
     user: Option<String> = None,
     password: Option<SmtpAuthSecret> = None,
     password_file: Option<PathBuf> = None,
