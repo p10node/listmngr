@@ -29,6 +29,8 @@ pub enum Target {
     Out,
     Archive,
     Digest,
+    /// The news gateway's copy, as of `to-usenet`.
+    Nntp,
 }
 
 impl Target {
@@ -40,6 +42,7 @@ impl Target {
             Self::Out => Some("to-outgoing"),
             Self::Archive => Some("to-archive"),
             Self::Digest => Some("to-digest"),
+            Self::Nntp => Some("to-usenet"),
         }
     }
 }
@@ -50,6 +53,8 @@ pub enum FanOut {
     Out,
     Archive,
     Digest,
+    /// Mailman's `nntp` queue: the post is gated to the list's newsgroup.
+    Nntp,
 }
 
 /// What the `in` runner must do for an accepted post, in handler order.
@@ -105,6 +110,9 @@ pub struct PipelineContext<'a> {
     /// The site seals deliveries (ARC), so the chain the post arrived with
     /// must stay to be extended; `cleanse-dkim` keeps the `ARC-*` fields.
     pub keep_arc: bool,
+    /// Mailman's `fromusenet`: the post was gated from the list's newsgroup
+    /// and must not be gated back (`to-usenet` queues nothing).
+    pub from_usenet: bool,
 }
 
 /// What a handler that ends the pipeline asks the caller to do with the post.
@@ -411,6 +419,30 @@ impl Handler for ToDigest {
     }
 }
 
+/// Mailman's `to-usenet`: queue the post for the list's newsgroup.
+#[derive(Debug)]
+pub struct ToUsenet;
+
+impl Handler for ToUsenet {
+    fn name(&self) -> &'static str {
+        "to-usenet"
+    }
+    fn process(
+        &self,
+        _message: &mut Working<'_>,
+        ctx: &PipelineContext<'_>,
+        data: &mut MsgData,
+    ) -> Result<(), HandlerError> {
+        let usenet = &ctx.list.usenet;
+        // A list without a newsgroup is not gating anything, however its
+        // switch is set; Mailman logs the misconfiguration and moves on.
+        if usenet.gateway_to_news && !usenet.linked_newsgroup.is_empty() && !ctx.from_usenet {
+            data.effects.push(Effect::Enqueue(FanOut::Nntp));
+        }
+        Ok(())
+    }
+}
+
 /// Copy to the outgoing queue.
 #[derive(Debug)]
 pub struct ToOutgoing;
@@ -437,6 +469,7 @@ pub fn fan_out_handlers() -> Vec<Box<dyn Handler>> {
         Box::new(MemberRecipients),
         Box::new(ToArchive),
         Box::new(ToDigest),
+        Box::new(ToUsenet),
         Box::new(AfterDelivery),
         Box::new(Acknowledge),
         Box::new(ToOutgoing),
@@ -505,6 +538,7 @@ pub fn builtin_pipelines() -> Vec<Pipeline> {
                 "rfc-2369",
                 "to-archive",
                 "to-digest",
+                "to-usenet",
                 "after-delivery",
                 "acknowledge",
                 "dmarc",

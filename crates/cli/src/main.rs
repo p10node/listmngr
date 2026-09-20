@@ -285,7 +285,7 @@ async fn run() -> Result<()> {
             config.api.listen
         ),
         Command::Status => status::check(&config).await?,
-        command => run_database(command, config).await?,
+        command => Box::pin(run_database(command, config)).await?,
     }
     Ok(())
 }

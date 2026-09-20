@@ -70,6 +70,7 @@ fn registry() -> HandlerRegistry {
             "to-archive",
             "second",
             "to-digest",
+            "to-usenet",
             "third",
             "to-outgoing",
         ],
@@ -86,7 +87,16 @@ const fn ctx(list: &MailingList, target: Target) -> PipelineContext<'_> {
         dmarc_mitigate: false,
         authentication_results: None,
         keep_arc: false,
+        from_usenet: false,
     }
+}
+
+/// A list that gateways to a newsgroup.
+fn gatewayed() -> MailingList {
+    let mut list = list();
+    list.usenet.gateway_to_news = true;
+    list.usenet.linked_newsgroup = "comp.lang.rust.lists".into();
+    list
 }
 
 #[test]
@@ -96,6 +106,7 @@ fn each_consumer_gets_the_bytes_as_of_its_own_fan_out_handler() {
     for (target, expected) in [
         (Target::Archive, "|first|"),
         (Target::Digest, "|first|second|"),
+        (Target::Nntp, "|first|second|"),
         (Target::Out, "|first|second|third|"),
     ] {
         let (bytes, data) = registry.run("p", b"|", &ctx(&list, target)).unwrap();
@@ -104,6 +115,7 @@ fn each_consumer_gets_the_bytes_as_of_its_own_fan_out_handler() {
             !data.effects.contains(&Effect::Enqueue(match target {
                 Target::Archive => FanOut::Archive,
                 Target::Digest => FanOut::Digest,
+                Target::Nntp => FanOut::Nntp,
                 _ => FanOut::Out,
             })),
             "{target:?}: the snapshot handler itself must not run"
@@ -135,9 +147,53 @@ fn planning_runs_every_handler_and_collects_the_effects_in_order() {
             "to-archive",
             "second",
             "to-digest",
+            "to-usenet",
             "third",
             "to-outgoing"
         ]
+    );
+}
+
+/// Mailman's `to-usenet`: a list that gateways to its newsgroup queues the
+/// post for the `nntp` runner; a list that does not, one without a
+/// newsgroup, or a post that came from the newsgroup, queues nothing.
+#[test]
+fn only_a_gatewayed_post_from_mail_gets_the_nntp_effect() {
+    let list = gatewayed();
+    let (_, data) = registry()
+        .run("p", b"|", &ctx(&list, Target::Plan))
+        .unwrap();
+    assert_eq!(
+        data.effects,
+        vec![
+            Effect::PlanRecipients,
+            Effect::Enqueue(FanOut::Archive),
+            Effect::Enqueue(FanOut::Digest),
+            Effect::Enqueue(FanOut::Nntp),
+            Effect::Enqueue(FanOut::Out),
+        ]
+    );
+    let mut off = gatewayed();
+    off.usenet.gateway_to_news = false;
+    let mut unlinked = gatewayed();
+    unlinked.usenet.linked_newsgroup.clear();
+    for (name, list) in [("gateway off", off), ("no newsgroup", unlinked)] {
+        let (_, data) = registry()
+            .run("p", b"|", &ctx(&list, Target::Plan))
+            .unwrap();
+        assert!(
+            !data.effects.contains(&Effect::Enqueue(FanOut::Nntp)),
+            "{name}"
+        );
+        assert!(data.ran.iter().any(|ran| ran == "to-usenet"), "{name}");
+    }
+    let list = gatewayed();
+    let mut from_usenet = ctx(&list, Target::Plan);
+    from_usenet.from_usenet = true;
+    let (_, data) = registry().run("p", b"|", &from_usenet).unwrap();
+    assert!(
+        !data.effects.contains(&Effect::Enqueue(FanOut::Nntp)),
+        "an article gated from the newsgroup is not gated back"
     );
 }
 
@@ -286,6 +342,7 @@ fn the_builtin_posting_pipeline_keeps_mailman_order_with_dmarc_after_the_copies(
             "rfc-2369",
             "to-archive",
             "to-digest",
+            "to-usenet",
             "after-delivery",
             "acknowledge",
             "dmarc",

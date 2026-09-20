@@ -53,18 +53,19 @@ async fn sink(listener: TcpListener, count: usize) -> Vec<(String, Vec<u8>)> {
 }
 #[tokio::test]
 async fn accepted_post_routes_mixed_modes_to_real_smtp_after_restart_without_regular_duplicate() {
-    mixed_modes(false, false).await;
+    Box::pin(mixed_modes(false, false)).await;
 }
 #[tokio::test]
 async fn munge_only_rewrites_regular_delivery_not_digest_authors() {
-    mixed_modes(true, false).await;
+    Box::pin(mixed_modes(true, false)).await;
 }
 #[tokio::test]
 async fn dkim_signs_regular_and_all_producer_digest_modes() {
-    mixed_modes(true, true).await;
+    Box::pin(mixed_modes(true, true)).await;
 }
 async fn mixed_modes(munge: bool, signing: bool) {
-    tokio::time::timeout(Duration::from_secs(15), async {
+    // The scenario holds whole list rows across awaits; keep it off the stack.
+    tokio::time::timeout(Duration::from_secs(15), Box::pin(async {
     let owned_db = tempfile::tempdir().unwrap();
     let dir = owned_db.path().to_path_buf();
     let url=format!("sqlite://{}?mode=rwc",dir.join("runner.db").display());
@@ -149,5 +150,5 @@ async fn mixed_modes(munge: bool, signing: bool) {
     }
     assert_eq!(sqlx::query_scalar::<_,i64>("SELECT COUNT(*) FROM queue_jobs WHERE queue='out' AND state='done'").fetch_one(db.pool()).await.unwrap(),4);
     db.pool().close().await;std::fs::remove_dir_all(dir).unwrap();
-    }).await.unwrap();
+    })).await.unwrap();
 }

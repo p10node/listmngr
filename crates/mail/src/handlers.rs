@@ -428,6 +428,7 @@ pub fn cook_for_site(
             dmarc_mitigate: false,
             authentication_results: None,
             keep_arc: false,
+            from_usenet: false,
         },
     )
 }
@@ -444,6 +445,8 @@ pub struct Admission<'a> {
     /// The delivery will be ARC-sealed: the chain the post arrived with is
     /// kept for the seal to extend.
     pub keep_arc: bool,
+    /// Mailman's `fromusenet`: the post was gated in from the newsgroup.
+    pub from_usenet: bool,
 }
 
 /// [`cook_for`] with everything the admission recorded.
@@ -468,6 +471,7 @@ pub fn cook_with(
                 dmarc_mitigate: admission.dmarc_mitigate,
                 authentication_results: admission.authentication_results,
                 keep_arc: admission.keep_arc,
+                from_usenet: admission.from_usenet,
             },
         )
         .map_err(pipeline_error)?;
@@ -480,6 +484,19 @@ pub fn cook_with(
 /// Returns [`Error::Refused`] when a handler ended the pipeline with a
 /// disposition, else [`Error::UnsafeHeaderContent`] for any other refusal.
 pub fn plan(raw: &[u8], list: &MailingList, identity: &str) -> Result<MsgData> {
+    plan_with(raw, list, identity, false)
+}
+
+/// [`plan`] for a post that may have been gated in from the newsgroup
+/// (`from_usenet`), which `to-usenet` must not gate back.
+/// # Errors
+/// As [`plan`].
+pub fn plan_with(
+    raw: &[u8],
+    list: &MailingList,
+    identity: &str,
+    from_usenet: bool,
+) -> Result<MsgData> {
     let (_, data) = builtin_registry()
         .run(
             &list.posting_pipeline,
@@ -492,6 +509,7 @@ pub fn plan(raw: &[u8], list: &MailingList, identity: &str) -> Result<MsgData> {
                 dmarc_mitigate: false,
                 authentication_results: None,
                 keep_arc: false,
+                from_usenet,
             },
         )
         .map_err(pipeline_error)?;
