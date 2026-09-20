@@ -26,6 +26,7 @@ pub mod delivery_policy;
 pub mod digests;
 mod heartbeat;
 mod inbound;
+pub mod nntp;
 mod outbound;
 mod policy_facts;
 mod processor;
@@ -285,6 +286,11 @@ pub async fn serve_mail_role(
     } else {
         None
     };
+    let news = nntp::run(db.clone(), config.nntp.clone(), shutdown.clone());
+    tasks.spawn(async move {
+        news.await;
+        Ok(())
+    });
     let inbound = Box::pin(processor::run(
         db.clone(),
         config,

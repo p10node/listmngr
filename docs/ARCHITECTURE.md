@@ -1,5 +1,40 @@
 # Architecture
 
+## Mail to news — bounded local acceptance verified
+
+`listmngr_core::NntpConfig` (`[nntp]`: `host`, `port`, `user`,
+`password`/`password_file`, `remove_headers`, `rewrite_duplicate_headers`
+as `"Source Target"` pairs; `validate` checks the port, the exclusive
+password sources and the header names; `enabled()` is a non-empty host;
+`credentials()` reads the file at use). The pipeline gains
+`Target::Nntp` (snapshot at `to-usenet`), `FanOut::Nntp`,
+`PipelineContext::from_usenet`/`Admission::from_usenet` and the
+`ToUsenet` handler, in `default-posting-pipeline` after `to-digest`;
+`listmngr_mail::handlers::plan_with(raw, list, id, from_usenet)` is what
+the `in` runner plans with (`Posting::from_usenet` from the context's
+`fromusenet`), and `Effect::Enqueue(FanOut::Nntp)` becomes a `Queue::Nntp`
+child job (`processor::consumer`, five tries). `listmngr_mail::nntp`:
+`prepare(raw, list, config)` (Mailman's `prepare_message` over a parsed
+header block, kept fields copied as folded: `Approved`, the subject
+through `without_prefix`, `newsgroups_header`, `message_id_header`,
+`Lines`, `remove_headers`, `rewrite_duplicates` writing targets as
+configured), `with_message_id`, `list_message_id`, and `Client` (`post`:
+connect, `MODE READER`, `AUTHINFO USER`/`PASS` when configured — a
+refusal reported without the password —, `POST`, `dot_stuffed` CRLF
+article, `240` → `Outcome::Accepted`, `4xx` → `Outcome::Refused(reply)`,
+anything else or a closed connection → an I/O error; thirty-second
+timeout). `listmngr_runners::nntp::run` claims `Queue::Nntp` (idle
+without a host), `process` runs `gate` under the lease heartbeat —
+message, context, list, `Gated::Skipped` when the list no longer
+gateways, `cook_with(Target::Nntp, …)`, `prepare`, the context's
+`nntp_message_id` applied when present, `Client::try_new(config).post` —
+and transitions: `ack` on `Posted`/`Skipped`, `refused` on a refusal
+(`441` without a replacement yet: `MailQueueRepo::set_context_value`
+records `nntp_message_id` and the job retries in a second; otherwise
+`shunt` with the reply), `retry` with a doubling minute-based delay on an
+error, nothing on a lost lease. `serve_mail_role` spawns it with the
+other runners.
+
 ## Usenet gateway settings — bounded local acceptance verified
 
 `listmngr_core::UsenetSettings` (flattened into `MailingList` like the
