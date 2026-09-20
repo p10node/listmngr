@@ -1,5 +1,32 @@
 # listmngr
 
+## News to mail (`P6-NNTP-GATENEWS`) — bounded local acceptance verified
+
+Mailman's `gatenews`, the other direction of the gateway. A list with
+`gateway_to_mail` and a `linked_newsgroup` has its newsgroup polled by
+the `nntp` runner — at start, then every `[nntp] gatenews_every_secs`
+(300; `0` leaves polling to the command) — and by hand with `listmngr
+nntp gate`, which prints one JSON line per polled list (`list_id`,
+`newsgroup`, `watermark`, `gated`, `error`). The first poll of a list
+only catches up: its `usenet_watermark` becomes the group's last article
+and nothing is gated, so linking a busy group does not flood the list.
+Each later poll reads the articles after the watermark (`GROUP`, then
+`ARTICLE` by number), skips the list's own posts come back (a `List-Id`
+naming the list) and articles without a `From`, and hands the rest to
+the `in` queue as posts from Usenet — `To` moved to `X-Originally-To`
+and set to the list, the `From` address as the envelope sender, the
+context marked `fromusenet` so the post is admitted like any other but
+never gated back out. The watermark moves article by article, each move
+an audit event (`usenet.watermark`), so a poll cut short never repeats
+itself; an expired article is logged and passed; a group the server does
+not know, or a server that cannot be reached, is reported per list and
+moves nothing.
+
+Limits: one reader session per poll (all lists in turn), plain TCP as
+Mailman's; the `in` queue's admission decides the article's fate (a
+moderated newsgroup gateway holds it like any post); Mailman's `HEAD`
+pre-check is folded into reading the article whole.
+
 ## Mail to news (`P6-NNTP-GATEWAY`) — bounded local acceptance verified
 
 Mailman's `to-usenet` handler and `nntp` runner. Configure the news
@@ -9,6 +36,7 @@ server once:
 [nntp]
 host = "news.example.org"        # empty (the default) leaves the gateway idle
 port = 119
+gatenews_every_secs = 300        # news → mail poll (P6-NNTP-GATENEWS); 0 = by hand
 user = "gateway"                 # optional; AUTHINFO USER/PASS
 password_file = "/etc/listmngr/nntp.pass"   # or password = "…"
 # remove_headers and rewrite_duplicate_headers default to Mailman's lists
