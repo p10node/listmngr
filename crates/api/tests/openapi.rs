@@ -456,6 +456,22 @@ async fn dmarc_openapi_exposes_bounded_settings_on_config_contracts() {
             "discard"
         ])
     );
+    assert_eq!(
+        doc["components"]["schemas"]["NewsgroupModeration"]["enum"],
+        json!(["none", "open_moderated", "moderated"])
+    );
+    for key in [
+        "gateway_to_mail",
+        "gateway_to_news",
+        "linked_newsgroup",
+        "nntp_prefix_subject_too",
+        "newsgroup_moderation",
+    ] {
+        assert!(
+            schema_property(&doc, &doc["components"]["schemas"]["ListConfigInput"], key).is_some(),
+            "{key} is a writable list setting"
+        );
+    }
     for key in ["dmarc_mitigate_action", "dmarc_mitigate_unconditionally"] {
         let mut broken = doc.clone();
         assert!(

@@ -189,6 +189,7 @@ pub async fn gather_context(
             dmarc_unconditional: list.dmarc.unconditional,
             dmarc_addresses: list.dmarc.dmarc_addresses.clone(),
             dmarc_moderation_notice: list.dmarc.dmarc_moderation_notice.clone(),
+            newsgroup_moderation: list.usenet.newsgroup_moderation,
         },
         message,
         site_header_checks: site_header_checks(config),
