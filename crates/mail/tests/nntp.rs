@@ -109,10 +109,15 @@ fn a_post_is_prepared_as_mailmans_nntp_runner_prepares_it() {
     );
 }
 
+/// A newsgroup to read: its name and its articles by number.
+type Group = (&'static str, Vec<(u64, &'static [u8])>);
+
 #[derive(Default)]
 struct Server {
     /// Articles the server accepted, dot-unstuffed.
     posted: Arc<Mutex<Vec<Vec<u8>>>>,
+    /// A newsgroup to read.
+    group: Option<Group>,
     /// `AUTHINFO USER`/`PASS` pairs it was given.
     logins: Arc<Mutex<Vec<(String, String)>>>,
     /// Reply to the article with this code once, then accept.
@@ -126,6 +131,7 @@ async fn serve(server: Server) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let refusal = Arc::new(Mutex::new(server.refuse_first_with));
+    let group = Arc::new(server.group);
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
@@ -134,6 +140,7 @@ async fn serve(server: Server) -> u16 {
             let posted = server.posted.clone();
             let logins = server.logins.clone();
             let refusal = refusal.clone();
+            let group = group.clone();
             let auth = server.auth;
             tokio::spawn(async move {
                 let (read, mut write) = stream.into_split();
@@ -189,6 +196,8 @@ async fn serve(server: Server) -> u16 {
                             },
                             |code| format!("{code}\r\n"),
                         )
+                    } else if let Some(reply) = reader_reply(&line, group.as_ref().as_ref()) {
+                        reply
                     } else if line.eq_ignore_ascii_case("QUIT") {
                         write.write_all(b"205 Bye\r\n").await.unwrap();
                         return;
@@ -201,6 +210,47 @@ async fn serve(server: Server) -> u16 {
         }
     });
     port
+}
+
+/// `GROUP`, `HEAD` and `ARTICLE` over the served newsgroup.
+fn reader_reply(line: &str, group: Option<&Group>) -> Option<String> {
+    if let Some(name) = line.strip_prefix("GROUP ") {
+        return Some(match group {
+            Some((known, articles)) if *known == name => {
+                let first = articles.first().map_or(0, |(n, _)| *n);
+                let last = articles.last().map_or(0, |(n, _)| *n);
+                format!("211 {} {first} {last} {name}\r\n", articles.len())
+            }
+            _ => "411 No such newsgroup\r\n".into(),
+        });
+    }
+    let rest = line
+        .strip_prefix("HEAD ")
+        .or_else(|| line.strip_prefix("ARTICLE "))?;
+    let whole = line.starts_with("ARTICLE ");
+    let number: u64 = rest.trim().parse().unwrap_or(0);
+    let found = group.and_then(|(_, articles)| articles.iter().find(|(n, _)| *n == number));
+    Some(match found {
+        Some((n, article)) => {
+            let text = String::from_utf8_lossy(article).into_owned();
+            let sent = if whole {
+                text
+            } else {
+                text.split("\r\n\r\n").next().unwrap_or("").to_owned() + "\r\n"
+            };
+            let code = if whole { 220 } else { 221 };
+            let mut out = format!("{code} {n} <{n}@news.example.invalid>\r\n");
+            for body_line in sent.split_inclusive("\r\n") {
+                if body_line.starts_with('.') {
+                    out.push('.');
+                }
+                out.push_str(body_line);
+            }
+            out.push_str(".\r\n");
+            out
+        }
+        None => "423 No such article number\r\n".into(),
+    })
 }
 
 fn config(port: u16) -> NntpConfig {
@@ -302,4 +352,88 @@ async fn a_refused_article_and_a_dead_server_are_told_apart() {
     let dead = free.local_addr().unwrap().port();
     drop(free);
     assert!(Client::new(&config(dead)).post(article).await.is_err());
+}
+
+const ARTICLE_ONE: &[u8] = b"Path: news.example.invalid!not-for-mail\r\nFrom: Carol <carol@elsewhere.invalid>\r\nNewsgroups: comp.lang.rust.lists\r\nSubject: From the newsgroup\r\nDate: Tue, 2 Sep 2026 09:00:00 +0000\r\nMessage-ID: <one@news.example.invalid>\r\nTo: someone@elsewhere.invalid\r\nXref: news.example.invalid comp.lang.rust.lists:41\r\n\r\n.leading dot\r\nsecond line\r\n";
+const ARTICLE_OURS: &[u8] = b"Path: news.example.invalid!not-for-mail\r\nFrom: alice@sender.invalid\r\nNewsgroups: comp.lang.rust.lists\r\nSubject: [dev] Gated out\r\nMessage-ID: <ours@sender.invalid>\r\nList-Id: Developers <dev.example.invalid>\r\n\r\nour own post, back again\r\n";
+
+/// The reader side: `GROUP`, `HEAD` and `ARTICLE` over one session, with
+/// the server's dot-stuffing undone and a missing group reported.
+#[tokio::test]
+async fn the_reader_walks_a_newsgroup() {
+    let port = serve(Server {
+        group: Some((
+            "comp.lang.rust.lists",
+            vec![(41, ARTICLE_ONE), (42, ARTICLE_OURS)],
+        )),
+        ..Server::default()
+    })
+    .await;
+    let mut reader = Client::new(&config(port)).reader().await.unwrap();
+    assert_eq!(
+        reader.group("comp.lang.rust.lists").await.unwrap(),
+        (41, 42)
+    );
+    let head = reader.head(41).await.unwrap();
+    assert!(
+        head.starts_with(b"Path: news.example.invalid"),
+        "{}",
+        String::from_utf8_lossy(&head)
+    );
+    assert!(!head.contains(&b'.') || !String::from_utf8_lossy(&head).contains("leading dot"));
+    let article = reader.article(41).await.unwrap();
+    assert_eq!(
+        article,
+        ARTICLE_ONE,
+        "{}",
+        String::from_utf8_lossy(&article)
+    );
+    assert!(reader.article(43).await.is_err(), "no such article");
+    assert!(reader.group("alt.missing").await.is_err(), "no such group");
+    reader.quit().await;
+}
+
+/// Mailman's `gatenews` on one article: an article that carries the
+/// list's own `List-Id` is ours and is not gated; another gets `To`
+/// moved to `X-Originally-To`, `To` set to the list, and its sender read.
+#[test]
+fn an_article_is_prepared_for_the_list_or_recognised_as_its_own() {
+    let list = list();
+    assert!(
+        listmngr_mail::nntp::inbound(ARTICLE_OURS, &list)
+            .unwrap()
+            .is_none()
+    );
+    let (raw, sender) = listmngr_mail::nntp::inbound(ARTICLE_ONE, &list)
+        .unwrap()
+        .expect("gated");
+    assert_eq!(sender, "carol@elsewhere.invalid");
+    assert_eq!(
+        header_value(&raw, "To").as_deref(),
+        Some("dev@example.invalid")
+    );
+    assert_eq!(
+        header_value(&raw, "X-Originally-To").as_deref(),
+        Some("someone@elsewhere.invalid")
+    );
+    assert_eq!(
+        header_value(&raw, "From").as_deref(),
+        Some("Carol <carol@elsewhere.invalid>")
+    );
+    assert!(raw.ends_with(b"\r\n.leading dot\r\nsecond line\r\n"));
+    // Without a To, none is invented but the list's.
+    let bare = b"From: carol@elsewhere.invalid\r\nSubject: x\r\n\r\nbody\r\n";
+    let (raw, _) = listmngr_mail::nntp::inbound(bare, &list).unwrap().unwrap();
+    assert_eq!(
+        header_value(&raw, "To").as_deref(),
+        Some("dev@example.invalid")
+    );
+    assert!(header_value(&raw, "X-Originally-To").is_none());
+    // Without a From there is no sender to post as: not gated.
+    let anonymous = b"Subject: x\r\n\r\nbody\r\n";
+    assert!(
+        listmngr_mail::nntp::inbound(anonymous, &list)
+            .unwrap()
+            .is_none()
+    );
 }
