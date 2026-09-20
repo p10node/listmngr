@@ -71,6 +71,8 @@ pub struct MailRoleConfig {
     pub backoff: delivery_policy::Backoff,
     /// `[mta] authenticity_checks`: the SPF/DKIM/DMARC verifier, when on.
     pub authenticity: Option<Arc<listmngr_mail::authenticity::Verifier>>,
+    /// `[mta.arc]`: the sealer for every delivered post, when on.
+    pub arc: Option<Arc<listmngr_mail::arc::Sealer>>,
     /// `[mta] verp_format` and `verp_delimiter`, validated at load.
     pub verp_format: String,
     pub verp_delimiter: String,
@@ -139,11 +141,13 @@ impl MailRoleConfig {
                             listmngr_core::Error::Validation(format!(
                                 "mta.authenticity_checks: resolver unavailable: {error}"
                             ))
-                        })?,
+                        })?
+                        .verifying_arc(config.mta.arc.enabled),
                 ))
             } else {
                 None
             },
+            arc: listmngr_mail::arc::Sealer::load(&config.mta.arc)?.map(Arc::new),
             verp_format: config.mta.verp_format.clone(),
             verp_delimiter: config.mta.verp_delimiter.clone(),
             verp_personalized_deliveries: config.mta.verp_personalized_deliveries,

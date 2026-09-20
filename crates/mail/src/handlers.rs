@@ -157,7 +157,9 @@ impl Handler for Cleanse {
     }
 }
 
-/// Drop the original DKIM/ARC signatures that redistribution invalidates.
+/// Drop the original DKIM signatures that redistribution invalidates, and
+/// the ARC sets unless the site seals its deliveries — a chain is kept to
+/// be extended, never left broken.
 #[derive(Debug)]
 pub struct CleanseDkim;
 
@@ -168,10 +170,10 @@ impl Handler for CleanseDkim {
     fn process(
         &self,
         message: &mut Working<'_>,
-        _ctx: &PipelineContext<'_>,
+        ctx: &PipelineContext<'_>,
         _data: &mut MsgData,
     ) -> std::result::Result<(), HandlerError> {
-        message.raw = cook::strip_signature_headers(&message.raw)
+        message.raw = cook::strip_signature_headers(&message.raw, ctx.keep_arc)
             .map_err(|error| refuse(self.name(), &error))?;
         Ok(())
     }
@@ -425,6 +427,7 @@ pub fn cook_for_site(
             base_url,
             dmarc_mitigate: false,
             authentication_results: None,
+            keep_arc: false,
         },
     )
 }
@@ -438,6 +441,9 @@ pub struct Admission<'a> {
     pub dmarc_mitigate: bool,
     /// The `Authentication-Results` value `validate-authenticity` writes.
     pub authentication_results: Option<&'a str>,
+    /// The delivery will be ARC-sealed: the chain the post arrived with is
+    /// kept for the seal to extend.
+    pub keep_arc: bool,
 }
 
 /// [`cook_for`] with everything the admission recorded.
@@ -461,6 +467,7 @@ pub fn cook_with(
                 base_url: admission.base_url,
                 dmarc_mitigate: admission.dmarc_mitigate,
                 authentication_results: admission.authentication_results,
+                keep_arc: admission.keep_arc,
             },
         )
         .map_err(pipeline_error)?;
@@ -484,6 +491,7 @@ pub fn plan(raw: &[u8], list: &MailingList, identity: &str) -> Result<MsgData> {
                 base_url: None,
                 dmarc_mitigate: false,
                 authentication_results: None,
+                keep_arc: false,
             },
         )
         .map_err(pipeline_error)?;

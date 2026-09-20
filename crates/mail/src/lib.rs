@@ -14,6 +14,7 @@ pub use store::FsMessageStore;
 mod cook;
 mod munge;
 pub use cook::{cook_headers, cook_individual_post, cook_post, header_body_split};
+pub mod arc;
 pub mod attachments;
 pub mod authenticity;
 pub mod bounce;

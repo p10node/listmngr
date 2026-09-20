@@ -1156,8 +1156,22 @@ impl Serialize for SmtpAuthSecret {
     }
 }
 
+// Mailman's `[ARC]`: seal every delivered post with the site's key so a
+// receiver can trust the authentication results this site recorded before
+// the list changed the message. Off by default; needs
+// `[mta] authenticity_checks`, which produces the results a seal carries.
+config_struct!(ArcConfig {
+    enabled: bool = false,
+    // The sealing domain (`d=`) and selector (`s=`); the public key is
+    // published at `<selector>._domainkey.<domain>` as for DKIM.
+    domain: String = String::new(),
+    selector: String = String::new(),
+    private_key_file: Option<PathBuf> = None
+});
+
 config_struct!(MtaConfig {
     enabled: bool = false,
+    arc: ArcConfig = ArcConfig::default(),
     bounce_maintenance_enabled: bool = false,
     bounce_maintenance_interval_secs: u32 = 60,
     bounce_maintenance_batch_size: u32 = 100,
@@ -1218,6 +1232,21 @@ impl MtaConfig {
     /// # Errors
     /// Returns the first violated invariant as a validation error.
     pub fn validate(&self) -> Result<()> {
+        if self.arc.enabled {
+            if !self.authenticity_checks {
+                return Err(Error::Validation(
+                    "mta.arc.enabled needs mta.authenticity_checks: a seal carries the results of this site's checks".into(),
+                ));
+            }
+            if self.arc.domain.is_empty()
+                || self.arc.selector.is_empty()
+                || self.arc.private_key_file.is_none()
+            {
+                return Err(Error::Validation(
+                    "mta.arc needs domain, selector and private_key_file".into(),
+                ));
+            }
+        }
         if self.enabled
             && !matches!(
                 self.smtp_tls.as_str(),

@@ -195,12 +195,27 @@ pub(super) struct DomainQuery {
     saved: String,
 }
 
+/// The DKIM keys published for `host`, and the ARC sealing key when it is
+/// the sealing domain: both are `<selector>._domainkey.<domain>` records.
 fn dkim_records(s: &AppState, language: &str, host: &str) -> Vec<Fact> {
+    let arc = &s.config.mta.arc;
+    let sealing = (arc.enabled && arc.domain == host)
+        .then(|| {
+            arc.private_key_file
+                .as_ref()
+                .map(|key| listmngr_core::DkimSigningConfig {
+                    domain: arc.domain.clone(),
+                    selector: arc.selector.clone(),
+                    private_key_file: key.clone(),
+                })
+        })
+        .flatten();
     s.config
         .mta
         .dkim_signing
         .iter()
         .filter(|entry| entry.domain == host)
+        .chain(sealing.as_ref())
         .map(|entry| {
             listmngr_mail::dkim::SigningKeys::dns_record(entry).map_or_else(
                 |_| Fact {

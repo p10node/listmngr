@@ -324,13 +324,15 @@ pub fn strip_control_headers(raw: &[u8]) -> Result<Vec<u8>> {
     Ok(output)
 }
 
-/// Pipeline primitive: drop the original DKIM/ARC signatures (the
-/// `cleanse-dkim` handler).
+/// Pipeline primitive: drop the original DKIM signatures and, unless
+/// `keep_arc`, the ARC sets (the `cleanse-dkim` handler).
 /// # Errors
 /// Returns an error if `raw` has no header/body boundary.
-pub fn strip_signature_headers(raw: &[u8]) -> Result<Vec<u8>> {
+pub fn strip_signature_headers(raw: &[u8], keep_arc: bool) -> Result<Vec<u8>> {
     let (blank_start, _) = header_body_split(raw).ok_or(Error::InvalidMessageId)?;
-    let mut output = strip_fields(&raw[..blank_start], is_signature_header);
+    let mut output = strip_fields(&raw[..blank_start], |name| {
+        is_signature_header(name) && !(keep_arc && name.starts_with("arc-"))
+    });
     output.extend_from_slice(&raw[blank_start..]);
     Ok(output)
 }

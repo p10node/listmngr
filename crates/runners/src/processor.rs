@@ -39,6 +39,8 @@ struct Submission<'a> {
     dmarc_mitigate: bool,
     /// `validate-authenticity`'s `Authentication-Results` value.
     authentication_results: Option<&'a str>,
+    /// The ARC chain verdict, when the site seals its deliveries.
+    arc_chain: Option<&'a str>,
 }
 
 /// Returns the `listmngr_posts_total` disposition: `accepted`, or
@@ -57,6 +59,7 @@ async fn accept_post(
         raw,
         dmarc_mitigate,
         authentication_results,
+        arc_chain,
     } = *submission;
     let list = db.lists().get(list_id).await?;
     let data = match listmngr_mail::handlers::plan(raw, &list, &lease.job.message_id.0.to_string())
@@ -94,6 +97,7 @@ async fn accept_post(
         acknowledge: None,
         dmarc_mitigate,
         authentication_results,
+        arc_chain,
     };
     for effect in &data.effects {
         match effect {
@@ -306,6 +310,7 @@ async fn admit_post(
                         .iter()
                         .any(|tag| tag == listmngr_pipeline::rules::DMARC_TAG),
                     authentication_results: verdict.header.as_deref(),
+                    arc_chain: verdict.arc_chain.map(listmngr_mail::arc::Chain::as_str),
                 },
             )
             .await?
