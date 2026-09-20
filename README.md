@@ -1,5 +1,49 @@
 # listmngr
 
+## Mail to news (`P6-NNTP-GATEWAY`) — bounded local acceptance verified
+
+Mailman's `to-usenet` handler and `nntp` runner. Configure the news
+server once:
+
+```toml
+[nntp]
+host = "news.example.org"        # empty (the default) leaves the gateway idle
+port = 119
+user = "gateway"                 # optional; AUTHINFO USER/PASS
+password_file = "/etc/listmngr/nntp.pass"   # or password = "…"
+# remove_headers and rewrite_duplicate_headers default to Mailman's lists
+```
+
+A list with `gateway_to_news` and a `linked_newsgroup` then has every
+accepted post queued on `nntp` by the `to-usenet` handler (between
+`to-digest` and `after-delivery`, as in Mailman; an article that came
+from the newsgroup, `fromusenet`, is never gated back). The `nntp`
+runner takes the post as it stood at `to-usenet` — the list's cooked
+copy, prefix and `List-*` headers included — and prepares it as
+Mailman's `prepare_message` does: `Approved: <posting address>` for an
+`open_moderated` or `moderated` group, the subject without the list's
+prefix unless `nntp_prefix_subject_too`, `Newsgroups:` set to the linked
+group or the group appended to the poster's own, the `Message-ID`
+unfolded (or one of the list's minted), a `Lines:` count, the transport
+headers in `remove_headers` dropped (`Received`, `NNTP-Posting-Host`,
+`X-Trace`, …) and the second and later `To`, `CC`, `MIME-Version` and
+`Content-Transfer-Encoding` moved to their `X-Original-*` targets. It is
+then offered over NNTP (`MODE READER`, `AUTHINFO` when configured,
+`POST`, dot-stuffed). `240` completes the job; `441` — a `Message-ID`
+the server already holds, from a cross-post — gets the article a
+`Message-ID` of the list's own and one more try, a second refusal shunts
+the job with the server's reply; an unreachable server backs off
+(one, two, four … minutes, an hour at most) within the job's five tries.
+A list that stopped gatewaying by the time its job runs completes it
+without posting. Without a `host`, the runner idles and gated posts wait
+in the queue.
+
+Limits: plain TCP as Mailman's `nntplib.NNTP` (no NNTPS/`STARTTLS`); the
+stripped subject is the list's prefix taken off wherever it stands, not
+Mailman's `stripped_subject` from the prefix handler; a refused
+credential or a `480` is a refusal that shunts, not a retry; the
+news → mail direction (`gatenews`, the watermark) is `P6-NNTP-GATENEWS`.
+
 ## Usenet gateway settings (`P6-NNTP-SETTINGS`) — bounded local acceptance verified
 
 Mailman's Usenet settings are list settings now, on both REST prefixes
@@ -1985,8 +2029,9 @@ lease expiry and re-claim there are covered by the repository contracts.
 Accepted posts run the list's `posting_pipeline` (default
 `default-posting-pipeline`): `member-recipients`, `cleanse`, `cleanse-dkim`,
 `cook-headers`, `subject-prefix`, `rfc-2369`, `to-archive`, `to-digest`,
-`dmarc`, `to-outgoing`. The `in` runner takes the fan-out decisions from the
-pipeline; the archive, digest and delivery consumers each receive the message
+`to-usenet` (since `P6-NNTP-GATEWAY`), `dmarc`, `to-outgoing`. The `in`
+runner takes the fan-out decisions from the pipeline; the archive, digest,
+news and delivery consumers each receive the message
 as it stood at their own `to-*` handler, so DMARC `From` rewriting reaches
 subscribers but never the archive or digests. `GET /system/pipelines` lists
 each pipeline with its real handler order and whether it can run. The

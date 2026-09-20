@@ -41,6 +41,21 @@ struct Submission<'a> {
     authentication_results: Option<&'a str>,
     /// The ARC chain verdict, when the site seals its deliveries.
     arc_chain: Option<&'a str>,
+    /// Mailman's `fromusenet`: `to-usenet` must not gate the post back.
+    from_usenet: bool,
+}
+
+/// A child job for a consumer that resolves no recipients of its own.
+fn consumer(queue: Queue, role: &MailRoleConfig) -> ChildJob {
+    ChildJob {
+        queue,
+        max_attempts: if queue == Queue::Digest {
+            role.out_max_attempts
+        } else {
+            5
+        },
+        recipients: Vec::new(),
+    }
 }
 
 /// Returns the `listmngr_posts_total` disposition: `accepted`, or
@@ -60,10 +75,15 @@ async fn accept_post(
         dmarc_mitigate,
         authentication_results,
         arc_chain,
+        from_usenet,
     } = *submission;
     let list = db.lists().get(list_id).await?;
-    let data = match listmngr_mail::handlers::plan(raw, &list, &lease.job.message_id.0.to_string())
-    {
+    let data = match listmngr_mail::handlers::plan_with(
+        raw,
+        &list,
+        &lease.job.message_id.0.to_string(),
+        from_usenet,
+    ) {
         Ok(data) => data,
         Err(listmngr_mail::Error::Refused {
             handler,
@@ -125,16 +145,12 @@ async fn accept_post(
                     })?
                     .emails(),
             }),
-            Effect::Enqueue(FanOut::Digest) => children.push(ChildJob {
-                queue: Queue::Digest,
-                max_attempts: role.out_max_attempts,
-                recipients: Vec::new(),
-            }),
-            Effect::Enqueue(FanOut::Archive) => children.push(ChildJob {
-                queue: Queue::Archive,
-                max_attempts: 5,
-                recipients: Vec::new(),
-            }),
+            // The archive, digest and news copies have no recipients of
+            // their own; the digest gets the delivery budget, the others
+            // five tries.
+            Effect::Enqueue(FanOut::Digest) => children.push(consumer(Queue::Digest, role)),
+            Effect::Enqueue(FanOut::Archive) => children.push(consumer(Queue::Archive, role)),
+            Effect::Enqueue(FanOut::Nntp) => children.push(consumer(Queue::Nntp, role)),
         }
     }
     db.mail_queue()
@@ -272,6 +288,8 @@ struct Posting<'a> {
     raw: &'a [u8],
     /// The web origin the web layer recorded, if any.
     web_post: Option<&'a WebPost>,
+    /// Mailman's `fromusenet`: gated in from the list's newsgroup.
+    from_usenet: bool,
 }
 
 async fn admit_post(
@@ -286,6 +304,7 @@ async fn admit_post(
         envelope_sender,
         raw,
         web_post,
+        from_usenet,
     } = *posting;
     let subject = listmngr_mail::header_value(raw, "subject").unwrap_or_default();
     let mut ctx = gather_context(db, config, list_id, envelope_sender, raw).await?;
@@ -311,6 +330,7 @@ async fn admit_post(
                         .any(|tag| tag == listmngr_pipeline::rules::DMARC_TAG),
                     authentication_results: verdict.header.as_deref(),
                     arc_chain: verdict.arc_chain.map(listmngr_mail::arc::Chain::as_str),
+                    from_usenet,
                 },
             )
             .await?
@@ -412,6 +432,7 @@ async fn process_one(
             envelope_sender: envelope_sender.as_deref(),
             raw: &message.raw,
             web_post: web_post.as_ref(),
+            from_usenet: context["fromusenet"] == true,
         },
     )
     .await?;
