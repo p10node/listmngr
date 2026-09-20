@@ -1,5 +1,42 @@
 # listmngr
 
+## ARC sealing (`P6-ARC-SEAL`) — bounded local acceptance verified
+
+Mailman's `arc-sign`, as `[mta.arc]`: with it on, every post delivered to
+subscribers is sealed (RFC 8617) with the site's key after the list's own
+DKIM signature, so a receiver that trusts this site can take the
+`Authentication-Results` recorded at intake — DKIM, SPF and DMARC of the
+post as it arrived — instead of the checks the list's changes break.
+
+```toml
+[mta]
+authenticity_checks = true       # the seal carries these results
+
+[mta.arc]
+enabled = true
+domain = "lists.example.org"      # d= of the seal; the key is published at
+selector = "arc"                 # arc._domainkey.lists.example.org
+private_key_file = "/etc/listmngr/arc.pem"
+```
+
+The `in` runner validates the chain a post arrives with (`arc=` joins the
+results) and records its verdict; the pipeline keeps the post's ARC sets
+where it would otherwise drop them as stale signatures; the out runner
+adds the next set to each delivery — `i=1; cv=none` for a post without a
+chain, `i=n+1; cv=pass` after a valid chain, `cv=fail` once after a
+broken one and never again — with `ARC-Authentication-Results` carrying
+the intake's results and `ARC-Message-Signature` covering Mailman's
+signed-header set plus `DKIM-Signature`. The domain page lists the ARC
+key's DNS record beside the DKIM ones. Owner mail, notices and digests
+are the site's own and are not sealed; a post that carries no intake
+record (one injected by hand) is delivered unsealed.
+
+Limits: sealing needs `authenticity_checks`, so posts are checked with
+the system resolver; the seal's timestamp makes two seals of the same
+delivery differ; ARC is being reclassified as Historic by the IETF
+(mail-auth keeps it behind a feature this build enables), so it is an
+option for sites whose receivers still evaluate it, not a default.
+
 ## DMARC `wrap_message` (`P6-DMARC-WRAP`) — bounded local acceptance verified
 
 `dmarc_mitigate_action` now takes every value Mailman's does:
@@ -1674,7 +1711,8 @@ authenticity_checks = true   # uses the system resolver
 ```
 
 The client IP for SPF comes from the first `Received:` header, which your
-MTA writes. See `P2-VALIDATE-AUTHENTICITY` in `docs/FEATURE_PARITY.md`.
+MTA writes. See `P2-VALIDATE-AUTHENTICITY` in `docs/FEATURE_PARITY.md`;
+`[mta.arc]` (`P6-ARC-SEAL`, above) seals deliveries with these results.
 
 ## Delivery sizing and retries — bounded acceptance verified
 

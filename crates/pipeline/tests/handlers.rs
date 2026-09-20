@@ -85,6 +85,7 @@ const fn ctx(list: &MailingList, target: Target) -> PipelineContext<'_> {
         base_url: None,
         dmarc_mitigate: false,
         authentication_results: None,
+        keep_arc: false,
     }
 }
 

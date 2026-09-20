@@ -105,7 +105,7 @@ const fn not_found() -> Txt {
     Txt::Error(Error::Dns(DnsError::RecordNotFound(ResponseCode::NXDomain)))
 }
 
-fn verifier(record: &str, policy: Option<&str>) -> Arc<Verifier> {
+fn verifier_for(record: &str, policy: Option<&str>) -> Arc<Verifier> {
     let cache = TxtCache::default();
     cache.seed(
         &format!("fixture._domainkey.{DOMAIN}."),
@@ -241,7 +241,7 @@ async fn a_restrictive_policy_munges_conditionally_and_the_results_travel_with_t
     let raw = signed(&fixture.key);
     let (state, context, copy, _) = post(
         &fixture.db,
-        Some(verifier(&fixture.record, Some("v=DMARC1; p=reject"))),
+        Some(verifier_for(&fixture.record, Some("v=DMARC1; p=reject"))),
         &raw,
     )
     .await;
@@ -274,7 +274,10 @@ async fn a_restrictive_policy_wraps_the_delivered_copy_when_the_list_wraps() {
     let raw = signed(&fixture.key);
     let (state, context, copy, _) = post(
         &fixture.db,
-        Some(verifier(&fixture.record, Some("v=DMARC1; p=quarantine"))),
+        Some(verifier_for(
+            &fixture.record,
+            Some("v=DMARC1; p=quarantine"),
+        )),
         &raw,
     )
     .await;
@@ -324,7 +327,7 @@ async fn a_restrictive_policy_wraps_the_delivered_copy_when_the_list_wraps() {
     let fixture = setup(json!({"dmarc_mitigate_action": "wrap_message"})).await;
     let raw = signed(&fixture.key);
     let (_, context, copy, _) =
-        post(&fixture.db, Some(verifier(&fixture.record, None)), &raw).await;
+        post(&fixture.db, Some(verifier_for(&fixture.record, None)), &raw).await;
     assert!(context.get("dmarc_mitigate").is_none());
     let copy = copy.expect("delivered");
     assert_eq!(
@@ -333,12 +336,100 @@ async fn a_restrictive_policy_wraps_the_delivered_copy_when_the_list_wraps() {
     );
 }
 
+/// A site that seals (`[mta.arc]`) also validates the chain a post arrives
+/// with: the `in` runner records the verdict on the context for the seal
+/// (`none` for a post without sets, `pass` for a valid chain, which the
+/// delivered copy then keeps) and reports it as `arc=`.
+#[tokio::test]
+async fn the_in_runner_records_the_arc_chain_verdict_for_the_seal() {
+    let fixture = setup(json!({})).await;
+    let raw = signed(&fixture.key);
+    let verifier = Arc::new(
+        Verifier::system("mx.example.invalid")
+            .unwrap()
+            .with_txt_cache(arc_cache(&fixture.record))
+            .verifying_arc(true),
+    );
+    let (state, context, _, _) = post(&fixture.db, Some(verifier.clone()), &raw).await;
+    assert_eq!(state, JobState::Done);
+    assert_eq!(context["arc_chain"], "none");
+    let results = context["authentication_results"].as_str().unwrap();
+    assert!(
+        results.contains("arc=none smtp.remote-ip=192.0.2.25"),
+        "{results}"
+    );
+    // The same post as an earlier sealer passed it on.
+    let earlier = listmngr_mail::arc::Sealer::load(&listmngr_core::ArcConfig {
+        enabled: true,
+        domain: DOMAIN.into(),
+        selector: "fixture".into(),
+        private_key_file: Some(fixture.key.clone()),
+    })
+    .unwrap()
+    .unwrap();
+    let arrived = earlier
+        .seal(
+            &raw,
+            "earlier.invalid; dkim=pass",
+            listmngr_mail::arc::Chain::None,
+        )
+        .unwrap();
+    let (state, context, copy, _) = post(&fixture.db, Some(verifier), &arrived).await;
+    assert_eq!(state, JobState::Done);
+    assert_eq!(context["arc_chain"], "pass", "{context}");
+    assert!(
+        context["authentication_results"]
+            .as_str()
+            .unwrap()
+            .contains("arc=pass"),
+        "{context}"
+    );
+    let copy = copy.expect("delivered");
+    assert!(
+        listmngr_mail::header_value(&copy, "ARC-Seal").is_some(),
+        "the chain stays on the copy for the seal to extend: {}",
+        String::from_utf8_lossy(&copy)
+    );
+    // Without sealing, a verifier does not look at the chain and the copy
+    // drops it as any stale signature.
+    let (_, context, copy, _) = post(
+        &fixture.db,
+        Some(verifier_for(&fixture.record, None)),
+        &arrived,
+    )
+    .await;
+    assert!(context.get("arc_chain").is_none(), "{context}");
+    let copy = copy.expect("delivered");
+    assert!(listmngr_mail::header_value(&copy, "ARC-Seal").is_none());
+}
+
+/// The seeded cache with the fixture key under both the DKIM selector and
+/// the ARC one it is also used as, and the tree-walk answers.
+fn arc_cache(record: &str) -> TxtCache {
+    let cache = TxtCache::default();
+    cache.seed(
+        &format!("fixture._domainkey.{DOMAIN}."),
+        Txt::DomainKey(Arc::new(
+            mail_auth::common::verify::DomainKey::parse(record.as_bytes()).unwrap(),
+        )),
+    );
+    cache.seed(
+        &format!("{DOMAIN}."),
+        Txt::Spf(Arc::new(
+            mail_auth::spf::Spf::parse(b"v=spf1 ip4:192.0.2.25 -all").unwrap(),
+        )),
+    );
+    cache.seed(&format!("_dmarc.{DOMAIN}."), not_found());
+    cache.seed("_dmarc.invalid.", not_found());
+    cache
+}
+
 #[tokio::test]
 async fn a_domain_without_a_policy_is_delivered_unmunged_with_its_results() {
     let fixture = setup(json!({"dmarc_mitigate_action": "munge_from"})).await;
     let raw = signed(&fixture.key);
     let (state, context, copy, _) =
-        post(&fixture.db, Some(verifier(&fixture.record, None)), &raw).await;
+        post(&fixture.db, Some(verifier_for(&fixture.record, None)), &raw).await;
     assert_eq!(state, JobState::Done);
     assert!(context.get("dmarc_mitigate").is_none());
     let copy = copy.expect("delivered");
@@ -354,7 +445,10 @@ async fn reject_and_discard_actions_refuse_posts_from_restrictive_domains() {
     let raw = signed(&fixture.key);
     let (state, _, copy, audit) = post(
         &fixture.db,
-        Some(verifier(&fixture.record, Some("v=DMARC1; p=quarantine"))),
+        Some(verifier_for(
+            &fixture.record,
+            Some("v=DMARC1; p=quarantine"),
+        )),
         &raw,
     )
     .await;
@@ -379,7 +473,7 @@ async fn reject_and_discard_actions_refuse_posts_from_restrictive_domains() {
     let raw = signed(&fixture.key);
     let (_, _, copy, audit) = post(
         &fixture.db,
-        Some(verifier(&fixture.record, Some("v=DMARC1; p=reject"))),
+        Some(verifier_for(&fixture.record, Some("v=DMARC1; p=reject"))),
         &raw,
     )
     .await;
@@ -389,7 +483,8 @@ async fn reject_and_discard_actions_refuse_posts_from_restrictive_domains() {
     // The same list delivers a domain that publishes no restrictive policy.
     let fixture = setup(json!({"dmarc_mitigate_action": "reject"})).await;
     let raw = signed(&fixture.key);
-    let (_, _, copy, audit) = post(&fixture.db, Some(verifier(&fixture.record, None)), &raw).await;
+    let (_, _, copy, audit) =
+        post(&fixture.db, Some(verifier_for(&fixture.record, None)), &raw).await;
     assert!(copy.is_some());
     assert!(audit.is_empty());
 }

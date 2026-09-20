@@ -3,6 +3,9 @@
 //! already-`Sent` recipient, and an `Ambiguous` outcome is never treated as
 //! a known success.
 #[cfg(test)]
+#[path = "arc_tests.rs"]
+mod arc_tests;
+#[cfg(test)]
 #[path = "bounce_notice_tests.rs"]
 mod bounce_notice_tests;
 #[cfg(test)]
@@ -78,6 +81,41 @@ struct Prepared {
     /// Set when every recipient gets their own transaction: a personalized
     /// list, or a VERP delivery of an ordinary one.
     per_recipient: Option<PerRecipient>,
+    /// What an ARC seal of this delivery carries, when the intake recorded
+    /// it: the site's results and its verdict on the chain that arrived.
+    arc: Option<ArcFacts>,
+}
+
+/// The intake's record for the seal (`authentication_results`, `arc_chain`
+/// on the message context).
+#[derive(Debug, Clone)]
+struct ArcFacts {
+    results: String,
+    chain: listmngr_mail::arc::Chain,
+}
+
+impl ArcFacts {
+    fn of(context: &serde_json::Value) -> Option<Self> {
+        Some(Self {
+            results: context["authentication_results"].as_str()?.to_owned(),
+            chain: listmngr_mail::arc::Chain::parse(context["arc_chain"].as_str()?)?,
+        })
+    }
+}
+
+/// Seal a signed delivery when the site seals and the intake recorded what
+/// the seal must carry.
+fn seal(
+    role: &MailRoleConfig,
+    bytes: Vec<u8>,
+    arc: Option<&ArcFacts>,
+) -> Result<Vec<u8>, PrepareError> {
+    match (&role.arc, arc) {
+        (Some(sealer), Some(facts)) => sealer
+            .seal(&bytes, &facts.results, facts.chain)
+            .map_err(|_| PrepareError::Invalid),
+        _ => Ok(bytes),
+    }
 }
 
 /// Why and how a delivery is split per recipient.
@@ -149,6 +187,7 @@ async fn prepare_post(
     let authentication_results = context["authentication_results"]
         .as_str()
         .map(str::to_owned);
+    let arc = ArcFacts::of(&context);
     let cooked = cook_with(
         target,
         raw,
@@ -158,6 +197,9 @@ async fn prepare_post(
             base_url: db.base_url(),
             dmarc_mitigate: context["dmarc_mitigate"] == true,
             authentication_results: authentication_results.as_deref(),
+            // A recorded chain verdict means the site sealed at intake and
+            // will seal this delivery: the chain stays to be extended.
+            keep_arc: context["arc_chain"].is_string(),
         },
     )
     .map_err(|_| PrepareError::Invalid)?;
@@ -166,6 +208,7 @@ async fn prepare_post(
             cooked,
             mail_from: list_id.bounces_address(),
             per_recipient: None,
+            arc,
         });
     }
     // Mailman decorates at delivery: the archive and digest copies were
@@ -191,11 +234,13 @@ async fn prepare_post(
                 personalization: None,
                 verp: true,
             }),
+            arc,
         });
     }
     Ok(Prepared {
         cooked,
         mail_from: list_id.bounces_address(),
+        arc,
         per_recipient: Some(PerRecipient {
             list,
             personalization: Some(Personalization {
@@ -277,9 +322,10 @@ async fn signed_copies(
         cooked,
         mail_from,
         per_recipient,
+        arc,
     } = prepared;
     if let Some(split) = &per_recipient {
-        let copies = recipient_copies(db, role, split, &cooked, pending).await;
+        let copies = recipient_copies(db, role, split, &cooked, pending, arc.as_ref()).await;
         let copies = local_delivery_result(db, role, lease, copies).await?;
         return Some((cooked, mail_from, Some(copies)));
     }
@@ -287,7 +333,7 @@ async fn signed_copies(
         db,
         role,
         lease,
-        sign_delivery(db, role, lease, cooked).await,
+        sign_delivery(db, role, lease, cooked, arc.as_ref()).await,
     )
     .await?;
     Some((signed, mail_from, None))
@@ -300,6 +346,7 @@ async fn recipient_copies(
     split: &PerRecipient,
     cooked: &[u8],
     pending: &[String],
+    arc: Option<&ArcFacts>,
 ) -> Result<Vec<RecipientCopy>, PrepareError> {
     let list = &split.list;
     let one_click_signer = match db.base_url() {
@@ -338,6 +385,7 @@ async fn recipient_copies(
                 .sign(list.id.mail_host(), bytes)
                 .map_err(|_| PrepareError::Invalid)?
         };
+        let signed = seal(role, signed, arc)?;
         let mail_from = if split.verp {
             listmngr_core::verp::encode(&role.verp_format, &list.id, recipient)
         } else {
@@ -419,10 +467,12 @@ async fn prepare_delivery_full(
     raw: &[u8],
     context: &str,
 ) -> Option<Prepared> {
+    // Owner mail, notices and digests are the site's own: never sealed.
     let unpersonalized = |cooked: Vec<u8>, mail_from: String| Prepared {
         cooked,
         mail_from,
         per_recipient: None,
+        arc: None,
     };
     let result = async {
         if db
@@ -774,8 +824,9 @@ async fn sign_delivery(
     role: &MailRoleConfig,
     lease: &Lease,
     cooked: Vec<u8>,
+    arc: Option<&ArcFacts>,
 ) -> Result<Vec<u8>, PrepareError> {
-    if role.dkim.is_empty() {
+    if role.dkim.is_empty() && (role.arc.is_none() || arc.is_none()) {
         return Ok(cooked);
     }
     let stored = db
@@ -817,9 +868,11 @@ async fn sign_delivery(
         .get(&id)
         .await
         .map_err(|error| lookup_error(&error))?;
-    role.dkim
+    let signed = role
+        .dkim
         .sign(list.id.mail_host(), cooked)
-        .map_err(|_| PrepareError::Invalid)
+        .map_err(|_| PrepareError::Invalid)?;
+    seal(role, signed, arc)
 }
 
 const fn lookup_error(error: &listmngr_core::Error) -> PrepareError {

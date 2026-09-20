@@ -37,6 +37,9 @@ pub struct Verdict {
     pub dmarc_policy_restrictive: bool,
     /// The From domain the policy applies to.
     pub dmarc_domain: Option<String>,
+    /// The ARC chain the post arrived with, when the site seals (else
+    /// `None`): what the seal's `cv=` will say.
+    pub arc_chain: Option<crate::arc::Chain>,
 }
 
 /// A pre-filled TXT record cache. Production runs without one; tests seed
@@ -91,6 +94,8 @@ pub struct Verifier {
     authenticator: MessageAuthenticator,
     authserv_id: String,
     cache: Option<TxtCache>,
+    /// Also validate the ARC chain (the site seals deliveries).
+    arc: bool,
 }
 
 impl std::fmt::Debug for Verifier {
@@ -114,7 +119,16 @@ impl Verifier {
             authenticator,
             authserv_id: authserv_id.to_owned(),
             cache: None,
+            arc: false,
         })
+    }
+
+    /// Also validate the ARC chain a post arrived with and report it as
+    /// `arc=` — what a site that seals its deliveries needs.
+    #[must_use]
+    pub const fn verifying_arc(mut self, arc: bool) -> Self {
+        self.arc = arc;
+        self
     }
 
     /// Answer every TXT lookup from `cache` first. Names it lacks still reach
@@ -188,6 +202,22 @@ impl Verifier {
             results = results.with_spf_mailfrom_result(spf, client.ip, mail_from, helo);
         }
         results = results.with_dmarc_result(&dmarc);
+        let arc = if self.arc {
+            let arc = match cache {
+                Some(cache) => {
+                    self.authenticator
+                        .verify_arc(Parameters::new(&message).with_txt_cache(cache))
+                        .await
+                }
+                None => self.authenticator.verify_arc(&message).await,
+            };
+            if let Some(client) = client {
+                results = results.with_arc_result(&arc, client.ip);
+            }
+            Some(crate::arc::Chain::of(&arc))
+        } else {
+            None
+        };
         let mut header = Vec::new();
         results.write_header(&mut header);
         let header = String::from_utf8_lossy(&header);
@@ -203,6 +233,7 @@ impl Verifier {
             header: Some(value),
             dmarc_policy_restrictive: matches!(dmarc.policy(), Policy::Reject | Policy::Quarantine),
             dmarc_domain: (!dmarc.domain().is_empty()).then(|| dmarc.domain().to_owned()),
+            arc_chain: arc,
         }
     }
 }

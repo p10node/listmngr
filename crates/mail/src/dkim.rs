@@ -21,11 +21,11 @@ impl std::fmt::Debug for SigningKeys {
     }
 }
 
-fn invalid() -> Error {
+pub(crate) fn invalid() -> Error {
     Error::Validation("invalid outbound DKIM signing configuration or message".into())
 }
 
-fn dns_name(value: &str) -> bool {
+pub(crate) fn dns_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 253
         && value.split('.').all(|label| {
@@ -40,7 +40,7 @@ fn dns_name(value: &str) -> bool {
 }
 
 /// A private key file: a regular file readable by nobody else, 64 KiB at most.
-fn read_key_file(path: &std::path::Path) -> Result<Vec<u8>> {
+pub(crate) fn read_key_file(path: &std::path::Path) -> Result<Vec<u8>> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -199,7 +199,7 @@ impl SigningKeys {
 
 // SMTP transport normalization, NOT DKIM canonicalization (owned by mail-auth).
 // Only opt-in signed deliveries change LF to CRLF; unsigned baseline is intact.
-fn smtp_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn smtp_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut normalized = Vec::with_capacity(bytes.len());
     for (index, byte) in bytes.iter().enumerate() {
         if *byte == b'\r' && bytes.get(index + 1) != Some(&b'\n') {
