@@ -115,7 +115,7 @@ impl Rule for DmarcMitigation {
                     ctx.list.dmarc_moderation_notice.clone()
                 })
             }
-            Action::NoMitigation | Action::MungeFrom => None,
+            Action::NoMitigation | Action::MungeFrom | Action::WrapMessage => None,
         }
     }
 }

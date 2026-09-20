@@ -514,6 +514,7 @@ web-ls-personalize-individual = Individual copies
 web-ls-personalize-full = Full
 web-ls-dmarc-none = No mitigation
 web-ls-dmarc-munge = Rewrite From to the list
+web-ls-dmarc-wrap = Wrap the post in a message from the list
 web-ls-frequency-yearly = Yearly
 web-ls-frequency-quarterly = Quarterly
 web-ls-frequency-monthly = Monthly

@@ -295,8 +295,9 @@ impl Handler for Rfc2369 {
     }
 }
 
-/// Delivery-only DMARC `From` mitigation. Runs after the archive and digest
-/// copies were taken, so only subscribers see the rewritten author.
+/// Delivery-only DMARC mitigation (`munge_from` or `wrap_message`). Runs
+/// after the archive and digest copies were taken, so only subscribers see
+/// the rewritten author or the wrapper.
 #[derive(Debug)]
 pub struct Dmarc;
 
@@ -311,17 +312,29 @@ impl Handler for Dmarc {
         _data: &mut MsgData,
     ) -> std::result::Result<(), HandlerError> {
         let list = ctx.list;
-        if list.anonymous_list || list.dmarc.action != DmarcMitigateAction::MungeFrom {
+        if list.anonymous_list {
             return Ok(());
         }
         // The `dmarc-mitigation` rule decided at admission whether the
-        // From domain's policy applies; an unconditional list munges every
-        // post.
+        // From domain's policy applies; an unconditional list mitigates
+        // every post.
         if !list.dmarc.unconditional && !ctx.dmarc_mitigate {
             return Ok(());
         }
-        message.raw = munge::rewrite(&message.raw, &list.id.posting_address())
-            .map_err(|error| refuse(self.name(), &error))?;
+        let posting_address = list.id.posting_address();
+        message.raw = match list.dmarc.action {
+            DmarcMitigateAction::MungeFrom => munge::rewrite(&message.raw, &posting_address),
+            DmarcMitigateAction::WrapMessage => munge::wrap(
+                &message.raw,
+                &posting_address,
+                list.id.mail_host(),
+                &list.dmarc.dmarc_wrapped_message_text,
+            ),
+            DmarcMitigateAction::NoMitigation
+            | DmarcMitigateAction::Reject
+            | DmarcMitigateAction::Discard => return Ok(()),
+        }
+        .map_err(|error| refuse(self.name(), &error))?;
         Ok(())
     }
 }

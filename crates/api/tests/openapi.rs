@@ -448,7 +448,13 @@ async fn dmarc_openapi_exposes_bounded_settings_on_config_contracts() {
     }
     assert_eq!(
         doc["components"]["schemas"]["DmarcMitigateAction"]["enum"],
-        json!(["no_mitigation", "munge_from", "reject", "discard"])
+        json!([
+            "no_mitigation",
+            "munge_from",
+            "wrap_message",
+            "reject",
+            "discard"
+        ])
     );
     for key in ["dmarc_mitigate_action", "dmarc_mitigate_unconditionally"] {
         let mut broken = doc.clone();
