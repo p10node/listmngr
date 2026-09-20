@@ -1,5 +1,37 @@
 # Architecture
 
+## DMARC `wrap_message` — bounded local acceptance verified
+
+`listmngr_mail::munge` now holds both delivery-time mitigations over a
+post's bytes. `block` reads the header block once — every field
+(lowercase name, unfolded value) and every raw line with the field it
+belongs to, under the same limits and refusals as before — so `rewrite`
+(`munge_from`) and `wrap` (`wrap_message`) share `author` (exactly one
+safe `From` mailbox, else `UnsafeHeaderContent`) and `identity` (the
+`Name (address) via list` `From` and the `Reply-To` that keeps the author
+reachable). `rewrite` copies every raw line but `From`, `Sender` and
+`Reply-To` and appends the generated pair; `wrap` returns the post
+unchanged when its `From` is already the list, and otherwise copies only
+Mailman's keepers (`kept_outside`: `mailman/handlers/dmarc.py` `KEEPERS`
+plus `Cc` and `X-BeenThere`), adds `MIME-Version`, a `Message-ID`
+derived from the post's SHA-256, the generated pair, and then either
+`Content-Type: message/rfc822` (inline) with the post as the body, or a
+`multipart/mixed` whose boundary is derived from the same hash: the
+`dmarc_wrapped_message_text` through `digest::wrap` at seventy columns
+as an inline `text/plain` part, then the post as an inline
+`message/rfc822` part, 7bit or 8bit as its bytes are. The post's own
+line endings are kept, the outer headers follow them, and the line break
+before a boundary is written beside the post so the post keeps its own
+last one. The `dmarc` handler (`listmngr_mail::handlers::Dmarc`, last
+before `to-outgoing`) dispatches on `dmarc_mitigate_action` after the
+same anonymity and conditional checks as before; the
+`dmarc-mitigation` rule treats `wrap_message` as it treats
+`munge_from`: tag, no hit. `DmarcMitigateAction::WrapMessage` in
+`listmngr_core`; migration `0052_dmarc_wrap.sql` recreates
+`mailing_lists.dmarc_mitigate_action` with the wider CHECK, as 0034 did
+(the semantic schema snapshot is unchanged); the DMARC settings page's
+select gains `web-ls-dmarc-wrap`.
+
 ## Subscription by mail, end to end — bounded local acceptance verified
 
 `join_and_leave_by_mail_round_trip_their_confirmation_tokens` in

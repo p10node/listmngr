@@ -1,5 +1,35 @@
 # listmngr
 
+## DMARC `wrap_message` (`P6-DMARC-WRAP`) — bounded local acceptance verified
+
+`dmarc_mitigate_action` now takes every value Mailman's does:
+`no_mitigation`, `munge_from`, `wrap_message`, `reject`, `discard`
+(migration 0052 widens the column's CHECK, values preserved; the REST
+config, OpenAPI enum and the DMARC settings page offer it). With
+`wrap_message`, a post the `dmarc-mitigation` rule tagged (or every post
+on an unconditional list) is delivered to subscribers as Mailman's
+wrapper: a new message `From` the list with the author named — `Author
+(address) via list` — the author reachable through `Reply-To` as
+`munge_from` does, a fresh `Message-ID`, and only the headers a reader's
+client threads and shows by carried over from the post (`Date`,
+`Subject`, `To`, `Cc`, `In-Reply-To`, `References`, `Archived-At`,
+`Precedence`, `List-*`, `X-Mailman-*`, plus `X-BeenThere` for the loop
+rule); `Sender`, the original `Message-ID` and everything else stay
+inside. The body is the post itself, whole, as an inline
+`message/rfc822` part — after `dmarc_wrapped_message_text` (wrapped at
+seventy columns) as an inline text part when the list has one, else as
+the message's only content. The archive and digest copies are never
+wrapped, an anonymous list needs no wrapper, and a post already from the
+list is left alone.
+
+Limits: the post inside is the cooked copy, as in Mailman — its
+`Subject` carries the prefix and `cleanse-dkim` has already removed the
+author's signature, so the wrapper preserves the author's headers and
+body, not a verifiable original signature; the outer `Message-ID` is
+derived from the post (the same post wraps to the same bytes) rather
+than random; `Cc` is kept on the wrapper whatever `reply_goes_to_list`
+says, where Mailman keeps it only when the author goes to `Reply-To`.
+
 ## Subscription by mail, end to end (`P3-SUBSCRIPTION-E2E`) — bounded local acceptance verified
 
 `crates/cli/tests/mailpath_e2e.rs` now walks the subscription flow over
@@ -2161,7 +2191,7 @@ and authenticated direct member removal are not token confirmations and do not
 acquire this behavior. See **P3-HTTP-CONFIRM-RECEIPT** and the preceding email
 increment in `docs/FEATURE_PARITY.md` for evidence and remaining boundaries.
 
-## Opt-in unconditional DMARC From rewriting (bounded)
+## DMARC From rewriting (`munge_from`)
 
 Set list config through JSON or form `PATCH`/`PUT` on either REST prefix:
 
@@ -2169,11 +2199,13 @@ Set list config through JSON or form `PATCH`/`PUT` on either REST prefix:
 {"dmarc_mitigate_action":"munge_from","dmarc_mitigate_unconditionally":true}
 ```
 
-Supported pairs are `no_mitigation` + `false` (default), `no_mitigation` +
-`true` (inactive/pre-staged), and `munge_from` + `true`. `munge_from` + `false`
-is rejected, including one-field PATCH transitions; PUT resets omitted settings.
-Other actions (`wrap_message`, `reject`, `discard`) are rejected. This is **not
-DNS-based conditional DMARC evaluation**, DKIM/ARC signing, or proof of delivery
+`dmarc_mitigate_action` takes `no_mitigation` (default), `munge_from`,
+`wrap_message` (`P6-DMARC-WRAP`, above), `reject` and `discard`;
+`dmarc_mitigate_unconditionally` applies the action to every post, and
+without it the `dmarc-mitigation` rule decides by the From domain's
+published policy when `[mta] authenticity_checks` is on
+(`P2-VALIDATE-AUTHENTICITY`), by `dmarc_addresses` always. This section
+describes `munge_from`; it is not ARC sealing or proof of delivery
 acceptance by remote providers.
 
 Individual subscriber delivery replaces From with the list posting address and MIME-safe

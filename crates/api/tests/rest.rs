@@ -722,6 +722,11 @@ async fn dmarc_config_roundtrips_and_accepts_every_mailman_action() {
             (
                 "PATCH",
                 r#"{"dmarc_mitigate_action":"wrap_message"}"#,
+                StatusCode::OK,
+            ),
+            (
+                "PATCH",
+                r#"{"dmarc_mitigate_action":"bogus"}"#,
                 StatusCode::BAD_REQUEST,
             ),
             (

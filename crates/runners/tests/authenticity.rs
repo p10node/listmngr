@@ -13,6 +13,7 @@ use listmngr_mail::dkim::SigningKeys;
 use mail_auth::common::parse::TxtRecordParser;
 use mail_auth::hickory_resolver::proto::op::ResponseCode;
 use mail_auth::{DnsError, Error, Txt};
+use mail_parser::MimeHeaders;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
@@ -258,6 +259,78 @@ async fn a_restrictive_policy_munges_conditionally_and_the_results_travel_with_t
     let header = listmngr_mail::header_value(&copy, "Authentication-Results").unwrap();
     assert!(header.contains("dmarc=pass"), "{header}");
     assert!(header.contains("spf=pass"), "{header}");
+}
+
+/// `wrap_message`: the same conditional decision, but the subscriber copy
+/// is a list-addressed message carrying the signed post whole, and a domain
+/// without a policy is delivered as it came.
+#[tokio::test]
+async fn a_restrictive_policy_wraps_the_delivered_copy_when_the_list_wraps() {
+    let fixture = setup(json!({
+        "dmarc_mitigate_action": "wrap_message",
+        "dmarc_wrapped_message_text": "The original post is attached."
+    }))
+    .await;
+    let raw = signed(&fixture.key);
+    let (state, context, copy, _) = post(
+        &fixture.db,
+        Some(verifier(&fixture.record, Some("v=DMARC1; p=quarantine"))),
+        &raw,
+    )
+    .await;
+    assert_eq!(state, JobState::Done);
+    assert_eq!(context["dmarc_mitigate"], true);
+    let copy = copy.expect("delivered");
+    let outer = mail_parser::MessageParser::default().parse(&copy).unwrap();
+    let from = outer.from().unwrap().first().unwrap();
+    assert_eq!(from.address(), Some(POSTING));
+    assert!(from.name().unwrap().contains("Alice"), "{from:?}");
+    assert!(
+        outer
+            .content_type()
+            .is_some_and(|c| c.ctype() == "multipart" && c.subtype() == Some("mixed")),
+        "{copy:?}"
+    );
+    let inner = outer
+        .parts
+        .iter()
+        .find_map(|part| match &part.body {
+            mail_parser::PartType::Message(inner) => Some(inner),
+            _ => None,
+        })
+        .expect("the post inside");
+    assert_eq!(
+        inner.from().unwrap().first().unwrap().address(),
+        Some(format!("alice@{DOMAIN}").as_str())
+    );
+    // `cleanse-dkim` dropped the author's signature before the wrapper was
+    // made, as it does for every copy; the post itself is inside whole.
+    assert_eq!(inner.subject(), Some("[auth] signed post"));
+    assert!(inner.body_text(0).unwrap().contains("hello list"));
+    assert!(
+        outer
+            .parts
+            .iter()
+            .any(|part| matches!(&part.body, mail_parser::PartType::Text(text) if text.contains("The original post is attached."))),
+        "{copy:?}"
+    );
+    // The stored post — what the archive and digest cook from — is untouched.
+    let stored: Vec<u8> = sqlx::query_scalar("SELECT raw FROM message_blobs LIMIT 1")
+        .fetch_one(fixture.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(stored, raw);
+    // No policy: no wrapper.
+    let fixture = setup(json!({"dmarc_mitigate_action": "wrap_message"})).await;
+    let raw = signed(&fixture.key);
+    let (_, context, copy, _) =
+        post(&fixture.db, Some(verifier(&fixture.record, None)), &raw).await;
+    assert!(context.get("dmarc_mitigate").is_none());
+    let copy = copy.expect("delivered");
+    assert_eq!(
+        listmngr_mail::header_value(&copy, "From").as_deref(),
+        Some(format!("Alice <alice@{DOMAIN}>").as_str())
+    );
 }
 
 #[tokio::test]
