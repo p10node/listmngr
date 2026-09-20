@@ -34,7 +34,7 @@ async fn dmarc_settings_audit_failure_rolls_back_and_pairs_are_strict() {
         .await
         .unwrap();
     for bad in [
-        json!({"dmarc_mitigate_action":"wrap_message"}),
+        json!({"dmarc_mitigate_action":"bogus"}),
         json!({"dmarc_mitigate_action":null}),
         json!({"dmarc_mitigate_unconditionally":"true"}),
         json!({"dmarc_mitigate_unconditionally":1}),
@@ -51,7 +51,7 @@ async fn dmarc_settings_audit_failure_rolls_back_and_pairs_are_strict() {
     );
     // Conditional mitigation (the From domain's published policy decides)
     // and every Mailman action are accepted independently.
-    for action in ["munge_from", "reject", "discard"] {
+    for action in ["munge_from", "wrap_message", "reject", "discard"] {
         db.lists()
             .update(&id, &json!({"dmarc_mitigate_action":action}))
             .await
@@ -71,11 +71,11 @@ async fn dmarc_settings_audit_failure_rolls_back_and_pairs_are_strict() {
             .fetch_one(db.pool())
             .await
             .unwrap(),
-        before + 4
+        before + 5
     );
     // SQL writes cannot bypass the action vocabulary.
     assert!(
-        sqlx::query("UPDATE mailing_lists SET dmarc_mitigate_action='wrap_message'")
+        sqlx::query("UPDATE mailing_lists SET dmarc_mitigate_action='bogus'")
             .execute(db.pool())
             .await
             .is_err()

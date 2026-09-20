@@ -314,7 +314,7 @@ async fn every_group(db: &Database, app: &axum::Router, owner: &str) {
         (
             "dmarc",
             vec![
-                ("dmarc_mitigate_action", "munge_from"),
+                ("dmarc_mitigate_action", "wrap_message"),
                 ("dmarc_mitigate_unconditionally", "true"),
                 ("dmarc_addresses", "one@example.org\n^.*@dmarc\\.example"),
                 ("dmarc_moderation_notice", "Rejected for DMARC"),
@@ -388,6 +388,21 @@ async fn every_group(db: &Database, app: &axum::Router, owner: &str) {
                 "{group} lacks {name}: {html}"
             );
         }
+        if *group == "dmarc" {
+            // Every Mailman mitigation is offered.
+            for action in [
+                "no_mitigation",
+                "munge_from",
+                "wrap_message",
+                "reject",
+                "discard",
+            ] {
+                assert!(
+                    html.contains(&format!("value=\"{action}\"")),
+                    "dmarc lacks {action}: {html}"
+                );
+            }
+        }
         let token = csrf(&html);
         let mut body = vec![("csrf", token.as_str())];
         body.extend(fields.iter().copied());
@@ -421,8 +436,9 @@ async fn every_group(db: &Database, app: &axum::Router, owner: &str) {
     assert!(list.anonymous_list);
     assert_eq!(
         list.dmarc.action,
-        listmngr_core::DmarcMitigateAction::MungeFrom
+        listmngr_core::DmarcMitigateAction::WrapMessage
     );
+    assert_eq!(list.dmarc.dmarc_wrapped_message_text, "Wrapped");
     assert!(list.dmarc.unconditional);
     assert_eq!(
         list.dmarc.dmarc_addresses,

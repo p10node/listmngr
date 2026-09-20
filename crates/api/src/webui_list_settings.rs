@@ -115,6 +115,7 @@ const PERSONALIZE: Options = &[
 const DMARC: Options = &[
     ("no_mitigation", "web-ls-dmarc-none"),
     ("munge_from", "web-ls-dmarc-munge"),
+    ("wrap_message", "web-ls-dmarc-wrap"),
     ("reject", "web-policy-reject"),
     ("discard", "web-policy-discard"),
 ];
