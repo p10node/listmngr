@@ -1,0 +1,6 @@
+C|mailing_lists|gateway_to_mail|integer|required|0
+C|mailing_lists|gateway_to_news|integer|required|0
+C|mailing_lists|linked_newsgroup|text|required|-
+C|mailing_lists|nntp_prefix_subject_too|integer|required|1
+C|mailing_lists|newsgroup_moderation|text|required|none
+C|mailing_lists|usenet_watermark|integer|optional|-

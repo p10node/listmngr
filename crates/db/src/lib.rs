@@ -23,6 +23,7 @@ pub mod tasks;
 pub mod templates;
 pub mod test_support;
 pub mod totp;
+pub mod usenet;
 pub mod web_admin;
 mod web_post;
 pub use web_post::Poster;
@@ -1632,6 +1633,9 @@ impl ListRepo<'_> {
             "first_strip_reply_to" => &mut list.alter_messages.first_strip_reply_to,
             "include_sender_header" => &mut list.alter_messages.include_sender_header,
             "topics_enabled" => &mut list.topics_enabled,
+            "gateway_to_mail" => &mut list.usenet.gateway_to_mail,
+            "gateway_to_news" => &mut list.usenet.gateway_to_news,
+            "nntp_prefix_subject_too" => &mut list.usenet.nntp_prefix_subject_too,
             _ => return Err(Error::Validation(key.into())),
         };
         *target = value
@@ -1730,6 +1734,33 @@ impl ListRepo<'_> {
                     list.dmarc.dmarc_wrapped_message_text = text.into();
                 }
             }
+            _ => return Err(invalid()),
+        }
+        Ok(())
+    }
+
+    /// Mailman's Usenet gateway settings; the watermark is not one of them.
+    fn patch_usenet(list: &mut MailingList, key: &str, value: &serde_json::Value) -> Result<()> {
+        let invalid = || Error::Validation(key.to_owned());
+        let usenet = &mut list.usenet;
+        match key {
+            "gateway_to_mail" | "gateway_to_news" | "nntp_prefix_subject_too" => {
+                let flag = value.as_bool().ok_or_else(invalid)?;
+                match key {
+                    "gateway_to_mail" => usenet.gateway_to_mail = flag,
+                    "gateway_to_news" => usenet.gateway_to_news = flag,
+                    _ => usenet.nntp_prefix_subject_too = flag,
+                }
+            }
+            // A newsgroup name as Usenet spells it, or none.
+            "linked_newsgroup" => {
+                let name = value
+                    .as_str()
+                    .filter(|name| name.is_empty() || listmngr_core::is_newsgroup_name(name))
+                    .ok_or_else(invalid)?;
+                usenet.linked_newsgroup = name.into();
+            }
+            "newsgroup_moderation" => usenet.newsgroup_moderation = parse_enum(key, value)?,
             _ => return Err(invalid()),
         }
         Ok(())
@@ -1886,6 +1917,7 @@ impl ListRepo<'_> {
             | "autoresponse_request_text"
             | "autoresponse_grace_period"
             | "topics" => Self::patch_alter_messages(list, key, value)?,
+            usenet if USENET_SETTINGS.contains(&usenet) => Self::patch_usenet(list, key, value)?,
             "preferred_language" => {
                 let language = value
                     .as_str()
@@ -1966,6 +1998,18 @@ impl ListRepo<'_> {
             .bind(i64::from(list.topics_enabled))
             .bind(i64::from(list.topics_bodylines_limit))
             .bind(serde_json::to_string(&list.topics).expect("topics serialize"))
+            .bind(list.id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        // The watermark is the gateway's, never a setting: not written here.
+        let usenet = &list.usenet;
+        sqlx::query("UPDATE mailing_lists SET gateway_to_mail=$1,gateway_to_news=$2,linked_newsgroup=$3,nntp_prefix_subject_too=$4,newsgroup_moderation=$5 WHERE list_id=$6")
+            .bind(i64::from(usenet.gateway_to_mail))
+            .bind(i64::from(usenet.gateway_to_news))
+            .bind(&usenet.linked_newsgroup)
+            .bind(i64::from(usenet.nntp_prefix_subject_too))
+            .bind(usenet.newsgroup_moderation.as_str())
             .bind(list.id.as_str())
             .execute(&mut **tx)
             .await
@@ -2462,6 +2506,36 @@ fn automatic_responses_from_row(
     })
 }
 
+/// The writable Usenet gateway settings (`usenet_watermark` is not one).
+const USENET_SETTINGS: [&str; 5] = [
+    "gateway_to_mail",
+    "gateway_to_news",
+    "nntp_prefix_subject_too",
+    "linked_newsgroup",
+    "newsgroup_moderation",
+];
+
+fn member_policy_from_row(row: &sqlx::any::AnyRow) -> Result<listmngr_core::MemberPolicy> {
+    Ok(listmngr_core::MemberPolicy {
+        subscription_policy: enum_column(row, "subscription_policy")?,
+        unsubscription_policy: enum_column(row, "unsubscription_policy")?,
+        member_roster_visibility: enum_column(row, "member_roster_visibility")?,
+    })
+}
+
+fn usenet_from_row(row: &sqlx::any::AnyRow) -> Result<listmngr_core::UsenetSettings> {
+    Ok(listmngr_core::UsenetSettings {
+        gateway_to_mail: flag_column(row, "gateway_to_mail")?,
+        gateway_to_news: flag_column(row, "gateway_to_news")?,
+        linked_newsgroup: row.try_get("linked_newsgroup").map_err(db_error)?,
+        nntp_prefix_subject_too: flag_column(row, "nntp_prefix_subject_too")?,
+        newsgroup_moderation: enum_column(row, "newsgroup_moderation")?,
+        usenet_watermark: row
+            .try_get::<Option<i64>, _>("usenet_watermark")
+            .map_err(db_error)?,
+    })
+}
+
 fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
     let bounce_flags = bounce_flags_from_row(row)?;
     Ok(MailingList {
@@ -2553,11 +2627,8 @@ fn list_from_row(row: &sqlx::any::AnyRow) -> Result<MailingList> {
         admin_notify_mchanges: flag_column(row, "admin_notify_mchanges")?,
         automatic_responses: automatic_responses_from_row(row)?,
         alter_messages: alter_messages_from_row(row)?,
-        member_policy: listmngr_core::MemberPolicy {
-            subscription_policy: enum_column(row, "subscription_policy")?,
-            unsubscription_policy: enum_column(row, "unsubscription_policy")?,
-            member_roster_visibility: enum_column(row, "member_roster_visibility")?,
-        },
+        member_policy: member_policy_from_row(row)?,
+        usenet: usenet_from_row(row)?,
         forward_unrecognized_bounces_to: enum_column(row, "forward_unrecognized_bounces_to")?,
         topics_enabled: flag_column(row, "topics_enabled")?,
         topics_bodylines_limit: topics_limit_column(row)?,

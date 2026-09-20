@@ -1,5 +1,27 @@
 # Architecture
 
+## Usenet gateway settings — bounded local acceptance verified
+
+`listmngr_core::UsenetSettings` (flattened into `MailingList` like the
+other groups) carries the five settings and `usenet_watermark:
+Option<i64>`, with `NewsgroupModeration` a `string_enum`;
+`is_newsgroup_name` is the validator (dot-separated components of
+letters, digits, `+`, `-`, `_`, at most 255 bytes). Migration
+`0053_usenet.sql` adds the six columns with Mailman's style defaults
+(`usenet-schema.snapshot` joins the corpus). `ListRepo`: the keys route
+through `USENET_SETTINGS` to `patch_usenet`, `persist_alter_messages`
+writes the five settings and never the watermark, `usenet_from_row` reads
+all six; `usenet_watermark` falls to the read-only refusal like any
+unknown key. `UsenetRepo::set_watermark` (`Database::usenet()`) is the
+gateway's write: the row and its `usenet.watermark` audit event in one
+transaction. REST: `ListConfigInput` gains the five, the form
+normaliser their booleans, and the `PUT` replacement drops
+`usenet_watermark` with the other read-only fields. Pipeline:
+`ListChecks::newsgroup_moderation`, the `news-moderation` rule
+(`rules::NewsModeration`, "Post to a moderated newsgroup gateway") and
+its `Defer` link between `max-size` and `no-subject` in
+`default-posting-chain`; `policy_facts` copies the setting from the list.
+
 ## ARC sealing — bounded local acceptance verified
 
 `listmngr_mail::arc` is the sealing side; `authenticity::Verifier` the
@@ -1704,13 +1726,14 @@ for posts. `/api/v1/system/pipelines` projects the registry as it is.
 
 ## P2-CHAIN-RULES — bounded acceptance verified
 
-The `default-posting-chain` follows Mailman 3's built-in chain, minus the
-`dmarc-mitigation` and `news-moderation` links whose rules do not exist yet:
+The `default-posting-chain` follows Mailman 3's built-in chain (the
+`dmarc-mitigation` link came with `P2-VALIDATE-AUTHENTICITY`, the
+`news-moderation` link with `P6-NNTP-SETTINGS`): `dmarc-mitigation` →
 `no-senders` → `approved` → `emergency` → `loop` → `banned-address` →
 `member-moderation` → `nonmember-moderation` → deferred `administrivia`,
-`implicit-dest`, `max-recipients`, `max-size`, `no-subject`,
-`suspicious-header` → `any` (jump `moderation`) → detour `header-match` →
-`accept`. Rules read the immutable `PostingContext` and share a mutable
+`implicit-dest`, `max-recipients`, `max-size`, `news-moderation`,
+`no-subject`, `suspicious-header` → `any` (jump `moderation`) → detour
+`header-match` → `accept`. Rules read the immutable `PostingContext` and share a mutable
 `EvalState` (Mailman's `msgdata`): hits, misses, reasons, tags, effects and the
 moderation action a member or nonmember rule recorded. Several deferred hits
 therefore yield one hold whose reason lists each of them in chain order, an

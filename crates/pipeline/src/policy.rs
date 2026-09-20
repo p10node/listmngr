@@ -84,6 +84,8 @@ pub struct ListChecks {
     pub dmarc_addresses: Vec<String>,
     /// `dmarc_moderation_notice`: the reason a rejected post carries.
     pub dmarc_moderation_notice: String,
+    /// `newsgroup_moderation`: a `moderated` gateway holds every post.
+    pub newsgroup_moderation: listmngr_core::NewsgroupModeration,
 }
 
 /// Message-derived facts. Extracted by the runner so the pipeline never parses

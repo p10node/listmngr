@@ -251,7 +251,8 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
         .init();
-    if let Err(error) = run().await {
+    // The command future carries whole list rows; keep it off the stack.
+    if let Err(error) = Box::pin(run()).await {
         let error_id = uuid::Uuid::now_v7();
         let (code, category, message) = errors::classify(&error);
         tracing::error!(%error_id, category, "CLI command failed");

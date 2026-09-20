@@ -89,6 +89,7 @@ fn builtin_posting_chain_preserves_the_documented_rule_order() {
             "implicit-dest",
             "max-recipients",
             "max-size",
+            "news-moderation",
             "no-subject",
             "suspicious-header",
             "any",
@@ -103,16 +104,16 @@ fn builtin_posting_chain_preserves_the_documented_rule_order() {
         "a restrictive policy jumps to the DMARC chain"
     );
     assert_eq!(
-        actions[14],
+        actions[15],
         LinkAction::Jump("moderation"),
         "any -> moderation"
     );
     assert_eq!(
-        actions[15],
+        actions[16],
         LinkAction::Detour("header-match"),
         "detour through the list's header rules"
     );
-    assert_eq!(actions[16], LinkAction::Jump("accept"));
+    assert_eq!(actions[17], LinkAction::Jump("accept"));
 }
 
 #[test]
@@ -387,6 +388,7 @@ fn an_accepted_post_records_every_rule_it_passed() {
             "implicit-dest",
             "max-recipients",
             "max-size",
+            "news-moderation",
             "no-subject",
             "suspicious-header",
             "any",
