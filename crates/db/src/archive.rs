@@ -305,6 +305,8 @@ fn publication(
             base_url,
             dmarc_mitigate: context.is_some_and(|context| context["dmarc_mitigate"] == true),
             authentication_results: authentication_results.as_deref(),
+            // The archive copy is not sealed; a stale chain has no place in it.
+            keep_arc: false,
         },
     )
     .map_err(|e| Error::Validation(e.to_string()))

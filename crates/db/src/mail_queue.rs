@@ -119,6 +119,10 @@ pub struct AcceptEffects<'a> {
     /// recorded on the stored message's context.
     pub dmarc_mitigate: bool,
     pub authentication_results: Option<&'a str>,
+    /// The ARC chain the post arrived with (`none`, `pass`, `fail`), when
+    /// the site seals its deliveries: the seal's `cv=` and the cue to keep
+    /// the chain through the pipeline.
+    pub arc_chain: Option<&'a str>,
 }
 
 /// Who posted what, for the acknowledgement notice.
@@ -377,7 +381,10 @@ impl<'a> MailQueueRepo<'a> {
             created.push(job);
         }
         if let Some(effects) = effects {
-            if effects.dmarc_mitigate || effects.authentication_results.is_some() {
+            if effects.dmarc_mitigate
+                || effects.authentication_results.is_some()
+                || effects.arc_chain.is_some()
+            {
                 let context: String =
                     sqlx::query_scalar("SELECT context FROM messages WHERE id=$1")
                         .bind(source.message_id.0.to_string())
@@ -394,6 +401,9 @@ impl<'a> MailQueueRepo<'a> {
                 }
                 if let Some(results) = effects.authentication_results {
                     context["authentication_results"] = serde_json::json!(results);
+                }
+                if let Some(chain) = effects.arc_chain {
+                    context["arc_chain"] = serde_json::json!(chain);
                 }
                 sqlx::query("UPDATE messages SET context=$1 WHERE id=$2")
                     .bind(context.to_string())

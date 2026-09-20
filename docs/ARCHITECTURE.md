@@ -1,5 +1,34 @@
 # Architecture
 
+## ARC sealing — bounded local acceptance verified
+
+`listmngr_mail::arc` is the sealing side; `authenticity::Verifier` the
+validating side. `Verifier::verifying_arc(true)` (set from
+`mta.arc.enabled`) runs `verify_arc` at intake beside DKIM, SPF and
+DMARC, appends `arc=` to the results when a client IP is known, and
+reports `Verdict::arc_chain` (`Chain::None`, `Pass` or `Fail`, from
+`Chain::of`); the `in` runner records it on the message context as
+`arc_chain` next to `authentication_results` (`AcceptEffects::arc_chain`,
+`Submission::arc_chain`). A recorded verdict is what makes a delivery
+sealable: `prepare_post` sets `Admission::keep_arc` from it, and
+`cleanse-dkim` (`cook::strip_signature_headers(raw, keep_arc)`) then
+keeps the `ARC-*` fields it would otherwise drop, so the chain can be
+extended. `Sealer::load` (an `ArcSealer` over an RSA key read like the
+DKIM keys, relaxed/simple, `SIGNED_HEADERS` = Mailman's `sig_headers`
+default plus `DKIM-Signature`, `From` oversigned) lives on
+`MailRoleConfig::arc`; `Sealer::seal(bytes, results, chain)` works
+without DNS: it parses the delivery, rebuilds the `ArcOutput` from the
+sets found (`Set`/`Header::new`) with the recorded verdict as its result,
+declines (bytes unchanged) when the last set says `cv=fail` or the
+message does not parse, writes the intake's results whole as the
+`ARC-Authentication-Results` value, and prepends the set mail-auth
+produces. The out runner seals in `recipient_copies` and `sign_delivery`
+after `SigningKeys::sign`, from `Prepared::arc` (`ArcFacts::of` the
+context); owner mail, notices and digests never carry the facts.
+`MtaConfig::validate` refuses `arc.enabled` without `authenticity_checks`
+or without domain, selector and key; `webui_domains::dkim_records` adds
+the sealing key's record on its domain.
+
 ## DMARC `wrap_message` — bounded local acceptance verified
 
 `listmngr_mail::munge` now holds both delivery-time mitigations over a
