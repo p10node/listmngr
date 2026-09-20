@@ -102,6 +102,13 @@ async fn matrix(db: Database) {
                 selector: "sel".into(),
                 private_key_file: key.clone(),
             });
+        // The ARC sealing key is published the same way, on its domain.
+        config.mta.arc = listmngr_core::ArcConfig {
+            enabled: true,
+            domain: "example.com".into(),
+            selector: "arc".into(),
+            private_key_file: Some(key.clone()),
+        };
     })
     .await;
     let root_user = user(&db, "root@example.com", true).await;
@@ -222,6 +229,7 @@ async fn domain_index_and_add(db: &Database, app: &axum::Router, root: &str) {
     );
     let html = page(app, "/web/admin/domains/example.com", root).await;
     has(&html, "sel._domainkey.example.com");
+    has(&html, "arc._domainkey.example.com");
     has(&html, "v=DKIM1; k=rsa; p=");
     lacks(&html, "PRIVATE KEY");
 }

@@ -20,7 +20,9 @@ async fn signing_lookup_outage_is_dependency_not_invalid_mail() {
         .await
         .unwrap();
     db.pool().close().await;
-    let error = sign_delivery(&db, &role, &lease, cooked).await.unwrap_err();
+    let error = sign_delivery(&db, &role, &lease, cooked, None)
+        .await
+        .unwrap_err();
     assert_eq!(format!("{error:?}"), "Dependency");
 }
 

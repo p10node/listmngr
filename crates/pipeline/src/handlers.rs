@@ -102,6 +102,9 @@ pub struct PipelineContext<'a> {
     /// The `Authentication-Results` value the `in` runner computed, written
     /// by `validate-authenticity`.
     pub authentication_results: Option<&'a str>,
+    /// The site seals deliveries (ARC), so the chain the post arrived with
+    /// must stay to be extended; `cleanse-dkim` keeps the `ARC-*` fields.
+    pub keep_arc: bool,
 }
 
 /// What a handler that ends the pipeline asks the caller to do with the post.
