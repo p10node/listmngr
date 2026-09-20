@@ -959,7 +959,10 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
 - DMARC đầy đủ — reject/discard, unconditional, `dmarc_addresses` và org domain (RFC 9989 tree walk của `mail-auth`, thay cho PSL) đã đóng ở P2-DMARC-MUNGE / P2-VALIDATE-AUTHENTICITY; còn lại:
   - [x] ~~**P6-DMARC-WRAP**~~ (xong) (S): `wrap_message` + `dmarc_wrapped_message_text` — `listmngr_mail::munge::wrap` theo `mailman/handlers/dmarc.py` (KEEPERS, `message/rfc822` inline, text part khi có), migration 0052 mở CHECK, REST/OpenAPI/settings page nhận giá trị.
   - [x] ~~**P6-ARC-SEAL**~~ (xong) (M): `[mta.arc]` — `listmngr_mail::arc::Sealer` (mail-auth `arc` feature) niêm phong mỗi delivery sau chữ ký DKIM của list với `ARC-Seal`/`ARC-Message-Signature`/`ARC-Authentication-Results` mang kết quả intake; `Verifier::verifying_arc` kiểm chain đầu vào ở `in` runner, `cleanse-dkim` giữ `ARC-*` khi site seal; DNS record của key hiện trên trang domain.
-- [ ] NNTP gateway: `to-usenet`, `nntp` runner, `gatenews`, `news-moderation`, watermark
+- NNTP gateway, tách thành:
+  - [x] ~~**P6-NNTP-SETTINGS**~~ (xong) (S): settings Usenet trên list (`gateway_to_mail`, `gateway_to_news`, `linked_newsgroup`, `nntp_prefix_subject_too`, `newsgroup_moderation`, `usenet_watermark` read-only; migration 0053), REST hai prefix, rule `news-moderation` trong chain.
+  - [ ] **P6-NNTP-GATEWAY** (M): handler `to-usenet` → queue `nntp`; `nntp` runner: `prepare_message` (Approved:, subject prefix, Newsgroups:, Message-ID, Lines:, remove/rewrite headers) và POST qua NNTP client (`[nntp] host/port/user/password`); Message-ID trùng → munge và requeue.
+  - [ ] **P6-NNTP-GATENEWS** (M): `listmngr nntp gate` + chu kỳ trong `nntp` runner (`gatenews_every`): GROUP/HEAD/ARTICLE, `X-Originally-To`, inject vào `in` với `fromusenet`, watermark.
 - [ ] `import21` (`config.pck` via serde-pickle, member lists, mbox) ; `import3` (đọc trực tiếp Mailman 3 DB + HyperKitty DB → mapping; hoặc qua REST)
 - [ ] `.po` import → 40+ ngôn ngữ templates
 - [ ] Webhooks + deliveries retry; plugins (Rust trait registry: rules/handlers/archivers)

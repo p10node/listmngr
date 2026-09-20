@@ -572,3 +572,29 @@ fn dmarc_mitigation_tags_munged_posts_and_refuses_when_the_list_says_so() {
     ctx.sender.dmarc_policy_restrictive = false;
     assert_eq!(decide_posting(&ctx), Disposition::Accept);
 }
+
+/// Mailman's `news-moderation`: a list that gateways to a moderated
+/// newsgroup holds every post for a moderator, with Mailman's reason; an
+/// open or unmoderated group changes nothing.
+#[test]
+fn a_moderated_newsgroup_gateway_holds_every_post() {
+    let mut ctx = base();
+    ctx.list.newsgroup_moderation = listmngr_core::NewsgroupModeration::Moderated;
+    let outcome = decide_posting_traced(&ctx);
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Hold("Post to a moderated newsgroup gateway".into())
+    );
+    assert!(
+        outcome.hits.iter().any(|rule| rule == "news-moderation"),
+        "{:?}",
+        outcome.hits
+    );
+    for open in [
+        listmngr_core::NewsgroupModeration::OpenModerated,
+        listmngr_core::NewsgroupModeration::None,
+    ] {
+        ctx.list.newsgroup_moderation = open;
+        assert_eq!(decide_posting(&ctx), Disposition::Accept, "{open:?}");
+    }
+}
