@@ -998,6 +998,7 @@ pub struct Config {
     pub antispam: AntispamConfig,
     pub archive: ArchiveConfig,
     pub runners: RunnerConfig,
+    pub nntp: NntpConfig,
     pub observability: ObservabilityConfig,
 }
 
@@ -1089,6 +1090,7 @@ impl Config {
         }
         config.mta.validate()?;
         config.mailman.validate()?;
+        config.nntp.validate()?;
         Ok(config)
     }
 
@@ -1631,6 +1633,123 @@ config_struct!(ArchiveConfig {
 config_struct!(RunnerConfig {
     lock_timeout: String = "10m".into()
 });
+// Mailman's `[nntp]`: the news server the `nntp` runner posts gated lists'
+// traffic to, and how a post is trimmed for it. Empty `host` leaves the
+// gateway off: `to-usenet` still queues nothing for a list that does not
+// gateway, and a queued post waits for a host.
+config_struct!(NntpConfig {
+    host: String = String::new(),
+    port: u16 = 119,
+    user: Option<String> = None,
+    password: Option<SmtpAuthSecret> = None,
+    password_file: Option<PathBuf> = None,
+    // Headers removed from every post before it is offered to the news
+    // server (Mailman's `remove_headers`).
+    remove_headers: Vec<String> = vec![
+        "nntp-posting-host".into(),
+        "nntp-posting-date".into(),
+        "x-trace".into(),
+        "x-complaints-to".into(),
+        "xref".into(),
+        "date-received".into(),
+        "posted".into(),
+        "posting-version".into(),
+        "relay-version".into(),
+        "received".into()
+    ],
+    // `"Source Target"` pairs: a header a news server accepts once keeps its
+    // first value and hands the rest to the target header (Mailman's
+    // `rewrite_duplicate_headers`).
+    rewrite_duplicate_headers: Vec<String> = vec![
+        "To X-Original-To".into(),
+        "CC X-Original-CC".into(),
+        "Content-Transfer-Encoding X-Original-Content-Transfer-Encoding".into(),
+        "MIME-Version X-MIME-Version".into()
+    ]
+});
+impl NntpConfig {
+    /// Whether a news server is configured at all.
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        !self.host.trim().is_empty()
+    }
+
+    /// The `[nntp]` invariants `Config::load` enforces.
+    /// # Errors
+    /// Returns the first violated invariant as a validation error.
+    pub fn validate(&self) -> Result<()> {
+        if self.port == 0 {
+            return Err(Error::Validation("nntp.port must be 1..65535".into()));
+        }
+        if self.password.is_some() && self.password_file.is_some() {
+            return Err(Error::Validation(
+                "nntp.password and nntp.password_file are exclusive".into(),
+            ));
+        }
+        if (self.password.is_some() || self.password_file.is_some()) && self.user.is_none() {
+            return Err(Error::Validation("nntp.password needs nntp.user".into()));
+        }
+        for pair in &self.rewrite_duplicate_headers {
+            let mut words = pair.split_whitespace();
+            match (words.next(), words.next(), words.next()) {
+                (Some(source), Some(target), None)
+                    if is_header_name(source) && is_header_name(target) => {}
+                _ => {
+                    return Err(Error::Validation(format!(
+                        "nntp.rewrite_duplicate_headers: {pair:?} is not \"Source Target\""
+                    )));
+                }
+            }
+        }
+        if let Some(name) = self
+            .remove_headers
+            .iter()
+            .find(|name| !is_header_name(name))
+        {
+            return Err(Error::Validation(format!(
+                "nntp.remove_headers: {name:?} is not a header name"
+            )));
+        }
+        Ok(())
+    }
+
+    /// The credentials for `AUTHINFO`, the password read from its file when
+    /// configured that way (never at configuration display).
+    /// # Errors
+    /// Returns a validation error for an unreadable, empty or exposed file.
+    pub fn credentials(&self) -> Result<Option<(String, SmtpAuthSecret)>> {
+        let Some(user) = &self.user else {
+            return Ok(None);
+        };
+        let password = match (&self.password, &self.password_file) {
+            (Some(password), _) => password.clone(),
+            (None, Some(path)) => read_secret_file(path, "nntp.password_file")?.into(),
+            (None, None) => return Err(Error::Validation("nntp.user needs a password".into())),
+        };
+        Ok(Some((user.clone(), password)))
+    }
+
+    /// The header rewrites as (source, target) pairs: the source lowercased
+    /// for matching, the target as configured for writing.
+    #[must_use]
+    pub fn duplicate_rewrites(&self) -> Vec<(String, String)> {
+        self.rewrite_duplicate_headers
+            .iter()
+            .filter_map(|pair| {
+                let mut words = pair.split_whitespace();
+                Some((words.next()?.to_ascii_lowercase(), words.next()?.to_owned()))
+            })
+            .collect()
+    }
+}
+
+/// RFC 5322 `field-name`: printable US-ASCII without the colon.
+#[must_use]
+pub fn is_header_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 78
+        && name.bytes().all(|b| (33..=126).contains(&b) && b != b':')
+}
 config_struct!(ObservabilityConfig {
     log: String = "info".into(),
     metrics: bool = true

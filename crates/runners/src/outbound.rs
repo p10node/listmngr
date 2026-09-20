@@ -200,6 +200,7 @@ async fn prepare_post(
             // A recorded chain verdict means the site sealed at intake and
             // will seal this delivery: the chain stays to be extended.
             keep_arc: context["arc_chain"].is_string(),
+            from_usenet: context["fromusenet"] == true,
         },
     )
     .map_err(|_| PrepareError::Invalid)?;

@@ -3052,6 +3052,7 @@ async fn assert_phase_one_catalogs(app: &axum::Router, token: &str) {
             "rfc-2369",
             "to-archive",
             "to-digest",
+            "to-usenet",
             "after-delivery",
             "acknowledge",
             "dmarc",

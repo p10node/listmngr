@@ -814,6 +814,39 @@ impl<'a> MailQueueRepo<'a> {
         tx.commit().await.map_err(db_error)?;
         Ok(jobs)
     }
+    /// Set one key of a stored message's routing context (a consumer's own
+    /// note to itself, such as the news gateway's replacement `Message-ID`).
+    /// # Errors
+    /// Returns `NotFound` for an unknown message and database errors.
+    pub async fn set_context_value(
+        &self,
+        id: MessageId,
+        key: &str,
+        value: serde_json::Value,
+    ) -> Result<()> {
+        let mut tx = self.db.write_tx().await?;
+        let context: Option<String> =
+            sqlx::query_scalar("SELECT context FROM messages WHERE id=$1")
+                .bind(id.0.to_string())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_error)?;
+        let context = context.ok_or_else(|| Error::NotFound("message".into()))?;
+        let mut context: serde_json::Value =
+            serde_json::from_str(&context).unwrap_or(serde_json::Value::Null);
+        if !context.is_object() {
+            context = serde_json::json!({});
+        }
+        context[key] = value;
+        sqlx::query("UPDATE messages SET context=$1 WHERE id=$2")
+            .bind(context.to_string())
+            .bind(id.0.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        tx.commit().await.map_err(db_error)
+    }
+
     /// Read the immutable original bytes and their submission index.
     /// # Errors
     /// Returns not-found or database errors.
