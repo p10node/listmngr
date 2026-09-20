@@ -441,13 +441,16 @@ impl Address {
     }
 }
 
-/// Bounded DMARC rewriting only; no DNS policy evaluation.
+/// Mailman's `dmarc_mitigate_action` vocabulary.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DmarcMitigateAction {
     #[default]
     NoMitigation,
     MungeFrom,
+    /// Mailman's `wrap_message`: deliver the post whole inside a
+    /// list-addressed message, `dmarc_wrapped_message_text` above it.
+    WrapMessage,
     /// Mailman's `reject`: refuse the post with `dmarc_moderation_notice`.
     Reject,
     /// Mailman's `discard`: drop the post silently.

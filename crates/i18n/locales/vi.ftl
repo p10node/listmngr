@@ -515,6 +515,7 @@ web-ls-personalize-individual = Từng bản riêng
 web-ls-personalize-full = Đầy đủ
 web-ls-dmarc-none = Không giảm thiểu
 web-ls-dmarc-munge = Viết lại From thành hộp thư chung
+web-ls-dmarc-wrap = Bọc bài viết trong một thư gửi từ hộp thư chung
 web-ls-frequency-yearly = Hằng năm
 web-ls-frequency-quarterly = Hằng quý
 web-ls-frequency-monthly = Hằng tháng

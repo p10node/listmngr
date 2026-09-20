@@ -956,7 +956,9 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
 
 ### Phase 6 — Advanced & migration (M)
 
-- [ ] DMARC đầy đủ: `wrap_message`, reject/discard, unconditional, `dmarc_addresses`, PSL; ARC seal handler
+- DMARC đầy đủ — reject/discard, unconditional, `dmarc_addresses` và org domain (RFC 9989 tree walk của `mail-auth`, thay cho PSL) đã đóng ở P2-DMARC-MUNGE / P2-VALIDATE-AUTHENTICITY; còn lại:
+  - [x] ~~**P6-DMARC-WRAP**~~ (xong) (S): `wrap_message` + `dmarc_wrapped_message_text` — `listmngr_mail::munge::wrap` theo `mailman/handlers/dmarc.py` (KEEPERS, `message/rfc822` inline, text part khi có), migration 0052 mở CHECK, REST/OpenAPI/settings page nhận giá trị.
+  - [ ] **P6-ARC-SEAL** (M): ARC seal handler (`arc` handler: `ARC-Seal`/`ARC-Message-Signature`/`ARC-Authentication-Results` với key ký của site khi list đổi thư).
 - [ ] NNTP gateway: `to-usenet`, `nntp` runner, `gatenews`, `news-moderation`, watermark
 - [ ] `import21` (`config.pck` via serde-pickle, member lists, mbox) ; `import3` (đọc trực tiếp Mailman 3 DB + HyperKitty DB → mapping; hoặc qua REST)
 - [ ] `.po` import → 40+ ngôn ngữ templates
