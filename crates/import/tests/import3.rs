@@ -6,7 +6,9 @@
 //! `tests/compat/generate_mailman3_rest.py`, so the shapes (pagination
 //! envelopes, `http_etag`, sparse `preferences`, Mailman's `7d`
 //! durations) are the server's own.
-use listmngr_core::{DeliveryMode, DeliveryStatus, ListId, MemberRole, ModerationAction};
+use listmngr_core::{
+    DeliveryMode, DeliveryStatus, ListId, MemberRole, ModerationAction, SubscriptionMode,
+};
 use listmngr_db::{AuditContext, Database};
 use listmngr_import::import3::{Site, Source, apply, fetch, plan};
 use serde_json::{Value, json};
@@ -24,6 +26,7 @@ impl Recorded {
     fn site() -> Self {
         let answers = BTreeMap::from([
             ("domains", "domains"),
+            ("users", "users"),
             ("lists?advertised=false", "lists"),
             ("bans", "bans-global"),
             ("lists/rust-users.example.invalid/config", "list-config"),
@@ -88,6 +91,18 @@ fn fixture(name: &str) -> Value {
 }
 
 impl Source for Recorded {
+    async fn get_optional(&self, path: &str) -> listmngr_import::Result<Option<Value>> {
+        // Mailman answers 404 for a user with no preferred address.
+        if let Some(id) = path
+            .strip_prefix("users/")
+            .and_then(|rest| rest.strip_suffix("/preferred_address"))
+        {
+            let all = fixture("user-preferred");
+            return Ok(all.get(id).cloned().filter(|value| !value.is_null()));
+        }
+        self.get(path).await.map(Some)
+    }
+
     async fn get(&self, path: &str) -> listmngr_import::Result<Value> {
         // A member's own preferences hang off its self link.
         if let Some(id) = path
@@ -96,6 +111,18 @@ impl Source for Recorded {
         {
             let all = fixture("preferences");
             return Ok(all.get(id).cloned().unwrap_or_else(|| json!({})));
+        }
+        for (prefix, suffix, file) in [
+            ("users/", "/addresses", "user-addresses"),
+            ("users/", "/preferences", "user-preferences"),
+        ] {
+            if let Some(id) = path
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.strip_suffix(suffix))
+            {
+                let all = fixture(file);
+                return Ok(all.get(id).cloned().unwrap_or_else(|| json!({})));
+            }
         }
         let name = self
             .answers
@@ -175,6 +202,41 @@ async fn a_real_cores_answers_read_into_a_snapshot() {
     assert_eq!(stranger.moderation_action, Some(ModerationAction::Discard));
     // Mailman subscribes Dave as a user, not as an address.
     assert_eq!(member("dave@example.invalid").subscription_mode, "as_user");
+}
+
+#[tokio::test]
+async fn the_accounts_come_with_their_addresses_and_the_one_they_prefer() {
+    let site = recorded_site().await;
+    // Mailman has a user behind every address, so the ones it made for
+    // plain subscribers come too — eight in all for this site.
+    assert_eq!(site.users.len(), 8, "{:?}", site.users);
+    let user = |email: &str| {
+        site.users
+            .iter()
+            .find(|user| user.addresses.iter().any(|address| address.email == email))
+            .unwrap_or_else(|| panic!("{email}"))
+    };
+    let dave = user("dave@example.invalid");
+    assert_eq!(dave.display_name, "Dave");
+    assert!(!dave.is_server_owner);
+    assert!(dave.has_password, "Mailman had a password hash for Dave");
+    assert_eq!(
+        dave.addresses
+            .iter()
+            .map(|address| address.email.as_str())
+            .collect::<Vec<_>>(),
+        ["dave@example.invalid", "dave@work.invalid"]
+    );
+    assert!(dave.addresses[0].verified);
+    assert_eq!(dave.preferred.as_deref(), Some("dave@example.invalid"));
+    assert_eq!(dave.preferences.hide_address, Some(true));
+    let eve = user("eve@example.invalid");
+    assert!(eve.is_server_owner);
+    assert_eq!(eve.preferred, None, "Mailman answers 404 without one");
+    assert!(!eve.addresses[1].verified);
+    let alice = user("alice@example.invalid");
+    assert_eq!(alice.display_name, "Alice Nguyễn");
+    assert!(!alice.has_password);
 }
 
 #[tokio::test]
@@ -280,13 +342,42 @@ async fn the_snapshot_plans_this_sites_settings() {
         "{:?}",
         plan.warnings
     );
-    // Dave is subscribed as a user in Mailman; here he becomes an address.
+    // Dave is subscribed as a user in Mailman, and his account comes with
+    // the import, so the membership keeps its mode instead of warning.
     assert!(
-        plan.warnings
+        !plan
+            .warnings
             .iter()
-            .any(|warning| warning.contains("dave@example.invalid") && warning.contains("as_user")),
+            .any(|warning| warning.contains("as_user")),
         "{:?}",
         plan.warnings
+    );
+}
+
+/// What the accounts plan, and what cannot come with them.
+#[tokio::test]
+async fn the_plan_carries_the_accounts_without_their_passwords() {
+    let plan = plan(&recorded_site().await);
+    assert_eq!(plan.users.len(), 8);
+    let dave = plan
+        .users
+        .iter()
+        .find(|user| user.preferred.as_deref() == Some("dave@example.invalid"))
+        .unwrap();
+    assert_eq!(dave.display_name, "Dave");
+    assert_eq!(dave.addresses.len(), 2);
+    // A password nobody can carry over: a warning, never the hash.
+    let warnings = plan.warnings.join("\n");
+    assert!(warnings.contains("dave@example.invalid"), "{warnings}");
+    assert!(warnings.contains("password"), "{warnings}");
+    assert!(!warnings.contains('$'), "no hash material: {warnings}");
+    assert_eq!(
+        plan.warnings
+            .iter()
+            .filter(|warning| warning.contains("cannot be carried over"))
+            .count(),
+        2,
+        "one per account that had a password: {warnings}"
     );
 }
 
@@ -320,6 +411,7 @@ async fn scenario(db: &Database) {
     let report = apply(db, &plan, &AuditContext::system()).await.unwrap();
     for (counted, expected) in [
         (report.domains, 2),
+        (report.users, 8),
         (report.lists, 2),
         (report.members, 4),
         (report.owners, 1),
@@ -333,18 +425,21 @@ async fn scenario(db: &Database) {
         assert_eq!(counted, expected, "{report:?}");
     }
     domains_and_lists_applied(db).await;
+    accounts_applied(db).await;
     rosters_applied(db).await;
     lists_applied(db).await;
     // A second import changes nothing and says what it skipped.
     let again = apply(db, &plan, &AuditContext::system()).await.unwrap();
     assert_eq!(again.domains, 0, "{again:?}");
+    assert_eq!(again.users, 0);
     assert_eq!(again.lists, 0);
     assert_eq!(again.members, 0);
     assert_eq!(again.bans, 0);
     assert_eq!(again.site_bans, 0);
     assert_eq!(again.header_matches, 0);
-    // Two domains, two lists and seven members were all there already.
-    assert_eq!(again.skipped, 11);
+    // Two domains, eight accounts, two lists and seven members were all
+    // there already.
+    assert_eq!(again.skipped, 19);
 }
 
 /// The domains and both lists, with the settings the core gave.
@@ -377,6 +472,48 @@ async fn domains_and_lists_applied(db: &Database) {
         db.lists().get(&announce).await.unwrap().display_name,
         "Announce"
     );
+}
+
+/// The accounts, their addresses and the membership that belongs to one.
+async fn accounts_applied(db: &Database) {
+    let dave = db.addresses().get("dave@example.invalid").await.unwrap();
+    let user_id = dave.user_id.expect("an account behind the address");
+    let user = db.users().get(user_id).await.unwrap();
+    assert_eq!(user.display_name, "Dave");
+    assert_eq!(user.preferred_address_id, Some(dave.id));
+    let spare = db.addresses().get("dave@work.invalid").await.unwrap();
+    assert_eq!(spare.user_id, Some(user_id));
+    let preferences = db.preferences().get_user(user_id).await.unwrap();
+    assert_eq!(preferences.hide_address, Some(true));
+    // The account that Mailman made a server owner is one here too, and
+    // its unverified address stays unverified.
+    let eve = db.addresses().get("eve@example.invalid").await.unwrap();
+    assert!(
+        db.users()
+            .get(eve.user_id.unwrap())
+            .await
+            .unwrap()
+            .is_server_owner
+    );
+    assert!(eve.verified_on.is_none());
+    // No account can be signed into: every imported one needs a reset.
+    let usable: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_credentials WHERE usable=1")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(usable, 0);
+    // Dave's membership is the account's, as Mailman had it.
+    let list: ListId = "rust-users.example.invalid".parse().unwrap();
+    let member = db
+        .members()
+        .roster(&list, MemberRole::Member)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|member| member.address_id == dave.id)
+        .unwrap();
+    assert_eq!(member.subscription_mode, SubscriptionMode::AsUser);
+    assert_eq!(member.user_id, Some(user_id));
 }
 
 /// The rosters with their own preferences.

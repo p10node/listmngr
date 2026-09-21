@@ -11,7 +11,10 @@ out — so the tests can drive the mapping from the answers a real core
 gave without a server.
 
 `import3::fetch(source, only)` walks the site: `domains`, the site
-`bans`, `lists?advertised=false` (or one list), and for each list its
+`bans`, `users` — each with `users/<id>/addresses`,
+`users/<id>/preferences` and `users/<id>/preferred_address` through
+`Source::get_optional`, which turns Mailman's `404` into `None` — then
+`lists?advertised=false` (or one list), and for each list its
 `config`, the four rosters, each member's own `preferences`
 (`members/<id>/preferences`, which Mailman answers sparsely), the list's
 `bans`, its `header-matches` and its `uris`. `collection` reads
@@ -27,10 +30,22 @@ dropped, and a warning for everything else — a setting this site does not
 have (unless it is at Mailman's own default), a language the catalog does
 not have, the moderator password hash (never its value), each template
 URI, and each member Mailman subscribed as a user.
-`import3::apply(db, plan, context)` writes the domains, the site bans and
-each list (create, configure, ban, header-match, subscribe with
-preferences and moderation action), skipping and counting what is already
-there, and records one `site.import3` audit event with the report.
+`import3::apply(db, plan, context)` writes the domains, the accounts, the
+site bans and each list (create, configure, ban, header-match, subscribe
+with preferences and moderation action), skipping and counting what is
+already there, and records one `site.import3` audit event with the
+report. An account goes through `UserRepo::create_imported_with_context`
+(`crates/db/src/user_import.rs`): one transaction holding the
+preferences row, the user, a credential row with a random password
+marked `usable=0`, each address (a bare one adopted with its
+registration date and verification, a mailbox Mailman had verified
+verified here, an address owned by another account a `Conflict` that
+writes nothing), every membership of those addresses given the account,
+the preferred address, and one `user.import` audit event that names the
+addresses and records `usable_password: false` — never hash material.
+A member Mailman had `as_user` is then subscribed `SubscriptionMode::AsUser`,
+so `Member::user_id` carries the account and the user preference layer
+applies as it does for an account made here.
 `crates/cli/src/import3.rs` is `listmngr import3`, whose
 `--password-file` keeps the core's password out of argv; a source that
 cannot be read exits `11` (`CLI-IMPORT-SOURCE`).

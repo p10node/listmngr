@@ -75,6 +75,24 @@ ${short_listname}-leave@${domain}`, `%(real_name)s mailing list` →
 three `autoresponse_*` texts (Mailman leaves them, which breaks their
 `%(...)s` on a Mailman 3 site).
 
+### Accounts and passwords
+
+Every Mailman account is created here with its display name, its
+`is_server_owner` flag, its addresses (an address nobody owns is adopted
+with its registration date, and one Mailman had verified stays verified;
+an address that already belongs to an account here is left alone and the
+Mailman account is skipped), its preferred address and its own
+preferences.
+
+**No password is carried over.** Mailman hashes passwords with passlib
+(`pbkdf2_sha512` by default), which this site cannot verify, so each
+imported account gets a random password nobody knows, stored as
+unusable: nobody can sign in with it, and the owner takes the account
+over through the password-recovery flow. The import warns once per
+account that had a password and never prints the hash. The write is
+audited as `user.import` with the addresses and `usable_password:
+false`.
+
 ### Rosters
 
 | Mailman 2.1 | listmngr |
@@ -124,6 +142,7 @@ instance to catch up a site that kept running during the migration.
 | --- | --- |
 | `/domains` | domains (`mail_host`, `description`, `alias_domain`) |
 | `/bans` | site-wide bans |
+| `/users`, `/users/<id>/addresses`, `/users/<id>/preferences`, `/users/<id>/preferred_address` | accounts with their addresses, preferences and preferred address (Mailman has an account behind every address, so plain subscribers bring one too) |
 | `/lists?advertised=false` | every list, advertised or not |
 | `/lists/<id>/config` | the list configuration (below) |
 | `/lists/<id>/roster/{member,owner,moderator,nonmember}` | the rosters, by address |
@@ -150,18 +169,18 @@ follows Mailman 3's model. The conversions:
 
 ### Rosters
 
-Members are subscribed **by address**, with the display name Mailman
-had, the member's own preferences (`acknowledge_posts`, `hide_address`,
+Members are subscribed with the display name Mailman had, the member's
+own preferences (`acknowledge_posts`, `hide_address`,
 `receive_list_copy`, `receive_own_postings`, `delivery_mode`,
 `delivery_status`, `preferred_language`) and the member's own
 `moderation_action` when Mailman set one. A member Mailman subscribed as
-a *user* (`subscription_mode: as_user`) becomes the same address here,
-with a warning: user accounts, their other addresses and their passwords
-are not imported yet.
+a *user* (`subscription_mode: as_user`) is subscribed the same way here,
+against the account the import brought over; one whose account the
+import did not see is subscribed as the address, with a warning.
 
 ### Not imported yet
 
-User accounts and passwords, held messages and pending requests
-(`P6-IMPORT3-USERS`), the Mailman 3 and HyperKitty databases read
+Passwords (see above), held messages and pending requests
+(`P6-IMPORT3-HELD`), the Mailman 3 and HyperKitty databases read
 directly without a running core (`P6-IMPORT3-DB`), and the archive,
 which comes over as an mbox (`listmngr archive import`).

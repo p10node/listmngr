@@ -1,0 +1,19 @@
+{
+  "0a38ab772d0c4c6fa0da2c961da8be82": null,
+  "2bf0cf475b0f43e1a0de0b742f66e2b8": null,
+  "30d8c7ee718e481795e1f26e51819b81": null,
+  "588ddb8e9b684d2a993b7470d33a62fb": null,
+  "7316ff10a91a4483ae7e9ca756db0b99": null,
+  "8b9b9fe850c34efb9de156fb9c76e7a7": null,
+  "aa513e5092634ae0896b84dfcc56ffc6": null,
+  "dc0c7c37a1894d698b11d9f6187500e0": {
+    "display_name": "Dave",
+    "email": "dave@example.invalid",
+    "http_etag": "\"e6f6f6948a5c6e797147753fafce2e9d4e02eea8\"",
+    "original_email": "dave@example.invalid",
+    "registered_on": "2026-09-21T08:52:51.617267",
+    "self_link": "http://127.0.0.1:8199/3.1/addresses/dave@example.invalid",
+    "user": "http://127.0.0.1:8199/3.1/users/dc0c7c37a1894d698b11d9f6187500e0",
+    "verified_on": "2026-09-21T08:52:51.853125"
+  }
+}

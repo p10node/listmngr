@@ -146,6 +146,12 @@ async fn import3_reads_a_real_mailman3_core() {
     for warning in &plan.warnings {
         println!("warning: {warning}");
     }
+    assert_eq!(site.users.len(), 8, "every Mailman account");
+    assert!(
+        site.users
+            .iter()
+            .any(|user| user.is_server_owner && user.has_password)
+    );
     let list = site
         .lists
         .iter()
