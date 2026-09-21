@@ -1,0 +1,41 @@
+{
+  "entries": [
+    {
+      "address": "http://127.0.0.1:8199/3.1/addresses/owner@example.invalid",
+      "bounce_score": 0,
+      "delivery_mode": "regular",
+      "display_name": "",
+      "email": "owner@example.invalid",
+      "http_etag": "\"0a31259541d42a6ac69e09dcc14e58e6ecdf9127\"",
+      "last_warning_sent": "0001-01-01T00:00:00",
+      "list_id": "rust-users.example.invalid",
+      "member_id": "ada6b0ada3d3487e92ba6c280f75b815",
+      "moderation_action": "accept",
+      "role": "owner",
+      "self_link": "http://127.0.0.1:8199/3.1/members/ada6b0ada3d3487e92ba6c280f75b815",
+      "subscription_mode": "as_address",
+      "total_warnings_sent": 0,
+      "user": "http://127.0.0.1:8199/3.1/users/bf24b748210541769716577130a7bdc4"
+    },
+    {
+      "address": "http://127.0.0.1:8199/3.1/addresses/mod@example.invalid",
+      "bounce_score": 0,
+      "delivery_mode": "regular",
+      "display_name": "",
+      "email": "mod@example.invalid",
+      "http_etag": "\"2e9a8d782b2d87e4028651745a7ae25acbddff31\"",
+      "last_warning_sent": "0001-01-01T00:00:00",
+      "list_id": "rust-users.example.invalid",
+      "member_id": "ff9619e011a24d00bc14be469857e19a",
+      "moderation_action": "accept",
+      "role": "moderator",
+      "self_link": "http://127.0.0.1:8199/3.1/members/ff9619e011a24d00bc14be469857e19a",
+      "subscription_mode": "as_address",
+      "total_warnings_sent": 0,
+      "user": "http://127.0.0.1:8199/3.1/users/fd459ce960834e6b904ca8042c847816"
+    }
+  ],
+  "http_etag": "\"b52a5187cca53d505c01e7e9eb9f40b6f853be82\"",
+  "start": 0,
+  "total_size": 6
+}

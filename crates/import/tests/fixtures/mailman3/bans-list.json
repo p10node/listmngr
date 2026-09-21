@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "email": "^.*@spam\\.invalid",
+      "http_etag": "\"a6486ea86abfd51a7fbde256c2b01686a4ee6822\"",
+      "list_id": "rust-users.example.invalid",
+      "self_link": "http://127.0.0.1:8199/3.1/lists/rust-users.example.invalid/bans/%5E.%2A%40spam%5C.invalid"
+    },
+    {
+      "email": "spammer@example.invalid",
+      "http_etag": "\"1be5725e499ad6e24e181862af98b6694257ebab\"",
+      "list_id": "rust-users.example.invalid",
+      "self_link": "http://127.0.0.1:8199/3.1/lists/rust-users.example.invalid/bans/spammer@example.invalid"
+    }
+  ],
+  "http_etag": "\"637d9ab4c0890a4fe1ac563f9246051d04630dd4\"",
+  "start": 0,
+  "total_size": 2
+}

@@ -1,0 +1,12 @@
+{
+  "entries": [
+    {
+      "email": "global-spammer@example.invalid",
+      "http_etag": "\"d3b990fc2a173257515736bdf6af7a2bbab4a415\"",
+      "self_link": "http://127.0.0.1:8199/3.1/bans/global-spammer@example.invalid"
+    }
+  ],
+  "http_etag": "\"202fbf626598a9feee6abdf10aa63991dd241061\"",
+  "start": 0,
+  "total_size": 1
+}

@@ -100,6 +100,68 @@ The 2.1 `archives/private/<list>.mbox/<list>.mbox` is imported separately
 with `listmngr archive import <list_id> <file.mbox>`, which keeps the
 Message-ID-Hash URLs Mailman 3 would give the same messages.
 
-## From Mailman 3 (`import3`)
+## From Mailman 3 over REST (`listmngr import3`)
 
-Not yet available (`P6-IMPORT3` in `docs/PLAN.md` §7).
+A running Mailman 3 core is read through its REST API and written here:
+
+```sh
+printf '%s' "$MAILMAN_REST_PASSWORD" > /protected/path/rest.pass
+listmngr import3 --rest http://127.0.0.1:8001/3.1 \
+    --user restadmin --password-file /protected/path/rest.pass --dry-run
+listmngr import3 --rest http://127.0.0.1:8001/3.1 \
+    --user restadmin --password-file /protected/path/rest.pass
+```
+
+The core is only read (`GET`), never changed, and the password is taken
+from a file so it stays out of the shell history. `--list <list_id>`
+imports one list; `--dry-run` prints the plan. Everything that is
+already here is left alone, so the command can be run again — for
+instance to catch up a site that kept running during the migration.
+
+### What is read
+
+| Mailman 3 resource | Here |
+| --- | --- |
+| `/domains` | domains (`mail_host`, `description`, `alias_domain`) |
+| `/bans` | site-wide bans |
+| `/lists?advertised=false` | every list, advertised or not |
+| `/lists/<id>/config` | the list configuration (below) |
+| `/lists/<id>/roster/{member,owner,moderator,nonmember}` | the rosters, by address |
+| `/members/<id>/preferences` | that member's own preferences (Mailman answers only what is set on the member itself) |
+| `/lists/<id>/bans` | the list's bans |
+| `/lists/<id>/header-matches` | header matches (`header`, `pattern`, `action` → chain) |
+| `/lists/<id>/uris` | reported as warnings: Mailman keeps a URI, not the text |
+
+### Settings
+
+Most of the configuration carries the same name, because this project
+follows Mailman 3's model. The conversions:
+
+| Mailman 3 | Here |
+| --- | --- |
+| `autoresponse_grace_period`, `bounce_info_stale_after`, `bounce_you_are_disabled_warnings_interval` (`7d`, `90d`) | whole days; a duration with hours or minutes left over is a warning |
+| `bounce_score_threshold`, `digest_size_threshold` (`5` or `5.0`) | a number |
+| `acceptable_aliases` (a list, or one multi-line string) | one alias per line |
+| `preferred_language` | only a language this site has (`en`, `vi`); else a warning |
+| `moderator_password` | not imported (a hash); a warning asks for a new one. Its value never reaches a message or a log |
+| `bounces_address`, `join_address`, `leave_address`, `no_reply_address`, `owner_address`, `posting_address`, `request_address`, `fqdn_listname`, `list_name`, `mail_host`, `created_at`, `last_post_at`, `digest_last_sent_at`, `post_id`, `volume`, `usenet_watermark` | derived here too: read, never written |
+| `max_days_to_hold`, and any setting a newer Mailman adds | a warning naming it, unless it is at Mailman's own default |
+| everything else (75 settings: the moderation actions, archives, bounces, digests, DMARC, content filtering, the Usenet gateway, the autoresponders, the reply/personalize/roster-visibility policies, …) | the same name and value |
+
+### Rosters
+
+Members are subscribed **by address**, with the display name Mailman
+had, the member's own preferences (`acknowledge_posts`, `hide_address`,
+`receive_list_copy`, `receive_own_postings`, `delivery_mode`,
+`delivery_status`, `preferred_language`) and the member's own
+`moderation_action` when Mailman set one. A member Mailman subscribed as
+a *user* (`subscription_mode: as_user`) becomes the same address here,
+with a warning: user accounts, their other addresses and their passwords
+are not imported yet.
+
+### Not imported yet
+
+User accounts and passwords, held messages and pending requests
+(`P6-IMPORT3-USERS`), the Mailman 3 and HyperKitty databases read
+directly without a running core (`P6-IMPORT3-DB`), and the archive,
+which comes over as an mbox (`listmngr archive import`).

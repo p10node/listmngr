@@ -1,0 +1,72 @@
+{
+  "entries": [
+    {
+      "address": "http://127.0.0.1:8199/3.1/addresses/alice@example.invalid",
+      "bounce_score": 0,
+      "delivery_mode": "plaintext_digests",
+      "display_name": "Alice Nguy\u1ec5n",
+      "email": "alice@example.invalid",
+      "http_etag": "\"78d9bda56aa09e6383a92fa705611b163a686add\"",
+      "last_warning_sent": "0001-01-01T00:00:00",
+      "list_id": "rust-users.example.invalid",
+      "member_id": "82a70572514947c5809a3b2280acc0a4",
+      "role": "member",
+      "self_link": "http://127.0.0.1:8199/3.1/members/82a70572514947c5809a3b2280acc0a4",
+      "subscription_mode": "as_address",
+      "total_warnings_sent": 0,
+      "user": "http://127.0.0.1:8199/3.1/users/e42d0fc9366c4e13b2250f34bbf57796"
+    },
+    {
+      "address": "http://127.0.0.1:8199/3.1/addresses/bob@example.invalid",
+      "bounce_score": 0,
+      "delivery_mode": "regular",
+      "display_name": "Bob",
+      "email": "bob@example.invalid",
+      "http_etag": "\"b619e2e2916694002ca662c83332df85b14ae32a\"",
+      "last_warning_sent": "0001-01-01T00:00:00",
+      "list_id": "rust-users.example.invalid",
+      "member_id": "32033ad91daf4ade9598a39ab005349a",
+      "moderation_action": "hold",
+      "role": "member",
+      "self_link": "http://127.0.0.1:8199/3.1/members/32033ad91daf4ade9598a39ab005349a",
+      "subscription_mode": "as_address",
+      "total_warnings_sent": 0,
+      "user": "http://127.0.0.1:8199/3.1/users/6e6424246e2043a599248276a0159323"
+    },
+    {
+      "address": "http://127.0.0.1:8199/3.1/addresses/carol@elsewhere.invalid",
+      "bounce_score": 0,
+      "delivery_mode": "regular",
+      "display_name": "",
+      "email": "carol@elsewhere.invalid",
+      "http_etag": "\"75836d73becdb816fdfe3071d335128eb327a08f\"",
+      "last_warning_sent": "0001-01-01T00:00:00",
+      "list_id": "rust-users.example.invalid",
+      "member_id": "656182b814864ab7a7aa5589368bcade",
+      "role": "member",
+      "self_link": "http://127.0.0.1:8199/3.1/members/656182b814864ab7a7aa5589368bcade",
+      "subscription_mode": "as_address",
+      "total_warnings_sent": 0,
+      "user": "http://127.0.0.1:8199/3.1/users/5f4a5ccfb50b45808bffc3bec0529118"
+    },
+    {
+      "address": "http://127.0.0.1:8199/3.1/addresses/dave@example.invalid",
+      "bounce_score": 0,
+      "delivery_mode": "regular",
+      "display_name": "Dave",
+      "email": "dave@example.invalid",
+      "http_etag": "\"0ccbf9e715c74c0fce6aab327411dadb018e4c60\"",
+      "last_warning_sent": "0001-01-01T00:00:00",
+      "list_id": "rust-users.example.invalid",
+      "member_id": "4371eced9bd64467944ac0fc2f6bddea",
+      "role": "member",
+      "self_link": "http://127.0.0.1:8199/3.1/members/4371eced9bd64467944ac0fc2f6bddea",
+      "subscription_mode": "as_user",
+      "total_warnings_sent": 0,
+      "user": "http://127.0.0.1:8199/3.1/users/9bfcfb46bfae4a03814b3c14e12d5d9a"
+    }
+  ],
+  "http_etag": "\"a3b7ec780b8f1ca170ffed0f6314873cc9fd974f\"",
+  "start": 0,
+  "total_size": 4
+}

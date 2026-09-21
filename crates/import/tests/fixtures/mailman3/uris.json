@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "http_etag": "\"58ab14edbf17cde121f97c2bc36a50e8af26b7f8\"",
+      "name": "list:member:regular:footer",
+      "self_link": "http://127.0.0.1:8199/3.1/lists/rust-users.example.invalid/uris/list:member:regular:footer",
+      "uri": "http://example.invalid/footer.txt"
+    }
+  ],
+  "http_etag": "\"c8fc547c0a483658cad0407fa4252f26f708d705\"",
+  "self_link": "http://127.0.0.1:8199/3.1/lists/rust-users.example.invalid/uris",
+  "start": 0,
+  "total_size": 1
+}

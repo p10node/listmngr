@@ -6,6 +6,7 @@ mod bounce;
 mod digests;
 mod errors;
 mod import21;
+mod import3;
 mod nntp;
 mod notify;
 mod queue;
@@ -100,6 +101,10 @@ enum Command {
         #[command(subcommand)]
         command: nntp::Command,
     },
+    /// Import a Mailman 3 site over its REST API: its domains, lists and
+    /// their settings, rosters with each member's own preferences, bans
+    /// and header matches. What is here already is left alone.
+    Import3(import3::Options),
     /// Import a Mailman 2.1 list's `config.pck` into an existing list:
     /// its settings, bans, header filter rules, decorations and rosters.
     Import21 {
@@ -387,6 +392,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Aliases { command } => aliases::run(&db, &config, command).await?,
         Command::Archive { command } => archive::run(&db, &config, command).await?,
         Command::Nntp { command } => nntp::run(&db, &config, command).await?,
+        Command::Import3(options) => import3::run(&db, options).await?,
         Command::Import21 {
             list_id,
             path,

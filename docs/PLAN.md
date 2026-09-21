@@ -965,7 +965,9 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
   - [x] ~~**P6-NNTP-GATENEWS**~~ (xong) (M): `listmngr nntp gate` + chu kỳ trong `nntp` runner (`[nntp] gatenews_every_secs`): GROUP/ARTICLE qua `Reader`, `nntp::inbound` (`X-Originally-To`, `To` = list, bỏ bài có `List-Id` của list), inject vào `in` với `fromusenet`, watermark từng bài có audit; lần poll đầu chỉ catch-up.
 - Import từ Mailman, tách thành:
   - [x] ~~**P6-IMPORT21**~~ (xong) (M): crate `listmngr-import` — `pickle::read` (protocol 0–2, instance `OBJ`/`BUILD`), `Config21`, `plan()` theo `mailman/utilities/importer.py` (settings/topics/aliases/bans/header_filter_rules/templates/rosters), `apply()` audited và chạy lại được, `listmngr import21 <list_id> <config.pck> [--dry-run]`; bảng mapping trong `docs/MIGRATION.md`.
-  - [ ] **P6-IMPORT3** (L): đọc trực tiếp Mailman 3 DB + HyperKitty DB → mapping; hoặc qua REST
+  - [x] ~~**P6-IMPORT3-REST**~~ (xong) (M): `listmngr import3 --rest` — `rest3::Rest` (Basic auth, chỉ GET, password từ file), `import3::fetch` (domains, site bans, lists + config, 4 roster + preferences, bans, header-matches, uris; phân trang `count`/`page`), `plan()` (bảng 75 setting, `7d` → ngày, alias theo dòng, phần còn lại thành warning), `apply()` audited và chạy lại được.
+  - [ ] **P6-IMPORT3-USERS** (M): user + address + preferred address + password legacy (verify rồi rehash Argon2), held messages và pending requests.
+  - [ ] **P6-IMPORT3-DB** (L): đọc thẳng Mailman 3 DB (không cần core chạy) và HyperKitty DB (threads/votes/tags/categories/favorites).
 - [ ] `.po` import → 40+ ngôn ngữ templates
 - [ ] Webhooks + deliveries retry; plugins (Rust trait registry: rules/handlers/archivers)
 - [ ] Remote HyperKitty archiver, Exim snippets, built-in inbound SMTP (experimental), S3 message store
