@@ -6,15 +6,15 @@
       "delivery_mode": "plaintext_digests",
       "display_name": "Alice Nguy\u1ec5n",
       "email": "alice@example.invalid",
-      "http_etag": "\"78d9bda56aa09e6383a92fa705611b163a686add\"",
+      "http_etag": "\"8e22c06c8aa54c6f39e1d742e44b56aa01619ca8\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "82a70572514947c5809a3b2280acc0a4",
+      "member_id": "44d8730e6e95466fa9c8f57e3ebc28c3",
       "role": "member",
-      "self_link": "http://127.0.0.1:8199/3.1/members/82a70572514947c5809a3b2280acc0a4",
+      "self_link": "http://127.0.0.1:8199/3.1/members/44d8730e6e95466fa9c8f57e3ebc28c3",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/e42d0fc9366c4e13b2250f34bbf57796"
+      "user": "http://127.0.0.1:8199/3.1/users/aa513e5092634ae0896b84dfcc56ffc6"
     },
     {
       "address": "http://127.0.0.1:8199/3.1/addresses/bob@example.invalid",
@@ -22,16 +22,16 @@
       "delivery_mode": "regular",
       "display_name": "Bob",
       "email": "bob@example.invalid",
-      "http_etag": "\"b619e2e2916694002ca662c83332df85b14ae32a\"",
+      "http_etag": "\"05f6f8702b7901049a90c12b2ac3e882134c6b9a\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "32033ad91daf4ade9598a39ab005349a",
+      "member_id": "d9a31fe2012240c5a9d104a64a5b6b4a",
       "moderation_action": "hold",
       "role": "member",
-      "self_link": "http://127.0.0.1:8199/3.1/members/32033ad91daf4ade9598a39ab005349a",
+      "self_link": "http://127.0.0.1:8199/3.1/members/d9a31fe2012240c5a9d104a64a5b6b4a",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/6e6424246e2043a599248276a0159323"
+      "user": "http://127.0.0.1:8199/3.1/users/30d8c7ee718e481795e1f26e51819b81"
     },
     {
       "address": "http://127.0.0.1:8199/3.1/addresses/carol@elsewhere.invalid",
@@ -39,15 +39,15 @@
       "delivery_mode": "regular",
       "display_name": "",
       "email": "carol@elsewhere.invalid",
-      "http_etag": "\"75836d73becdb816fdfe3071d335128eb327a08f\"",
+      "http_etag": "\"c685b6b16b21043fbc541b185550e32b28f17e53\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "656182b814864ab7a7aa5589368bcade",
+      "member_id": "17a0358008714120b1fd1f78428dc46f",
       "role": "member",
-      "self_link": "http://127.0.0.1:8199/3.1/members/656182b814864ab7a7aa5589368bcade",
+      "self_link": "http://127.0.0.1:8199/3.1/members/17a0358008714120b1fd1f78428dc46f",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/5f4a5ccfb50b45808bffc3bec0529118"
+      "user": "http://127.0.0.1:8199/3.1/users/7316ff10a91a4483ae7e9ca756db0b99"
     },
     {
       "address": "http://127.0.0.1:8199/3.1/addresses/dave@example.invalid",
@@ -55,18 +55,18 @@
       "delivery_mode": "regular",
       "display_name": "Dave",
       "email": "dave@example.invalid",
-      "http_etag": "\"0ccbf9e715c74c0fce6aab327411dadb018e4c60\"",
+      "http_etag": "\"a30cdb4883ca7795f2da7f2b64af27fe044032b9\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "4371eced9bd64467944ac0fc2f6bddea",
+      "member_id": "6c356f5c35354ef3b02f0268f091ebe0",
       "role": "member",
-      "self_link": "http://127.0.0.1:8199/3.1/members/4371eced9bd64467944ac0fc2f6bddea",
+      "self_link": "http://127.0.0.1:8199/3.1/members/6c356f5c35354ef3b02f0268f091ebe0",
       "subscription_mode": "as_user",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/9bfcfb46bfae4a03814b3c14e12d5d9a"
+      "user": "http://127.0.0.1:8199/3.1/users/dc0c7c37a1894d698b11d9f6187500e0"
     }
   ],
-  "http_etag": "\"a3b7ec780b8f1ca170ffed0f6314873cc9fd974f\"",
+  "http_etag": "\"42c6a451bacc7bcda6474794729c6978d630bb51\"",
   "start": 0,
   "total_size": 4
 }

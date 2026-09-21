@@ -92,6 +92,21 @@ impl Rest {
     }
 }
 
+impl Rest {
+    /// One resource that may not be there: `404` is `None`, every other
+    /// refusal is an error.
+    ///
+    /// # Errors
+    /// As `get`, except for a missing resource.
+    pub async fn get_optional(&self, path: &str) -> Result<Option<Json>> {
+        match self.get(path).await {
+            Ok(body) => Ok(Some(body)),
+            Err(Error::Rest(message)) if message.contains("404") => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
 /// The credentials travel in the `Authorization` header, never in the
 /// URL — but a URL with userinfo (`https://user:secret@host/`) would
 /// reach a message through the client's own error text, so any such URL
@@ -113,5 +128,9 @@ fn scrub(message: &str) -> String {
 impl Source for Rest {
     async fn get(&self, path: &str) -> Result<Json> {
         Self::get(self, path).await
+    }
+
+    async fn get_optional(&self, path: &str) -> Result<Option<Json>> {
+        Self::get_optional(self, path).await
     }
 }
