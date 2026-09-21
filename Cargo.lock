@@ -2101,6 +2101,7 @@ dependencies = [
  "listmngr-archive",
  "listmngr-core",
  "listmngr-db",
+ "listmngr-import",
  "listmngr-mail",
  "listmngr-runners",
  "mail-auth",
@@ -2241,6 +2242,20 @@ dependencies = [
  "fluent-bundle",
  "intl-memoizer",
  "unic-langid",
+]
+
+[[package]]
+name = "listmngr-import"
+version = "0.1.0"
+dependencies = [
+ "listmngr-core",
+ "listmngr-db",
+ "listmngr-mail",
+ "regex",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
