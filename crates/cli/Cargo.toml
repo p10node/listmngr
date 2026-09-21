@@ -18,6 +18,7 @@ listmngr-api = { path = "../api", version = "0.1.0" }
 listmngr-archive = { path = "../archive", version = "0.1.0" }
 listmngr-core = { path = "../core", version = "0.1.0" }
 listmngr-db = { path = "../db", version = "0.1.0" }
+listmngr-import = { path = "../import", version = "0.1.0" }
 listmngr-mail = { path = "../mail", version = "0.1.0" }
 listmngr-runners = { path = "../runners", version = "0.1.0" }
 serde_json.workspace = true

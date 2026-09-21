@@ -4032,6 +4032,24 @@ pub struct AuditRepo<'a> {
     db: &'a Database,
 }
 impl AuditRepo<'_> {
+    /// Record one event of its own — a summary of work whose writes each
+    /// carried their own event, such as an import.
+    /// # Errors
+    /// Returns database errors.
+    pub async fn record_with_context(
+        &self,
+        context: &AuditContext,
+        action: &str,
+        target_type: &str,
+        target_id: &str,
+        diff: serde_json::Value,
+    ) -> Result<()> {
+        let mut tx = self.db.write_tx().await?;
+        Database::record_tx_with_context(&mut tx, context, action, target_type, target_id, diff)
+            .await?;
+        tx.commit().await.map_err(db_error)
+    }
+
     /// # Errors
     /// Returns an error when audit records cannot be queried or decoded.
     pub async fn list(&self) -> Result<Vec<AuditEntry>> {
