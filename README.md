@@ -1,6 +1,6 @@
 # listmngr
 
-## Mailman 3 import over REST (`P6-IMPORT3-REST`, `P6-IMPORT3-USERS`) — bounded local acceptance verified
+## Mailman 3 import over REST (`P6-IMPORT3-REST`, `P6-IMPORT3-USERS`, `P6-IMPORT3-HELD`) — bounded local acceptance verified
 
 A whole Mailman 3 site moves over from a running core, read-only:
 
@@ -16,13 +16,19 @@ The importer reads the core's domains, its site bans, its accounts (each
 with its addresses, the one it prefers and its own preferences), every
 list (with `--list <list_id>` just one) with its `config`, the four
 rosters with each member's own preferences, the list's bans, its header
-matches and its template URIs, and writes them here: the domains, the accounts (with their
+matches, its template URIs, and what it was still holding — the messages
+waiting for a moderator and the subscription changes nobody had decided
+— and writes them here: the domains, the accounts (with their
 addresses — an address nobody owns is adopted, one Mailman had verified
 stays verified — and their preferred address), the lists (style
 `legacy-default`, then the imported configuration), the members with
 their preferences and their own moderation action, the bans and the
-header matches. A member Mailman subscribed as a *user* is subscribed
-the same way here, against the imported account. Mailman's spellings become this site's — `7d`
+header matches, the held messages (kept whole, with the date the core
+held them, so a moderator here accepts or rejects exactly what was held)
+and the subscription requests a moderator still has to decide. A member
+Mailman subscribed as a *user* is subscribed the same way here, against
+the imported account. **An import mails nobody:** the moderators and
+subscribers were told once already by the site being left behind. Mailman's spellings become this site's — `7d`
 durations become whole days, a multi-line `acceptable_aliases` becomes
 one alias per line, and the resources Mailman derives (the list's
 addresses, `created_at`, `post_id`, `volume`, `usenet_watermark`) are
@@ -45,7 +51,8 @@ with a random password nobody knows, marked unusable: its owner takes
 the account over through the password-recovery flow, and the import
 warns once per account that had a password (never printing the hash).
 
-Limits: held messages and pending requests are not imported yet; Mailman
+Limits: a confirmation the subscriber still owed is not carried over —
+the token belongs to the old site — and is reported instead; Mailman
 keeps only a *URI* for each template, so each one is reported as a
 warning to set by hand; a setting this site does not have, or a value it
 cannot take, is a warning and the rest of the list still imports.

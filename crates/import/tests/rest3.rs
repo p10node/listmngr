@@ -146,7 +146,7 @@ async fn import3_reads_a_real_mailman3_core() {
     for warning in &plan.warnings {
         println!("warning: {warning}");
     }
-    assert_eq!(site.users.len(), 8, "every Mailman account");
+    assert_eq!(site.users.len(), 9, "every Mailman account");
     assert!(
         site.users
             .iter()
@@ -159,6 +159,13 @@ async fn import3_reads_a_real_mailman3_core() {
         .expect("the populated list");
     assert_eq!(list.display_name, "Rust-Users");
     assert_eq!(list.members.len(), 7);
+    let announce = site
+        .lists
+        .iter()
+        .find(|entry| entry.list_id.as_str() == "announce.other.invalid")
+        .expect("the second list");
+    assert_eq!(announce.held.len(), 1, "a post waiting for a moderator");
+    assert_eq!(announce.requests.len(), 1, "a join waiting for one too");
     let planned = plan
         .lists
         .iter()

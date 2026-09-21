@@ -150,6 +150,8 @@ instance to catch up a site that kept running during the migration.
 | `/lists/<id>/bans` | the list's bans |
 | `/lists/<id>/header-matches` | header matches (`header`, `pattern`, `action` → chain) |
 | `/lists/<id>/uris` | reported as warnings: Mailman keeps a URI, not the text |
+| `/lists/<id>/held` | messages waiting for a moderator, kept whole with the core's hold date |
+| `/lists/<id>/requests` | subscription changes waiting for a moderator (a confirmation the subscriber owes stays behind, with a warning) |
 
 ### Settings
 
@@ -178,9 +180,23 @@ a *user* (`subscription_mode: as_user`) is subscribed the same way here,
 against the account the import brought over; one whose account the
 import did not see is subscribed as the address, with a warning.
 
+### What was waiting
+
+A message the core was holding comes over with its bytes, its sender,
+its subject, the core's reason and the date it was held, and waits for a
+moderator here; accepting it later delivers exactly what was held.
+Importing the same message twice is refused, so the command can be run
+again. A subscription change waiting for a moderator becomes a request
+here, in `pending_moderation`, with no token issued.
+
+**An import mails nobody.** No hold notice, no confirmation, no welcome:
+whoever needed telling was told by the site being left behind. A
+confirmation the subscriber still owed is *not* imported — the token was
+issued by the other site and cannot be honoured here — and each one is
+reported so the operator can ask those people to join again.
+
 ### Not imported yet
 
-Passwords (see above), held messages and pending requests
-(`P6-IMPORT3-HELD`), the Mailman 3 and HyperKitty databases read
+Passwords (see above), the Mailman 3 and HyperKitty databases read
 directly without a running core (`P6-IMPORT3-DB`), and the archive,
 which comes over as an mbox (`listmngr archive import`).

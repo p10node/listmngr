@@ -6,19 +6,19 @@
       "delivery_mode": "regular",
       "display_name": "",
       "email": "owner@example.invalid",
-      "http_etag": "\"972912b857de541d9d312092d89685cb1e701bcf\"",
+      "http_etag": "\"ac61b778f59d2fe31ae963f84bc7acf5ec6620f9\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "f5799ea4ecd9448e9c0af089b5ce3d63",
+      "member_id": "c84a53880c764a01840112e1fec69372",
       "moderation_action": "accept",
       "role": "owner",
-      "self_link": "http://127.0.0.1:8199/3.1/members/f5799ea4ecd9448e9c0af089b5ce3d63",
+      "self_link": "http://127.0.0.1:8199/3.1/members/c84a53880c764a01840112e1fec69372",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/8b9b9fe850c34efb9de156fb9c76e7a7"
+      "user": "http://127.0.0.1:8199/3.1/users/6fc1a57f66164a228bf0ded53bc72579"
     }
   ],
-  "http_etag": "\"da0adb9b5e0ab97feef4af4a9ce2e123b5a8d15b\"",
+  "http_etag": "\"a3a5f6d8bb84f72b126c8de02ea02c46e507dbdc\"",
   "start": 0,
   "total_size": 1
 }
