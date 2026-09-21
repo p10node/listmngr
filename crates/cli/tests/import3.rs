@@ -17,6 +17,25 @@ fn answer(path: &str) -> String {
     let body = match path {
         "domains" => read("domains"),
         "bans" => read("bans-global"),
+        "users" => read("users"),
+        path if path.starts_with("users/") => {
+            let (id, tail) = path
+                .trim_start_matches("users/")
+                .split_once('/')
+                .unwrap_or(("", ""));
+            let file = match tail {
+                "addresses" => "user-addresses",
+                "preferences" => "user-preferences",
+                _ => "user-preferred",
+            };
+            let all: serde_json::Value =
+                serde_json::from_str(&read(file).unwrap_or_default()).unwrap_or_default();
+            let found = all.get(id).cloned().unwrap_or(serde_json::Value::Null);
+            if tail == "preferred_address" && found.is_null() {
+                return "404".to_owned();
+            }
+            Some(found.to_string())
+        }
         path if path.starts_with("lists?") => read("lists"),
         path if path.starts_with("members/") => {
             let id = path
@@ -78,15 +97,18 @@ async fn core() -> u16 {
                 let authorized = request
                     .to_lowercase()
                     .contains("authorization: basic cmvzdgfkbwluonbhc3n3b3jkagvyzq==");
-                let response = if authorized {
-                    let body = answer(target.trim_start_matches("/3.1/"));
+                let body = answer(target.trim_start_matches("/3.1/"));
+                let response = if !authorized {
+                    "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_owned()
+                } else if body == "404" {
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_owned()
+                } else {
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                         body.len()
                     )
-                } else {
-                    "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                        .to_owned()
                 };
                 let _ = stream.write_all(response.as_bytes()).await;
                 let _ = stream.flush().await;
@@ -166,6 +188,7 @@ fn import3_plans_dry_then_writes_the_site_it_read() {
     assert!(output.status.success(), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
     assert_eq!(report["domains"], 2);
+    assert_eq!(report["users"], 8);
     assert_eq!(report["lists"], 2);
     assert_eq!(report["members"], 4);
     assert_eq!(report["owners"], 1);
@@ -176,6 +199,6 @@ fn import3_plans_dry_then_writes_the_site_it_read() {
     let report: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
     assert_eq!(report["lists"], 0);
     assert_eq!(report["members"], 0);
-    assert_eq!(report["skipped"], 11);
+    assert_eq!(report["skipped"], 19);
     drop(rt);
 }

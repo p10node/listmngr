@@ -13,7 +13,7 @@ use listmngr_core::{
     SubscriptionMode,
 };
 use listmngr_db::header_matches::HeaderMatchRow;
-use listmngr_db::{AuditContext, Database, NewList, NewMember};
+use listmngr_db::{AuditContext, Database, ImportedAddress, ImportedUser, NewList, NewMember};
 use serde_json::{Map, Value as Json, json};
 
 /// Where the site is read from: the REST client, or a recorded site in
@@ -24,6 +24,37 @@ pub trait Source {
     /// # Errors
     /// Whatever the source cannot read.
     fn get(&self, path: &str) -> impl Future<Output = Result<Json>> + Send;
+
+    /// One resource that may not be there: Mailman answers `404` for a
+    /// user without a preferred address, which is not an error.
+    ///
+    /// # Errors
+    /// Whatever the source cannot read, other than a missing resource.
+    fn get_optional(&self, path: &str) -> impl Future<Output = Result<Option<Json>>> + Send;
+}
+
+/// One address of a Mailman account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Address3 {
+    pub email: String,
+    pub display_name: String,
+    /// Whether Mailman had proof of the mailbox.
+    pub verified: bool,
+}
+
+/// An account of the Mailman site. Mailman has one behind every
+/// address, so most of these carry nothing but the address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct User3 {
+    pub user_id: String,
+    pub display_name: String,
+    pub is_server_owner: bool,
+    /// Whether Mailman had a password hash for the account. The hash
+    /// itself is never read out of the core.
+    pub has_password: bool,
+    pub addresses: Vec<Address3>,
+    pub preferred: Option<String>,
+    pub preferences: Preferences,
 }
 
 /// A domain of the Mailman site.
@@ -67,6 +98,7 @@ pub struct List3 {
 pub struct Site {
     pub domains: Vec<Domain3>,
     pub site_bans: Vec<String>,
+    pub users: Vec<User3>,
     pub lists: Vec<List3>,
 }
 
@@ -88,6 +120,7 @@ pub struct ListPlan3 {
 pub struct Plan3 {
     pub domains: Vec<Domain3>,
     pub site_bans: Vec<String>,
+    pub users: Vec<User3>,
     pub lists: Vec<ListPlan3>,
     pub warnings: Vec<String>,
 }
@@ -103,6 +136,15 @@ impl Plan3 {
                 "alias_domain": domain.alias_domain,
             })).collect::<Vec<_>>(),
             "site_bans": self.site_bans,
+            "users": self.users.iter().map(|user| json!({
+                "display_name": user.display_name,
+                "is_server_owner": user.is_server_owner,
+                "addresses": user.addresses.iter().map(|address| json!({
+                    "email": address.email,
+                    "verified": address.verified,
+                })).collect::<Vec<_>>(),
+                "preferred": user.preferred,
+            })).collect::<Vec<_>>(),
             "lists": self.lists.iter().map(|list| json!({
                 "list_id": list.list_id.as_str(),
                 "display_name": list.display_name,
@@ -126,6 +168,8 @@ impl Plan3 {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Report3 {
     pub domains: usize,
+    pub users: usize,
+    pub addresses: usize,
     pub lists: usize,
     pub settings: usize,
     pub members: usize,
@@ -145,6 +189,8 @@ impl Report3 {
     pub fn to_json(&self) -> Json {
         json!({
             "domains": self.domains,
+            "users": self.users,
+            "addresses": self.addresses,
             "lists": self.lists,
             "settings": self.settings,
             "members": self.members,
@@ -340,6 +386,7 @@ pub async fn fetch<S: Source + Sync>(source: &S, only: Option<&ListId>) -> Resul
     let mut site = Site {
         domains: Vec::new(),
         site_bans: Vec::new(),
+        users: Vec::new(),
         lists: Vec::new(),
     };
     for entry in collection(source, "domains").await? {
@@ -356,6 +403,9 @@ pub async fn fetch<S: Source + Sync>(source: &S, only: Option<&ListId>) -> Resul
     for entry in collection(source, "bans").await? {
         site.site_bans.push(text(&entry, "email"));
     }
+    for entry in collection(source, "users").await? {
+        site.users.push(one_user(source, &entry).await?);
+    }
     for entry in collection(source, "lists?advertised=false").await? {
         let list_id: ListId = text(&entry, "list_id").parse()?;
         if only.is_some_and(|wanted| wanted != &list_id) {
@@ -364,6 +414,45 @@ pub async fn fetch<S: Source + Sync>(source: &S, only: Option<&ListId>) -> Resul
         site.lists.push(one_list(source, &list_id, &entry).await?);
     }
     Ok(site)
+}
+
+/// One account, with its addresses, the one it prefers (Mailman answers
+/// `404` when there is none) and its own preferences. The password hash
+/// Mailman may put in the resource is noted but never read out.
+async fn one_user<S: Source + Sync>(source: &S, entry: &Json) -> Result<User3> {
+    let user_id = text(entry, "user_id");
+    let mut addresses = Vec::new();
+    for found in collection(source, &format!("users/{user_id}/addresses")).await? {
+        addresses.push(Address3 {
+            email: text(&found, "email").to_lowercase(),
+            display_name: text(&found, "display_name"),
+            verified: found
+                .get("verified_on")
+                .is_some_and(|value| !value.is_null()),
+        });
+    }
+    let preferred = source
+        .get_optional(&format!("users/{user_id}/preferred_address"))
+        .await?
+        .map(|address| text(&address, "email").to_lowercase());
+    let preferences = source
+        .get(&format!("users/{user_id}/preferences"))
+        .await
+        .unwrap_or_else(|_| json!({}));
+    Ok(User3 {
+        user_id,
+        display_name: text(entry, "display_name"),
+        is_server_owner: entry
+            .get("is_server_owner")
+            .and_then(Json::as_bool)
+            .unwrap_or(false),
+        has_password: entry
+            .get("password")
+            .is_some_and(|value| value.as_str().is_some_and(|hash| !hash.is_empty())),
+        addresses,
+        preferred,
+        preferences: preferences_of(&preferences),
+    })
 }
 
 async fn one_list<S: Source + Sync>(source: &S, list_id: &ListId, entry: &Json) -> Result<List3> {
@@ -441,28 +530,35 @@ async fn one_member<S: Source + Sync>(
             .and_then(Json::as_str)
             .unwrap_or("as_address")
             .to_owned(),
-        preferences: Preferences {
-            acknowledge_posts: preferences.get("acknowledge_posts").and_then(Json::as_bool),
-            hide_address: preferences.get("hide_address").and_then(Json::as_bool),
-            preferred_language: preferences
-                .get("preferred_language")
-                .and_then(Json::as_str)
-                .filter(|code| LANGUAGES.contains(code))
-                .map(str::to_owned),
-            receive_list_copy: preferences.get("receive_list_copy").and_then(Json::as_bool),
-            receive_own_postings: preferences
-                .get("receive_own_postings")
-                .and_then(Json::as_bool),
-            delivery_mode: preferences
-                .get("delivery_mode")
-                .and_then(Json::as_str)
-                .and_then(|mode| mode.parse::<DeliveryMode>().ok()),
-            delivery_status: preferences
-                .get("delivery_status")
-                .and_then(Json::as_str)
-                .and_then(|status| status.parse::<DeliveryStatus>().ok()),
-        },
+        preferences: preferences_of(&preferences),
     })
+}
+
+/// The preferences Mailman answers, which are only those set on the
+/// resource itself; a language this site's catalog does not have is
+/// left out.
+fn preferences_of(preferences: &Json) -> Preferences {
+    Preferences {
+        acknowledge_posts: preferences.get("acknowledge_posts").and_then(Json::as_bool),
+        hide_address: preferences.get("hide_address").and_then(Json::as_bool),
+        preferred_language: preferences
+            .get("preferred_language")
+            .and_then(Json::as_str)
+            .filter(|code| LANGUAGES.contains(code))
+            .map(str::to_owned),
+        receive_list_copy: preferences.get("receive_list_copy").and_then(Json::as_bool),
+        receive_own_postings: preferences
+            .get("receive_own_postings")
+            .and_then(Json::as_bool),
+        delivery_mode: preferences
+            .get("delivery_mode")
+            .and_then(Json::as_str)
+            .and_then(|mode| mode.parse::<DeliveryMode>().ok()),
+        delivery_status: preferences
+            .get("delivery_status")
+            .and_then(Json::as_str)
+            .and_then(|status| status.parse::<DeliveryStatus>().ok()),
+    }
 }
 
 /// A collection, page by page: Mailman answers `entries`, `start` and
@@ -517,8 +613,22 @@ pub fn plan(site: &Site) -> Plan3 {
     let mut plan = Plan3 {
         domains: site.domains.clone(),
         site_bans: site.site_bans.clone(),
+        users: site.users.clone(),
         ..Plan3::default()
     };
+    for user in &site.users {
+        if !user.has_password {
+            continue;
+        }
+        let who = user
+            .preferred
+            .clone()
+            .or_else(|| user.addresses.first().map(|address| address.email.clone()))
+            .unwrap_or_else(|| user.user_id.clone());
+        plan.warnings.push(format!(
+            "{who}: the account's password is hashed by Mailman and cannot be carried over; the account is imported without a usable password and its owner sets one through the recovery flow"
+        ));
+    }
     for list in &site.lists {
         let mut settings = Map::new();
         for (key, value) in &list.config {
@@ -554,9 +664,17 @@ pub fn plan(site: &Site) -> Plan3 {
             ));
         }
         for member in &list.members {
-            if member.subscription_mode != "as_address" {
+            if member.subscription_mode == "as_address" {
+                continue;
+            }
+            let known = site.users.iter().any(|user| {
+                user.addresses
+                    .iter()
+                    .any(|address| address.email == member.email)
+            });
+            if !known {
                 plan.warnings.push(format!(
-                    "{}: {} is subscribed {} in Mailman; imported as the address, with no user account",
+                    "{}: {} is subscribed {} in Mailman, whose account this import did not see; subscribed as the address",
                     list.list_id.as_str(),
                     member.email,
                     member.subscription_mode
@@ -656,6 +774,9 @@ pub async fn apply(db: &Database, plan: &Plan3, context: &AuditContext) -> Resul
             Err(error) => return Err(error.into()),
         }
     }
+    for user in &plan.users {
+        apply_user(db, user, context, &mut report).await?;
+    }
     for ban in &plan.site_bans {
         match db.bans().site_get(ban).await {
             Ok(_) => {}
@@ -673,6 +794,61 @@ pub async fn apply(db: &Database, plan: &Plan3, context: &AuditContext) -> Resul
         .record_with_context(context, "site.import3", "site", "", report.to_json())
         .await?;
     Ok(report)
+}
+
+/// One account: created with its addresses when none of them is here
+/// yet, skipped when any already belongs to an account (the site this
+/// import writes into wins).
+async fn apply_user(
+    db: &Database,
+    user: &User3,
+    context: &AuditContext,
+    report: &mut Report3,
+) -> Result<()> {
+    if user.addresses.is_empty() {
+        report.warnings.push(format!(
+            "the Mailman account {} has no address and cannot be imported",
+            user.user_id
+        ));
+        return Ok(());
+    }
+    for address in &user.addresses {
+        if db.address_has_account(&address.email).await? {
+            report.skipped += 1;
+            return Ok(());
+        }
+    }
+    let imported = ImportedUser {
+        display_name: user.display_name.clone(),
+        is_server_owner: user.is_server_owner,
+        locale: user
+            .preferences
+            .preferred_language
+            .clone()
+            .unwrap_or_else(|| "en".into()),
+        addresses: user
+            .addresses
+            .iter()
+            .map(|address| ImportedAddress {
+                email: address.email.clone(),
+                display_name: address.display_name.clone(),
+                verified: address.verified,
+            })
+            .collect(),
+        preferred: user.preferred.clone(),
+    };
+    let created = db
+        .users()
+        .create_imported_with_context(imported, context)
+        .await?;
+    if user.preferences != Preferences::default() {
+        db.preferences()
+            .set_user_with_context(created.id, user.preferences.clone(), context)
+            .await?;
+    }
+    report.users += 1;
+    report.addresses += user.addresses.len();
+    Ok(())
 }
 
 async fn apply_list(
@@ -769,7 +945,13 @@ async fn apply_members(
                     list_id: list.list_id.clone(),
                     email: entry.email.clone(),
                     role: entry.role,
-                    subscription_mode: SubscriptionMode::AsAddress,
+                    subscription_mode: if entry.subscription_mode == "as_user"
+                        && db.address_has_account(&entry.email).await?
+                    {
+                        SubscriptionMode::AsUser
+                    } else {
+                        SubscriptionMode::AsAddress
+                    },
                     display_name: entry.display_name.clone(),
                 },
                 true,

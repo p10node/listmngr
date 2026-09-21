@@ -202,6 +202,12 @@ def populate(rest):
         pre_confirmed="True",
         pre_approved="True",
     )
+    rest.patch(user["self_link"] + "/preferences", preferred_language="en", hide_address="True")
+    # A second account: a server owner with an address it never verified.
+    rest.post("users", email="eve@example.invalid", display_name="Eve", password="y" * 12)
+    eve = rest.get("users/eve@example.invalid")
+    rest.post(eve["self_link"] + "/addresses", email="eve@spare.invalid")
+    rest.patch(eve["self_link"], is_server_owner="True")
 
 
 def dump(rest):
@@ -230,6 +236,21 @@ def dump(rest):
         body = rest.get(path)
         (OUT / f"{name}.json").write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
         print(name, path)
+    # Every user, with the resources that hang off it.
+    addresses, preferences, preferred = {}, {}, {}
+    for user in rest.get("users")["entries"]:
+        uid = user["user_id"]
+        addresses[uid] = rest.get(f"users/{uid}/addresses")
+        preferences[uid] = rest.get(f"users/{uid}/preferences")
+        status, body = rest.request("GET", f"users/{uid}/preferred_address")
+        preferred[uid] = body if status == 200 else None
+    for name, data in (
+        ("user-addresses", addresses),
+        ("user-preferences", preferences),
+        ("user-preferred", preferred),
+    ):
+        (OUT / f"{name}.json").write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        print(name, len(data))
     # Every member's preferences, by the member id the roster gives.
     preferences = {}
     for role in ("member", "owner", "moderator", "nonmember"):
