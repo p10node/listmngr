@@ -13,7 +13,11 @@ use listmngr_core::{
     SubscriptionMode,
 };
 use listmngr_db::header_matches::HeaderMatchRow;
-use listmngr_db::{AuditContext, Database, ImportedAddress, ImportedUser, NewList, NewMember};
+use listmngr_db::workflows::SubscriptionAction;
+use listmngr_db::{
+    AuditContext, Database, ImportedAddress, ImportedHold, ImportedRequest, ImportedUser, NewList,
+    NewMember,
+};
 use serde_json::{Map, Value as Json, json};
 
 /// Where the site is read from: the REST client, or a recorded site in
@@ -57,6 +61,31 @@ pub struct User3 {
     pub preferences: Preferences,
 }
 
+/// A message the core is holding for a moderator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hold3 {
+    pub sender: String,
+    pub subject: String,
+    pub reason: String,
+    /// When the core held it, in milliseconds.
+    pub hold_date: i64,
+    /// The message as the core kept it.
+    pub raw: Vec<u8>,
+}
+
+/// A subscription change the core has not decided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Request3 {
+    pub email: String,
+    pub display_name: String,
+    /// Mailman's `subscription` or `unsubscription`.
+    pub action: String,
+    /// Mailman's `moderator` (a moderator decides) or `subscriber` (a
+    /// confirmation is out).
+    pub token_owner: String,
+    pub requested_at: i64,
+}
+
 /// A domain of the Mailman site.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Domain3 {
@@ -91,6 +120,8 @@ pub struct List3 {
     pub header_matches: Vec<HeaderMatchRow>,
     /// `(template name, URI)`; Mailman keeps only the URI.
     pub uris: Vec<(String, String)>,
+    pub held: Vec<Hold3>,
+    pub requests: Vec<Request3>,
 }
 
 /// The whole site.
@@ -113,6 +144,10 @@ pub struct ListPlan3 {
     pub bans: Vec<String>,
     pub header_matches: Vec<HeaderMatchRow>,
     pub members: Vec<Member3>,
+    pub held: Vec<Hold3>,
+    /// Only the requests a moderator has to decide: a confirmation the
+    /// subscriber owes belongs to the token the other system issued.
+    pub requests: Vec<Request3>,
 }
 
 /// What an import will write.
@@ -151,6 +186,11 @@ impl Plan3 {
                 "settings": list.settings,
                 "bans": list.bans,
                 "header_matches": list.header_matches,
+                "held": list.held.len(),
+                "requests": list.requests.iter().map(|request| json!({
+                    "email": request.email,
+                    "action": request.action,
+                })).collect::<Vec<_>>(),
                 "members": list.members.iter().map(|member| json!({
                     "email": member.email,
                     "role": member.role.as_str(),
@@ -180,6 +220,8 @@ pub struct Report3 {
     pub bans: usize,
     pub site_bans: usize,
     pub header_matches: usize,
+    pub held: usize,
+    pub requests: usize,
     pub warnings: Vec<String>,
 }
 
@@ -201,6 +243,8 @@ impl Report3 {
             "bans": self.bans,
             "site_bans": self.site_bans,
             "header_matches": self.header_matches,
+            "held": self.held,
+            "requests": self.requests,
             "warnings": self.warnings,
         })
     }
@@ -496,6 +540,37 @@ async fn one_list<S: Source + Sync>(source: &S, list_id: &ListId, entry: &Json) 
         };
         uris.push((name.to_owned(), uri.to_owned()));
     }
+    let mut held = Vec::new();
+    for found in collection(source, &format!("lists/{id}/held")).await? {
+        held.push(Hold3 {
+            sender: text(&found, "sender"),
+            subject: text(&found, "subject"),
+            reason: found
+                .get("moderation_reasons")
+                .and_then(Json::as_array)
+                .map(|reasons| {
+                    reasons
+                        .iter()
+                        .filter_map(Json::as_str)
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
+                .filter(|reason| !reason.is_empty())
+                .unwrap_or_else(|| text(&found, "reason")),
+            hold_date: milliseconds(&text(&found, "hold_date")),
+            raw: text(&found, "msg").into_bytes(),
+        });
+    }
+    let mut requests = Vec::new();
+    for found in collection(source, &format!("lists/{id}/requests")).await? {
+        requests.push(Request3 {
+            email: text(&found, "email").to_lowercase(),
+            display_name: text(&found, "display_name"),
+            action: text(&found, "type"),
+            token_owner: text(&found, "token_owner"),
+            requested_at: milliseconds(&text(&found, "when")),
+        });
+    }
     Ok(List3 {
         list_id: list_id.clone(),
         mail_host: text(entry, "mail_host"),
@@ -505,7 +580,19 @@ async fn one_list<S: Source + Sync>(source: &S, list_id: &ListId, entry: &Json) 
         bans,
         header_matches,
         uris,
+        held,
+        requests,
     })
+}
+
+/// A Mailman timestamp (`2026-09-21T11:49:26.586592`, no zone: the core
+/// writes UTC) in milliseconds; an unreadable one is "now", so a hold
+/// still comes over.
+fn milliseconds(stamp: &str) -> i64 {
+    chrono::NaiveDateTime::parse_from_str(stamp, "%Y-%m-%dT%H:%M:%S%.f").map_or_else(
+        |_| chrono::Utc::now().timestamp_millis(),
+        |naive| naive.and_utc().timestamp_millis(),
+    )
 }
 
 async fn one_member<S: Source + Sync>(
@@ -681,6 +768,19 @@ pub fn plan(site: &Site) -> Plan3 {
                 ));
             }
         }
+        let mut requests = Vec::new();
+        for request in &list.requests {
+            if request.token_owner == "moderator" {
+                requests.push(request.clone());
+                continue;
+            }
+            plan.warnings.push(format!(
+                "{}: {} still had to confirm a {} in Mailman; that confirmation token belongs to the old site and cannot be carried over, so the request is not imported",
+                list.list_id.as_str(),
+                request.email,
+                request.action
+            ));
+        }
         plan.lists.push(ListPlan3 {
             list_id: list.list_id.clone(),
             mail_host: list.mail_host.clone(),
@@ -689,6 +789,8 @@ pub fn plan(site: &Site) -> Plan3 {
             bans: list.bans.clone(),
             header_matches: list.header_matches.clone(),
             members: list.members.clone(),
+            held: list.held.clone(),
+            requests,
         });
     }
     plan
@@ -903,7 +1005,88 @@ async fn apply_list(
             .await?;
         report.header_matches += 1;
     }
-    apply_members(db, list, context, report).await
+    apply_members(db, list, context, report).await?;
+    apply_waiting(db, list, context, report).await
+}
+
+/// What the other site was still holding: the messages, then the
+/// requests a moderator has to decide. A message already held here is
+/// left alone, and so is a request for an address that is waiting
+/// already, so an import can be run again.
+async fn apply_waiting(
+    db: &Database,
+    list: &ListPlan3,
+    context: &AuditContext,
+    report: &mut Report3,
+) -> Result<()> {
+    for hold in &list.held {
+        match db
+            .moderation()
+            .hold_imported_with_context(
+                ImportedHold {
+                    list_id: &list.list_id,
+                    raw: &hold.raw,
+                    sender: &hold.sender,
+                    subject: &hold.subject,
+                    reason: &hold.reason,
+                    hold_date: hold.hold_date,
+                },
+                context,
+            )
+            .await
+        {
+            Ok(_) => report.held += 1,
+            Err(listmngr_core::Error::Conflict(_)) => report.skipped += 1,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    if list.requests.is_empty() {
+        return Ok(());
+    }
+    let waiting = db
+        .workflows()
+        .pending(
+            &list.list_id,
+            listmngr_db::workflows::RequestFilter::default(),
+        )
+        .await?;
+    for request in &list.requests {
+        if waiting
+            .iter()
+            .any(|pending| pending.email.to_lowercase() == request.email)
+        {
+            report.skipped += 1;
+            continue;
+        }
+        let action = if request.action == "unsubscription" {
+            SubscriptionAction::Leave
+        } else {
+            SubscriptionAction::Join
+        };
+        match db
+            .workflows()
+            .import_request_with_context(
+                ImportedRequest {
+                    list_id: &list.list_id,
+                    email: &request.email,
+                    display_name: &request.display_name,
+                    action,
+                    requested_at: request.requested_at,
+                },
+                context,
+            )
+            .await
+        {
+            Ok(_) => report.requests += 1,
+            Err(listmngr_core::Error::Validation(reason)) => report.warnings.push(format!(
+                "{}: the waiting request of {} was not imported: {reason}",
+                list.list_id.as_str(),
+                request.email
+            )),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 async fn apply_members(

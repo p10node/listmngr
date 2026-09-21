@@ -52,6 +52,8 @@ impl Recorded {
                 "header-matches",
             ),
             ("lists/rust-users.example.invalid/uris", "uris"),
+            ("lists/rust-users.example.invalid/held", "held"),
+            ("lists/rust-users.example.invalid/requests", "requests"),
             ("lists/announce.other.invalid/config", "announce-config"),
             (
                 "lists/announce.other.invalid/roster/member",
@@ -75,6 +77,8 @@ impl Recorded {
                 "announce-header-matches",
             ),
             ("lists/announce.other.invalid/uris", "announce-uris"),
+            ("lists/announce.other.invalid/held", "announce-held"),
+            ("lists/announce.other.invalid/requests", "announce-requests"),
         ]);
         Self { answers }
     }
@@ -209,7 +213,7 @@ async fn the_accounts_come_with_their_addresses_and_the_one_they_prefer() {
     let site = recorded_site().await;
     // Mailman has a user behind every address, so the ones it made for
     // plain subscribers come too — eight in all for this site.
-    assert_eq!(site.users.len(), 8, "{:?}", site.users);
+    assert_eq!(site.users.len(), 9, "{:?}", site.users);
     let user = |email: &str| {
         site.users
             .iter()
@@ -237,6 +241,42 @@ async fn the_accounts_come_with_their_addresses_and_the_one_they_prefer() {
     let alice = user("alice@example.invalid");
     assert_eq!(alice.display_name, "Alice Nguyễn");
     assert!(!alice.has_password);
+}
+
+/// What the old site was still holding: a post waiting for a moderator
+/// and a join nobody had answered.
+#[tokio::test]
+async fn what_was_waiting_on_the_old_site_comes_too() {
+    let site = recorded_site().await;
+    let announce = site
+        .lists
+        .iter()
+        .find(|list| list.list_id.as_str() == "announce.other.invalid")
+        .unwrap();
+    assert_eq!(announce.held.len(), 1);
+    let held = &announce.held[0];
+    assert_eq!(held.sender, "stranger@example.invalid");
+    assert_eq!(held.subject, "Please let me in");
+    assert_eq!(held.reason, "The message is not from a list member");
+    assert!(held.hold_date > 1_700_000_000_000, "{}", held.hold_date);
+    assert!(
+        String::from_utf8_lossy(&held.raw).contains("Message-ID: <held-1@example.invalid>"),
+        "the message itself, as the core kept it"
+    );
+    assert_eq!(announce.requests.len(), 1);
+    let request = &announce.requests[0];
+    assert_eq!(request.email, "wanted@example.invalid");
+    assert_eq!(request.display_name, "Wanted");
+    assert_eq!(request.action, "subscription");
+    assert_eq!(request.token_owner, "moderator");
+    assert!(request.requested_at > 1_700_000_000_000);
+    // The other list had nothing waiting.
+    let rust = site
+        .lists
+        .iter()
+        .find(|list| list.list_id.as_str() == "rust-users.example.invalid")
+        .unwrap();
+    assert!(rust.held.is_empty() && rust.requests.is_empty());
 }
 
 #[tokio::test]
@@ -354,11 +394,43 @@ async fn the_snapshot_plans_this_sites_settings() {
     );
 }
 
+/// A confirmation the subscriber still owed cannot be carried over: the
+/// token was issued by the other system.
+#[tokio::test]
+async fn a_confirmation_the_subscriber_owed_is_a_warning() {
+    let mut site = recorded_site().await;
+    let announce = site
+        .lists
+        .iter_mut()
+        .find(|list| list.list_id.as_str() == "announce.other.invalid")
+        .unwrap();
+    let mut owed = announce.requests[0].clone();
+    owed.email = "unconfirmed@example.invalid".into();
+    owed.token_owner = "subscriber".into();
+    announce.requests.push(owed);
+    let plan = plan(&site);
+    let announce = plan
+        .lists
+        .iter()
+        .find(|list| list.list_id.as_str() == "announce.other.invalid")
+        .unwrap();
+    assert_eq!(announce.requests.len(), 1, "only the moderator's");
+    assert_eq!(announce.requests[0].email, "wanted@example.invalid");
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|warning| warning.contains("unconfirmed@example.invalid")
+                && warning.contains("confirm")),
+        "{:?}",
+        plan.warnings
+    );
+}
+
 /// What the accounts plan, and what cannot come with them.
 #[tokio::test]
 async fn the_plan_carries_the_accounts_without_their_passwords() {
     let plan = plan(&recorded_site().await);
-    assert_eq!(plan.users.len(), 8);
+    assert_eq!(plan.users.len(), 9);
     let dave = plan
         .users
         .iter()
@@ -411,7 +483,7 @@ async fn scenario(db: &Database) {
     let report = apply(db, &plan, &AuditContext::system()).await.unwrap();
     for (counted, expected) in [
         (report.domains, 2),
-        (report.users, 8),
+        (report.users, 9),
         (report.lists, 2),
         (report.members, 4),
         (report.owners, 1),
@@ -420,6 +492,8 @@ async fn scenario(db: &Database) {
         (report.bans, 2),
         (report.site_bans, 1),
         (report.header_matches, 2),
+        (report.held, 1),
+        (report.requests, 1),
         (report.skipped, 0),
     ] {
         assert_eq!(counted, expected, "{report:?}");
@@ -428,6 +502,7 @@ async fn scenario(db: &Database) {
     accounts_applied(db).await;
     rosters_applied(db).await;
     lists_applied(db).await;
+    waiting_applied(db).await;
     // A second import changes nothing and says what it skipped.
     let again = apply(db, &plan, &AuditContext::system()).await.unwrap();
     assert_eq!(again.domains, 0, "{again:?}");
@@ -437,9 +512,11 @@ async fn scenario(db: &Database) {
     assert_eq!(again.bans, 0);
     assert_eq!(again.site_bans, 0);
     assert_eq!(again.header_matches, 0);
-    // Two domains, eight accounts, two lists and seven members were all
-    // there already.
-    assert_eq!(again.skipped, 19);
+    assert_eq!(again.held, 0, "a message already held is not held twice");
+    assert_eq!(again.requests, 0);
+    // Two domains, nine accounts, two lists, seven members, the held
+    // message and the waiting request were all there already.
+    assert_eq!(again.skipped, 22);
 }
 
 /// The domains and both lists, with the settings the core gave.
@@ -550,6 +627,35 @@ async fn rosters_applied(db: &Database) {
     );
 }
 
+/// What was waiting, waiting here now.
+async fn waiting_applied(db: &Database) {
+    let announce: ListId = "announce.other.invalid".parse().unwrap();
+    let held = db.moderation().list_pending(&announce).await.unwrap();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].sender, "stranger@example.invalid");
+    assert_eq!(held[0].subject, "Please let me in");
+    assert_eq!(held[0].reason, "The message is not from a list member");
+    let stored = db.mail_queue().message(held[0].message_id).await.unwrap();
+    assert!(String::from_utf8_lossy(&stored.raw).contains("Please let me in"));
+    let requests = db
+        .workflows()
+        .pending(&announce, listmngr_db::workflows::RequestFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].email, "wanted@example.invalid");
+    assert_eq!(
+        requests[0].token_owner,
+        listmngr_db::workflows::TokenOwner::Moderator
+    );
+    // An import mails nobody: no notice was queued for either of them.
+    let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM queue_jobs")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(queued, 0);
+}
+
 /// Bans (list and site), header matches, and the audit trail.
 async fn lists_applied(db: &Database) {
     let list: ListId = "rust-users.example.invalid".parse().unwrap();
@@ -584,6 +690,8 @@ async fn lists_applied(db: &Database) {
         "preferences.update",
         "ban.create",
         "list.header_matches",
+        "moderation.import",
+        "subscription.import",
         "site.import3",
     ] {
         assert!(

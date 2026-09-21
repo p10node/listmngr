@@ -84,6 +84,11 @@ impl<'a> ModerationRepo<'a> {
         self.clock = Some(clock);
         self
     }
+    /// The database this repository writes to, for the import module.
+    #[must_use]
+    pub(crate) const fn db(&self) -> &'a Database {
+        self.db
+    }
     #[must_use]
     pub fn live(self) -> Self {
         self.with_clock(&crate::mail_queue::SystemLeaseClock)
