@@ -1,6 +1,6 @@
 # listmngr
 
-## Mailman 3 import over REST (`P6-IMPORT3-REST`) — bounded local acceptance verified
+## Mailman 3 import over REST (`P6-IMPORT3-REST`, `P6-IMPORT3-USERS`) — bounded local acceptance verified
 
 A whole Mailman 3 site moves over from a running core, read-only:
 
@@ -12,13 +12,17 @@ listmngr import3 --rest http://127.0.0.1:8001/3.1 \
     --user restadmin --password-file /protected/path/rest.pass
 ```
 
-The importer reads the core's domains, its site bans, every list (with
-`--list <list_id>` just one) with its `config`, the four rosters with each
-member's own preferences, the list's bans, its header matches and its
-template URIs, and writes them here: the domains, the lists (style
-`legacy-default`, then the imported configuration), the members by
-address with their preferences and their own moderation action, the bans
-and the header matches. Mailman's spellings become this site's — `7d`
+The importer reads the core's domains, its site bans, its accounts (each
+with its addresses, the one it prefers and its own preferences), every
+list (with `--list <list_id>` just one) with its `config`, the four
+rosters with each member's own preferences, the list's bans, its header
+matches and its template URIs, and writes them here: the domains, the accounts (with their
+addresses — an address nobody owns is adopted, one Mailman had verified
+stays verified — and their preferred address), the lists (style
+`legacy-default`, then the imported configuration), the members with
+their preferences and their own moderation action, the bans and the
+header matches. A member Mailman subscribed as a *user* is subscribed
+the same way here, against the imported account. Mailman's spellings become this site's — `7d`
 durations become whole days, a multi-line `acceptable_aliases` becomes
 one alias per line, and the resources Mailman derives (the list's
 addresses, `created_at`, `post_id`, `volume`, `usenet_watermark`) are
@@ -35,12 +39,17 @@ standard error, each write carries its audit event, and one
 `site.import3` event records the report. Running it again leaves
 everything that is already here alone and counts it as `skipped`.
 
-Limits: user accounts, passwords, held messages and pending requests are
-not imported yet, so a member Mailman subscribed as a user becomes an
-address here with a warning; Mailman keeps only a *URI* for each
-template, so each one is reported as a warning to set by hand; a setting
-this site does not have, or a value it cannot take, is a warning and the
-rest of the list still imports. `docs/MIGRATION.md` has the mapping.
+**Passwords do not come over.** Mailman hashes them with passlib, in a
+scheme this site cannot verify, so every imported account is created
+with a random password nobody knows, marked unusable: its owner takes
+the account over through the password-recovery flow, and the import
+warns once per account that had a password (never printing the hash).
+
+Limits: held messages and pending requests are not imported yet; Mailman
+keeps only a *URI* for each template, so each one is reported as a
+warning to set by hand; a setting this site does not have, or a value it
+cannot take, is a warning and the rest of the list still imports.
+`docs/MIGRATION.md` has the mapping.
 
 ## Mailman 2.1 import (`P6-IMPORT21`) — bounded local acceptance verified
 

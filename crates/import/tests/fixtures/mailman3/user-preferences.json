@@ -1,0 +1,39 @@
+{
+  "0a38ab772d0c4c6fa0da2c961da8be82": {
+    "http_etag": "\"96b722b1c1b576a77bea2afd2414d13ceb0b0ebe\"",
+    "self_link": "http://127.0.0.1:8199/3.1/users/0a38ab772d0c4c6fa0da2c961da8be82/preferences"
+  },
+  "2bf0cf475b0f43e1a0de0b742f66e2b8": {
+    "http_etag": "\"6b28497bff9774804aeff49cdb942b81e539092e\"",
+    "preferred_language": "en",
+    "self_link": "http://127.0.0.1:8199/3.1/users/2bf0cf475b0f43e1a0de0b742f66e2b8/preferences"
+  },
+  "30d8c7ee718e481795e1f26e51819b81": {
+    "http_etag": "\"f233b46f8d831da361cb3465ea610caf25f7ebec\"",
+    "self_link": "http://127.0.0.1:8199/3.1/users/30d8c7ee718e481795e1f26e51819b81/preferences"
+  },
+  "588ddb8e9b684d2a993b7470d33a62fb": {
+    "http_etag": "\"61eec8fd7740c1e053b4fa7398eb77b3d5ec7a24\"",
+    "preferred_language": "en",
+    "self_link": "http://127.0.0.1:8199/3.1/users/588ddb8e9b684d2a993b7470d33a62fb/preferences"
+  },
+  "7316ff10a91a4483ae7e9ca756db0b99": {
+    "http_etag": "\"4f9ef48f92a577eeac316ba83790967256b47336\"",
+    "self_link": "http://127.0.0.1:8199/3.1/users/7316ff10a91a4483ae7e9ca756db0b99/preferences"
+  },
+  "8b9b9fe850c34efb9de156fb9c76e7a7": {
+    "http_etag": "\"c0aec426a14d366126b483c4864b5b0b5f2b02ff\"",
+    "preferred_language": "en",
+    "self_link": "http://127.0.0.1:8199/3.1/users/8b9b9fe850c34efb9de156fb9c76e7a7/preferences"
+  },
+  "aa513e5092634ae0896b84dfcc56ffc6": {
+    "http_etag": "\"66b97ffa61d4209e83c3f3f8151d9ded8e7fafef\"",
+    "self_link": "http://127.0.0.1:8199/3.1/users/aa513e5092634ae0896b84dfcc56ffc6/preferences"
+  },
+  "dc0c7c37a1894d698b11d9f6187500e0": {
+    "hide_address": true,
+    "http_etag": "\"80643dbd99eb199d7aa3c8180685b5966e5433cc\"",
+    "preferred_language": "en",
+    "self_link": "http://127.0.0.1:8199/3.1/users/dc0c7c37a1894d698b11d9f6187500e0/preferences"
+  }
+}
