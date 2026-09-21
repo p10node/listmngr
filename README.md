@@ -1,5 +1,39 @@
 # listmngr
 
+## Mailman 2.1 import (`P6-IMPORT21`) — bounded local acceptance verified
+
+A Mailman 2.1 list moves over with its own `config.pck`:
+
+```sh
+listmngr lists create rust-users.example.invalid --display-name Rust
+listmngr import21 rust-users.example.invalid /var/lib/mailman/lists/rust-users/config.pck --dry-run
+listmngr import21 rust-users.example.invalid /var/lib/mailman/lists/rust-users/config.pck
+listmngr archive import rust-users.example.invalid rust-users.mbox
+```
+
+The pickle is read here (protocols 0–2, Python 2 strings, and the
+`Mailman.Bouncer._BounceInfo` instances 2.1 left in `bounce_info`, which
+are ignored as Mailman's own importer ignores them), and the mapping is
+Mailman 3's `import21`: settings with their renames and conversions,
+topics, acceptable aliases, bans, header filter rules as header matches,
+the four decoration templates with their placeholders converted, and the
+rosters — members (regular and digest), owners, moderators, and the
+addresses of the `*_these_nonmembers` lists as nonmembers — each with the
+2.1 option bits, delivery status and language. `--dry-run` prints the
+plan as JSON and changes nothing. Every run prints its report
+(`settings`, `members`, `owners`, `moderators`, `nonmembers`, `skipped`,
+`bans`, `header_matches`, `templates`, `warnings`) on standard output and
+its warnings on standard error, and can be run again: what is already
+there is left alone. Each write carries its audit event, and the import
+adds one `list.import21` event with the report. `docs/MIGRATION.md` has
+the full mapping table.
+
+Limits: the list must exist first (and its domain with it); 2.1
+passwords, `bounce_info` and the moderator password are not imported — a
+warning asks for a new moderator password; a language 2.1 had that this
+site does not is dropped with a warning; members are subscribed by
+address, without user accounts.
+
 ## News to mail (`P6-NNTP-GATENEWS`) — bounded local acceptance verified
 
 Mailman's `gatenews`, the other direction of the gateway. A list with

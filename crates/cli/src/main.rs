@@ -5,6 +5,7 @@ mod archive;
 mod bounce;
 mod digests;
 mod errors;
+mod import21;
 mod nntp;
 mod notify;
 mod queue;
@@ -98,6 +99,17 @@ enum Command {
     Nntp {
         #[command(subcommand)]
         command: nntp::Command,
+    },
+    /// Import a Mailman 2.1 list's `config.pck` into an existing list:
+    /// its settings, bans, header filter rules, decorations and rosters.
+    Import21 {
+        /// The list to import into, e.g. `dev.example.invalid`.
+        list_id: String,
+        /// The 2.1 list's `lists/<name>/config.pck`.
+        path: std::path::PathBuf,
+        /// Print the plan as JSON and change nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 #[derive(Debug, Subcommand)]
@@ -375,6 +387,11 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Aliases { command } => aliases::run(&db, &config, command).await?,
         Command::Archive { command } => archive::run(&db, &config, command).await?,
         Command::Nntp { command } => nntp::run(&db, &config, command).await?,
+        Command::Import21 {
+            list_id,
+            path,
+            dry_run,
+        } => import21::run(&db, &list_id, &path, dry_run).await?,
         Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
             bail!("command does not use database")
         }

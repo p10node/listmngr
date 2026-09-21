@@ -123,7 +123,7 @@ Người đang tìm/đang dùng Mailman có thể chọn listmngr mà **không m
 | Errors/log        | `thiserror`, `anyhow`, `tracing`, `tracing-subscriber`                      | 2 / 1 / 0.1               |                                            |
 | IDs/time          | `uuid` (v7), `chrono`                                                       | 1.26 / 0.4                |                                            |
 | IDN               | `idna`                                                                      | 1.1                       |                                            |
-| Pickle (import21) | `serde-pickle`                                                              | –                         | đọc `config.pck` Mailman 2.1               |
+| Pickle (import21) | reader riêng trong `crates/import` (`pickle.rs`)                            | –                         | `config.pck` Mailman 2.1 (serde-pickle 1.2.0 đọc sai opcode `OBJ`) |
 | Test              | `testcontainers`, `proptest`, `cargo-fuzz`, `insta`, Playwright (dev only)  | –                         |                                            |
 | Supply chain      | `cargo-deny`, `cargo-audit`, `cargo-sbom`, `cosign`                         | –                         |                                            |
 
@@ -963,7 +963,9 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
   - [x] ~~**P6-NNTP-SETTINGS**~~ (xong) (S): settings Usenet trên list (`gateway_to_mail`, `gateway_to_news`, `linked_newsgroup`, `nntp_prefix_subject_too`, `newsgroup_moderation`, `usenet_watermark` read-only; migration 0053), REST hai prefix, rule `news-moderation` trong chain.
   - [x] ~~**P6-NNTP-GATEWAY**~~ (xong) (M): handler `to-usenet` → queue `nntp`; `nntp` runner: `prepare_message` (Approved:, subject prefix, Newsgroups:, Message-ID, Lines:, remove/rewrite headers) và POST qua NNTP client (`[nntp] host/port/user/password`); Message-ID trùng (441) → munge một lần và requeue; server chết → backoff.
   - [x] ~~**P6-NNTP-GATENEWS**~~ (xong) (M): `listmngr nntp gate` + chu kỳ trong `nntp` runner (`[nntp] gatenews_every_secs`): GROUP/ARTICLE qua `Reader`, `nntp::inbound` (`X-Originally-To`, `To` = list, bỏ bài có `List-Id` của list), inject vào `in` với `fromusenet`, watermark từng bài có audit; lần poll đầu chỉ catch-up.
-- [ ] `import21` (`config.pck` via serde-pickle, member lists, mbox) ; `import3` (đọc trực tiếp Mailman 3 DB + HyperKitty DB → mapping; hoặc qua REST)
+- Import từ Mailman, tách thành:
+  - [x] ~~**P6-IMPORT21**~~ (xong) (M): crate `listmngr-import` — `pickle::read` (protocol 0–2, instance `OBJ`/`BUILD`), `Config21`, `plan()` theo `mailman/utilities/importer.py` (settings/topics/aliases/bans/header_filter_rules/templates/rosters), `apply()` audited và chạy lại được, `listmngr import21 <list_id> <config.pck> [--dry-run]`; bảng mapping trong `docs/MIGRATION.md`.
+  - [ ] **P6-IMPORT3** (L): đọc trực tiếp Mailman 3 DB + HyperKitty DB → mapping; hoặc qua REST
 - [ ] `.po` import → 40+ ngôn ngữ templates
 - [ ] Webhooks + deliveries retry; plugins (Rust trait registry: rules/handlers/archivers)
 - [ ] Remote HyperKitty archiver, Exim snippets, built-in inbound SMTP (experimental), S3 message store
@@ -1031,4 +1033,4 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
 | SQLite + Postgres divergence         | test matrix cả 2; hạn chế SQL đặc thù, wrap ở repo layer.                                                   |
 | `sqlx 0.9` / `askama 0.16` API mới   | pin version, ADR ghi lý do; upgrade theo phase.                                                             |
 | Scope UI lớn                         | dùng component partial dùng lại; ưu tiên moderation & settings trước, "nice-to-have" (command palette) sau. |
-| Import 2.1 pickle                    | `serde-pickle` + fixture `config.pck` thật; fallback: script Python export JSON.                            |
+| Import 2.1 pickle                    | reader pickle riêng (`crates/import/src/pickle.rs`) + fixture `config.pck` thật của Mailman 3 (`MAILMAN_TESTING_DIR`).                            |
