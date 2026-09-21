@@ -6,15 +6,15 @@
       "delivery_mode": "plaintext_digests",
       "display_name": "Alice Nguy\u1ec5n",
       "email": "alice@example.invalid",
-      "http_etag": "\"8e22c06c8aa54c6f39e1d742e44b56aa01619ca8\"",
+      "http_etag": "\"adfa83cf00488ff676e6746d5fb42ecabe4fbd61\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "44d8730e6e95466fa9c8f57e3ebc28c3",
+      "member_id": "ad0dce9201074e0b87fa2dde62d4d4cb",
       "role": "member",
-      "self_link": "http://127.0.0.1:8199/3.1/members/44d8730e6e95466fa9c8f57e3ebc28c3",
+      "self_link": "http://127.0.0.1:8199/3.1/members/ad0dce9201074e0b87fa2dde62d4d4cb",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/aa513e5092634ae0896b84dfcc56ffc6"
+      "user": "http://127.0.0.1:8199/3.1/users/e8c358f9d436496095d334f3b6591253"
     },
     {
       "address": "http://127.0.0.1:8199/3.1/addresses/bob@example.invalid",
@@ -22,16 +22,16 @@
       "delivery_mode": "regular",
       "display_name": "Bob",
       "email": "bob@example.invalid",
-      "http_etag": "\"05f6f8702b7901049a90c12b2ac3e882134c6b9a\"",
+      "http_etag": "\"6532a5749e898abd86144752f3c9f7480d1a7f04\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "d9a31fe2012240c5a9d104a64a5b6b4a",
+      "member_id": "278209c340a34e6ba2d1a6114f0f6eb0",
       "moderation_action": "hold",
       "role": "member",
-      "self_link": "http://127.0.0.1:8199/3.1/members/d9a31fe2012240c5a9d104a64a5b6b4a",
+      "self_link": "http://127.0.0.1:8199/3.1/members/278209c340a34e6ba2d1a6114f0f6eb0",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/30d8c7ee718e481795e1f26e51819b81"
+      "user": "http://127.0.0.1:8199/3.1/users/1e87e867719d4e8f9383814a40ee90fb"
     },
     {
       "address": "http://127.0.0.1:8199/3.1/addresses/carol@elsewhere.invalid",
@@ -39,15 +39,15 @@
       "delivery_mode": "regular",
       "display_name": "",
       "email": "carol@elsewhere.invalid",
-      "http_etag": "\"c685b6b16b21043fbc541b185550e32b28f17e53\"",
+      "http_etag": "\"5204be02ccfe4dfe83dbdca9faad50e5c62d2049\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "17a0358008714120b1fd1f78428dc46f",
+      "member_id": "5b31181c3c4a45ca81837bb231aff2c6",
       "role": "member",
-      "self_link": "http://127.0.0.1:8199/3.1/members/17a0358008714120b1fd1f78428dc46f",
+      "self_link": "http://127.0.0.1:8199/3.1/members/5b31181c3c4a45ca81837bb231aff2c6",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/7316ff10a91a4483ae7e9ca756db0b99"
+      "user": "http://127.0.0.1:8199/3.1/users/27216dba45c147be92eec79ce4a4fea8"
     },
     {
       "address": "http://127.0.0.1:8199/3.1/addresses/dave@example.invalid",
@@ -55,18 +55,18 @@
       "delivery_mode": "regular",
       "display_name": "Dave",
       "email": "dave@example.invalid",
-      "http_etag": "\"a30cdb4883ca7795f2da7f2b64af27fe044032b9\"",
+      "http_etag": "\"522de2e5f708226a30b4688a97aeb53fd22d83bf\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "6c356f5c35354ef3b02f0268f091ebe0",
+      "member_id": "593f28963b874eb291a1506ff2ebea7e",
       "role": "member",
-      "self_link": "http://127.0.0.1:8199/3.1/members/6c356f5c35354ef3b02f0268f091ebe0",
+      "self_link": "http://127.0.0.1:8199/3.1/members/593f28963b874eb291a1506ff2ebea7e",
       "subscription_mode": "as_user",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/dc0c7c37a1894d698b11d9f6187500e0"
+      "user": "http://127.0.0.1:8199/3.1/users/8470d847368f45d7868a434b2b9ad856"
     }
   ],
-  "http_etag": "\"42c6a451bacc7bcda6474794729c6978d630bb51\"",
+  "http_etag": "\"4a58429ddc5662815b7723a40f77da9aa1cf68bd\"",
   "start": 0,
   "total_size": 4
 }

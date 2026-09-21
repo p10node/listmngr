@@ -15,6 +15,7 @@ workspace = true
 listmngr-core = { path = "../core", version = "0.1.0" }
 listmngr-db = { path = "../db", version = "0.1.0" }
 listmngr-mail = { path = "../mail", version = "0.1.0" }
+chrono.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls-webpki-roots"] }
 serde_json.workspace = true

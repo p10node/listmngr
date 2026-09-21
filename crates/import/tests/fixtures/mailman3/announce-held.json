@@ -1,0 +1,42 @@
+{
+  "entries": [
+    {
+      "_parsemsg": false,
+      "envsender": "noreply@other.invalid",
+      "hold_date": "2026-09-21T11:49:26.586592",
+      "http_etag": "\"31a0087eb49455976ad38009c3710bc694c92a03\"",
+      "lang": "en",
+      "listid": "announce.other.invalid",
+      "member_moderation_action": "hold",
+      "message_id": "<held-1@example.invalid>",
+      "moderation_reasons": [
+        "The message is not from a list member"
+      ],
+      "moderation_sender": "stranger@example.invalid",
+      "msg": "From: stranger@example.invalid\nTo: announce@other.invalid\nSubject: Please let me in\nMessage-ID: <held-1@example.invalid>\nDate: Mon, 21 Sep 2026 09:00:00 +0000\nX-Mailman-Rule-Hits: nonmember-moderation\nX-Mailman-Rule-Misses: dmarc-mitigation; no-senders; approved; loop; banned-address; emergency; member-moderation\nMessage-ID-Hash: JO3FPU5E5P46AIKO2SWXPXY5QWDPFO4O\nX-Message-ID-Hash: JO3FPU5E5P46AIKO2SWXPXY5QWDPFO4O\n\nA post that waits for a moderator.\n",
+      "original_size": 297,
+      "original_subject": "Please let me in",
+      "reason": "The message is not from a list member",
+      "request_id": 1,
+      "rule_hits": [
+        "nonmember-moderation"
+      ],
+      "rule_misses": [
+        "dmarc-mitigation",
+        "no-senders",
+        "approved",
+        "loop",
+        "banned-address",
+        "emergency",
+        "member-moderation"
+      ],
+      "self_link": "http://127.0.0.1:8199/3.1/lists/announce.other.invalid/held/1",
+      "sender": "stranger@example.invalid",
+      "subject": "Please let me in",
+      "version": 3
+    }
+  ],
+  "http_etag": "\"d33926640e92d381307d4203b33910ece81c2310\"",
+  "start": 0,
+  "total_size": 1
+}

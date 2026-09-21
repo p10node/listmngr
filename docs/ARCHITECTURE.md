@@ -17,7 +17,8 @@ gave without a server.
 `lists?advertised=false` (or one list), and for each list its
 `config`, the four rosters, each member's own `preferences`
 (`members/<id>/preferences`, which Mailman answers sparsely), the list's
-`bans`, its `header-matches` and its `uris`. `collection` reads
+`bans`, its `header-matches`, its `uris`, its `held` and its `requests`.
+`collection` reads
 Mailman's envelope (`entries`, `start`, `total_size`) and pages with
 `count`/`page` until it has them all. The result is a `Site` of
 `Domain3`/`List3`/`Member3`, Mailman's own names and values.
@@ -43,6 +44,19 @@ verified here, an address owned by another account a `Conflict` that
 writes nothing), every membership of those addresses given the account,
 the preferred address, and one `user.import` audit event that names the
 addresses and records `usable_password: false` — never hash material.
+What the core was still holding goes through
+`crates/db/src/moderation_import.rs`:
+`ModerationRepo::hold_imported_with_context` stores the message bytes
+(`message_blobs`/`messages`, context `imported: true`), inserts the
+`held_messages` row with the core's own `hold_date`, refuses a message
+already held on that list, audits `moderation.import` — never
+`moderation.hold` — and queues no notice, so nobody is mailed by a
+migration; `WorkflowRepo::import_request_with_context` inserts a
+`subscription_workflows` row in `pending_moderation` with a token hash
+nobody holds, refuses a banned address, and audits
+`subscription.import`. `import3::plan` keeps only the requests whose
+`token_owner` is `moderator` and reports the confirmations the
+subscriber still owed, whose tokens belong to the other site.
 A member Mailman had `as_user` is then subscribed `SubscriptionMode::AsUser`,
 so `Member::user_id` carries the account and the user preference layer
 applies as it does for an account made here.

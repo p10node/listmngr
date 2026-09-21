@@ -6,16 +6,16 @@
       "delivery_mode": "regular",
       "display_name": "",
       "email": "owner@example.invalid",
-      "http_etag": "\"972912b857de541d9d312092d89685cb1e701bcf\"",
+      "http_etag": "\"ac61b778f59d2fe31ae963f84bc7acf5ec6620f9\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "f5799ea4ecd9448e9c0af089b5ce3d63",
+      "member_id": "c84a53880c764a01840112e1fec69372",
       "moderation_action": "accept",
       "role": "owner",
-      "self_link": "http://127.0.0.1:8199/3.1/members/f5799ea4ecd9448e9c0af089b5ce3d63",
+      "self_link": "http://127.0.0.1:8199/3.1/members/c84a53880c764a01840112e1fec69372",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/8b9b9fe850c34efb9de156fb9c76e7a7"
+      "user": "http://127.0.0.1:8199/3.1/users/6fc1a57f66164a228bf0ded53bc72579"
     },
     {
       "address": "http://127.0.0.1:8199/3.1/addresses/mod@example.invalid",
@@ -23,19 +23,19 @@
       "delivery_mode": "regular",
       "display_name": "",
       "email": "mod@example.invalid",
-      "http_etag": "\"130f2838cf51d221064a28acc247eee00578236d\"",
+      "http_etag": "\"5945504dc7aaac6ad185de78b26ea906cab3f2c6\"",
       "last_warning_sent": "0001-01-01T00:00:00",
       "list_id": "rust-users.example.invalid",
-      "member_id": "443635ba30534189bc680d8332bc60c1",
+      "member_id": "127a5cbc1f724bc2b3d3671ac9926372",
       "moderation_action": "accept",
       "role": "moderator",
-      "self_link": "http://127.0.0.1:8199/3.1/members/443635ba30534189bc680d8332bc60c1",
+      "self_link": "http://127.0.0.1:8199/3.1/members/127a5cbc1f724bc2b3d3671ac9926372",
       "subscription_mode": "as_address",
       "total_warnings_sent": 0,
-      "user": "http://127.0.0.1:8199/3.1/users/588ddb8e9b684d2a993b7470d33a62fb"
+      "user": "http://127.0.0.1:8199/3.1/users/da5c38c07c7447838c930944c87202e4"
     }
   ],
-  "http_etag": "\"a29b397cc79848aeb0fe672027c9eaa2c73d8021\"",
+  "http_etag": "\"a976587e43a395cc7f9b0454489a81573166d9cf\"",
   "start": 0,
   "total_size": 6
 }

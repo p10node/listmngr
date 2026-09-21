@@ -17,6 +17,7 @@ Writes `crates/import/tests/fixtures/mailman3/<name>.json`.
 """
 import argparse
 import base64
+import time
 import json
 import urllib.error
 import urllib.request
@@ -56,7 +57,7 @@ class Rest:
 
     def post(self, path, **data):
         status, body = self.request("POST", path, data)
-        assert status in (200, 201, 204), (path, status, body)
+        assert status in (200, 201, 202, 204), (path, status, body)
         return body
 
     def patch(self, path, **data):
@@ -210,6 +211,45 @@ def populate(rest):
     rest.patch(eve["self_link"], is_server_owner="True")
 
 
+def waiting(rest):
+    """Leave a held message and an undecided subscription behind, the way
+    a site being migrated has them: a post from a stranger to a list that
+    holds non-member posts, and a join a moderator has not answered."""
+    rest.patch(
+        "lists/announce.other.invalid/config",
+        default_nonmember_action="hold",
+        subscription_policy="moderate",
+    )
+    rest.post(
+        "queues/in",
+        list_id="announce.other.invalid",
+        text=(
+            "From: stranger@example.invalid\n"
+            "To: announce@other.invalid\n"
+            "Subject: Please let me in\n"
+            "Message-ID: <held-1@example.invalid>\n"
+            "Date: Mon, 21 Sep 2026 09:00:00 +0000\n"
+            "\n"
+            "A post that waits for a moderator.\n"
+        ),
+    )
+    rest.post(
+        "members",
+        list_id="announce.other.invalid",
+        subscriber="wanted@example.invalid",
+        display_name="Wanted",
+        role="member",
+        pre_verified="True",
+        pre_confirmed="True",
+    )
+    # The `in` runner has to see the injected message before it is held.
+    for _ in range(50):
+        time.sleep(0.2)
+        if rest.get("lists/announce.other.invalid/held")["total_size"]:
+            return
+    raise AssertionError("the core did not hold the injected message")
+
+
 def dump(rest):
     OUT.mkdir(parents=True, exist_ok=True)
     wanted = {
@@ -231,6 +271,10 @@ def dump(rest):
         "announce-bans": "lists/announce.other.invalid/bans",
         "announce-header-matches": "lists/announce.other.invalid/header-matches",
         "announce-uris": "lists/announce.other.invalid/uris",
+        "held": "lists/rust-users.example.invalid/held",
+        "requests": "lists/rust-users.example.invalid/requests",
+        "announce-held": "lists/announce.other.invalid/held",
+        "announce-requests": "lists/announce.other.invalid/requests",
     }
     for name, path in wanted.items():
         body = rest.get(path)
@@ -272,6 +316,7 @@ def main():
     rest = Rest(args.url, args.user, args.password)
     if not args.no_populate:
         populate(rest)
+        waiting(rest)
     dump(rest)
 
 

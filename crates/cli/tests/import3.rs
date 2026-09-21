@@ -65,6 +65,8 @@ fn answer(path: &str) -> String {
                     if prefix.is_empty() { "-list" } else { "" }
                 )),
                 "header-matches" => read(&format!("{prefix}header-matches")),
+                "held" => read(&format!("{prefix}held")),
+                "requests" => read(&format!("{prefix}requests")),
                 "uris" => read(&format!("{prefix}uris")),
                 tail if tail.starts_with("roster/") => {
                     let role = tail.trim_start_matches("roster/");
@@ -188,17 +190,19 @@ fn import3_plans_dry_then_writes_the_site_it_read() {
     assert!(output.status.success(), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
     assert_eq!(report["domains"], 2);
-    assert_eq!(report["users"], 8);
+    assert_eq!(report["users"], 9);
     assert_eq!(report["lists"], 2);
     assert_eq!(report["members"], 4);
     assert_eq!(report["owners"], 1);
     assert_eq!(report["site_bans"], 1);
     assert_eq!(report["header_matches"], 2);
+    assert_eq!(report["held"], 1);
+    assert_eq!(report["requests"], 1);
     let output = run(vec![]);
     assert!(output.status.success(), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
     assert_eq!(report["lists"], 0);
     assert_eq!(report["members"], 0);
-    assert_eq!(report["skipped"], 19);
+    assert_eq!(report["skipped"], 22);
     drop(rt);
 }
