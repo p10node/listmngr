@@ -1,5 +1,47 @@
 # Architecture
 
+## Mailman 2.1 import — bounded local acceptance verified
+
+`crates/import` (`listmngr-import`) is the migration crate.
+`pickle::read` is a reader for the pickles Python 2 wrote — protocols
+0–2 with the protocol 3–4 opcodes a Python 3 `pickle.dumps` adds — with
+memoised values in one arena (a container filled after its `PUT` reads
+back full wherever it is referenced, a reference cycle reads as `None`)
+and old-style instances (`INST`/`OBJ`/`BUILD`) as `Item::Instance`; it
+exists because `serde-pickle` 1.2.0 pops the class of an `OBJ` twice and
+so cannot read a 2.1 `config.pck` whose `bounce_info` holds
+`_BounceInfo` instances. `config21::Config21` is the list dictionary in
+Mailman's terms (`bytes_to_str`, tuples as lists, instances and classes
+as `None`) with `text`/`int`/`float`/`bool` (Python truth)/`text_list`/
+`dict`/`text_dict`/`list`.
+
+`import21::plan(config, list) -> Plan` is Mailman 3's
+`mailman/utilities/importer.py`: the `SETTINGS` table (2.1 key → setting
+→ `Kind`: text, bool, int, float, text list, seconds→days, an enum by
+index, Mailman's autorespond triple), then the conversions Mailman does
+by hand — `subject_prefix` with its space, the language only when the
+site has it, `default_member_action` from `default_member_moderation` +
+`member_moderation_action`, DMARC from the larger of `from_is_list` and
+`dmarc_moderation_action` (unconditional when `from_is_list` wins),
+`archive_policy` from `archive`/`archive_private` — plus `topics`,
+`aliases` (each line anchored, the list's own name added), `bans`,
+`header_matches` (Mailman's line parsing and `action_to_chain`),
+`templates` (`convert_to_uri` names, `convert_placeholders`, nothing
+written when the text equals the built-in default) and `rosters`
+(members, digest members, owners, moderators, the `*_these_nonmembers`
+addresses; the option bits, `delivery_status` codes, languages and
+display names). Everything left out is a warning on the plan.
+
+`import21::apply(db, list, plan, context)` writes it: the settings in
+one audited `lists().update_with_context`, then each ban, header match,
+template and member in its own audited write (`subscribe_with_context`
+by address, `preferences().set_member_with_context`, the member's own
+moderation action), what is already there skipped and counted, and one
+`list.import21` audit event with the report.
+`AuditRepo::record_with_context` is the standalone audit write it uses.
+`crates/cli/src/import21.rs` is `listmngr import21 <list_id> <path>
+[--dry-run]`.
+
 ## News to mail — bounded local acceptance verified
 
 `listmngr_mail::nntp::Client` gained a session (`connect`: greeting,
