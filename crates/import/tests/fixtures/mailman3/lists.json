@@ -1,0 +1,33 @@
+{
+  "entries": [
+    {
+      "advertised": true,
+      "description": "",
+      "display_name": "Announce",
+      "fqdn_listname": "announce@other.invalid",
+      "http_etag": "\"86ca2c8c1010f59231c3598d6e1c4447c58afca8\"",
+      "list_id": "announce.other.invalid",
+      "list_name": "announce",
+      "mail_host": "other.invalid",
+      "member_count": 0,
+      "self_link": "http://127.0.0.1:8199/3.1/lists/announce.other.invalid",
+      "volume": 1
+    },
+    {
+      "advertised": false,
+      "description": "Rust users of Example",
+      "display_name": "Rust-Users",
+      "fqdn_listname": "rust-users@example.invalid",
+      "http_etag": "\"e49cb23aff0b5e9ee7479decc0e2febbc708c4f4\"",
+      "list_id": "rust-users.example.invalid",
+      "list_name": "rust-users",
+      "mail_host": "example.invalid",
+      "member_count": 4,
+      "self_link": "http://127.0.0.1:8199/3.1/lists/rust-users.example.invalid",
+      "volume": 1
+    }
+  ],
+  "http_etag": "\"1caa538bf3f37fb7ebba661b2c5269bed699054c\"",
+  "start": 0,
+  "total_size": 2
+}

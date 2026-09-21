@@ -1,0 +1,23 @@
+{
+  "entries": [
+    {
+      "action": "discard",
+      "header": "x-spam-flag",
+      "http_etag": "\"dfb09f7d8fbee5be70c7803f63a17650d0753bbe\"",
+      "pattern": "YES",
+      "position": 0,
+      "self_link": "http://127.0.0.1:8199/3.1/lists/rust-users.example.invalid/header-matches/0"
+    },
+    {
+      "action": "reject",
+      "header": "subject",
+      "http_etag": "\"03abe539ed619c007aa20f8df9c2e221f0fbc249\"",
+      "pattern": ".*viagra.*",
+      "position": 1,
+      "self_link": "http://127.0.0.1:8199/3.1/lists/rust-users.example.invalid/header-matches/1"
+    }
+  ],
+  "http_etag": "\"af5cbe225ce8a3ccda23788d31ca519bc21e8cda\"",
+  "start": 0,
+  "total_size": 2
+}

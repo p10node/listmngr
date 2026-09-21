@@ -1,5 +1,40 @@
 # Architecture
 
+## Mailman 3 import over REST — bounded local acceptance verified
+
+`listmngr_import::rest3::Rest` is a read-only client of a Mailman 3
+core's REST API: Basic authentication, a thirty-second timeout, `GET`
+only, and a `Debug` that shows the root and the user but never the
+password (a URL carrying userinfo is replaced in any error message).
+`import3::Source` is the one thing the importer needs — a path in, JSON
+out — so the tests can drive the mapping from the answers a real core
+gave without a server.
+
+`import3::fetch(source, only)` walks the site: `domains`, the site
+`bans`, `lists?advertised=false` (or one list), and for each list its
+`config`, the four rosters, each member's own `preferences`
+(`members/<id>/preferences`, which Mailman answers sparsely), the list's
+`bans`, its `header-matches` and its `uris`. `collection` reads
+Mailman's envelope (`entries`, `start`, `total_size`) and pages with
+`count`/`page` until it has them all. The result is a `Site` of
+`Domain3`/`List3`/`Member3`, Mailman's own names and values.
+
+`import3::plan(site)` turns that into `Plan3`: the `SETTINGS` table (75
+Mailman settings this site has, with `Kind3::Same`, `Days` for the `7d`
+timedeltas, `Float` for the two thresholds Mailman may write as integers
+and `Lines` for `acceptable_aliases`), the `DERIVED` list read and
+dropped, and a warning for everything else — a setting this site does not
+have (unless it is at Mailman's own default), a language the catalog does
+not have, the moderator password hash (never its value), each template
+URI, and each member Mailman subscribed as a user.
+`import3::apply(db, plan, context)` writes the domains, the site bans and
+each list (create, configure, ban, header-match, subscribe with
+preferences and moderation action), skipping and counting what is already
+there, and records one `site.import3` audit event with the report.
+`crates/cli/src/import3.rs` is `listmngr import3`, whose
+`--password-file` keeps the core's password out of argv; a source that
+cannot be read exits `11` (`CLI-IMPORT-SOURCE`).
+
 ## Mailman 2.1 import — bounded local acceptance verified
 
 `crates/import` (`listmngr-import`) is the migration crate.

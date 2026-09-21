@@ -1,5 +1,47 @@
 # listmngr
 
+## Mailman 3 import over REST (`P6-IMPORT3-REST`) — bounded local acceptance verified
+
+A whole Mailman 3 site moves over from a running core, read-only:
+
+```sh
+printf '%s' "$MAILMAN_REST_PASSWORD" > /protected/path/rest.pass
+listmngr import3 --rest http://127.0.0.1:8001/3.1 \
+    --user restadmin --password-file /protected/path/rest.pass --dry-run
+listmngr import3 --rest http://127.0.0.1:8001/3.1 \
+    --user restadmin --password-file /protected/path/rest.pass
+```
+
+The importer reads the core's domains, its site bans, every list (with
+`--list <list_id>` just one) with its `config`, the four rosters with each
+member's own preferences, the list's bans, its header matches and its
+template URIs, and writes them here: the domains, the lists (style
+`legacy-default`, then the imported configuration), the members by
+address with their preferences and their own moderation action, the bans
+and the header matches. Mailman's spellings become this site's — `7d`
+durations become whole days, a multi-line `acceptable_aliases` becomes
+one alias per line, and the resources Mailman derives (the list's
+addresses, `created_at`, `post_id`, `volume`, `usenet_watermark`) are
+read but never written. Nothing is written back to the core: the whole
+import is `GET` requests under Basic authentication, and the password is
+read from a file so it never enters the shell history or a process
+listing.
+
+`--dry-run` prints the plan as JSON and changes nothing. Every run prints
+its report (`domains`, `lists`, `settings`, `members`, `owners`,
+`moderators`, `nonmembers`, `skipped`, `bans`, `site_bans`,
+`header_matches`, `warnings`) on standard output and its warnings on
+standard error, each write carries its audit event, and one
+`site.import3` event records the report. Running it again leaves
+everything that is already here alone and counts it as `skipped`.
+
+Limits: user accounts, passwords, held messages and pending requests are
+not imported yet, so a member Mailman subscribed as a user becomes an
+address here with a warning; Mailman keeps only a *URI* for each
+template, so each one is reported as a warning to set by hand; a setting
+this site does not have, or a value it cannot take, is a warning and the
+rest of the list still imports. `docs/MIGRATION.md` has the mapping.
+
 ## Mailman 2.1 import (`P6-IMPORT21`) — bounded local acceptance verified
 
 A Mailman 2.1 list moves over with its own `config.pck`:
@@ -3067,6 +3109,7 @@ validate and normalize complete email addresses, including IDNA domains.
 | 8    | Authentication, authorization, or rate-limit rejection       |
 | 9    | Input/output failure                                         |
 | 10   | Database connection, query, or migration failure             |
+| 11   | A Mailman site being imported could not be read              |
 
 Runtime errors emit a stable `error[CLI-…]` category and a correlation UUID,
 without raw error chains, input values, or database credentials. Usage errors are

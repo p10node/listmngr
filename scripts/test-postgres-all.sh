@@ -6,7 +6,7 @@
 # test creates and drops its own schema on TEST_POSTGRES_URL, so the server
 # only needs to be disposable, never empty. The ignored tests that
 # need other fixtures (a browser, `postmap`, a benchmark, Mailman's own
-# `testing/` directory) are skipped by name.
+# `testing/` directory, a running Mailman 3 core) are skipped by name.
 set -eu
 
 : "${TEST_POSTGRES_URL:?TEST_POSTGRES_URL must point to a disposable PostgreSQL server}"
@@ -29,4 +29,5 @@ exec cargo test --locked --workspace --all-targets -- --ignored \
   --skip search_p95_is_under_100ms_over_100k_posts --skip import_100k_posts_in_under_ten_minutes \
   --skip real_postfix_lookup_agrees_with_runtime_recipient_validation \
   --skip real_postmap_compiles_hash_maps_that_answer_exact_lookups \
-  --skip import21_reads_mailman3s_own_fixture
+  --skip import21_reads_mailman3s_own_fixture \
+  --skip import3_reads_a_real_mailman3_core
