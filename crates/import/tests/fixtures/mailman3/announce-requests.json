@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "display_name": "Wanted",
+      "email": "wanted@example.invalid",
+      "http_etag": "\"86932b217ec5a423e80de2d93de36b72c8876feb\"",
+      "list_id": "announce.other.invalid",
+      "token": "caa99c6f5063962a2e906827007635f2e4aff6a6",
+      "token_owner": "moderator",
+      "type": "subscription",
+      "when": "2026-09-21T11:49:26"
+    }
+  ],
+  "http_etag": "\"058e50b59978caede1ec9fc6c0aeeb0e364f2888\"",
+  "start": 0,
+  "total_size": 1
+}

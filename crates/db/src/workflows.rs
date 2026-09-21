@@ -19,7 +19,7 @@ pub enum SubscriptionAction {
     Leave,
 }
 impl SubscriptionAction {
-    const fn name(self) -> &'static str {
+    pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Join => "join",
             Self::Leave => "leave",
@@ -46,7 +46,7 @@ pub enum TokenOwner {
 }
 
 impl TokenOwner {
-    const fn state(self) -> &'static str {
+    pub(crate) const fn state(self) -> &'static str {
         match self {
             Self::Subscriber => "pending_confirmation",
             Self::Moderator => "pending_moderation",
@@ -145,6 +145,13 @@ impl RequestDecision {
 pub struct WorkflowRepo<'a> {
     db: &'a Database,
     clock: Option<&'a dyn crate::mail_queue::LeaseClock>,
+}
+impl<'a> WorkflowRepo<'a> {
+    /// The database this repository writes to, for the import module.
+    #[must_use]
+    pub(crate) const fn db(&self) -> &'a Database {
+        self.db
+    }
 }
 impl Database {
     #[must_use]
