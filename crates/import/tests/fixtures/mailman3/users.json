@@ -1,0 +1,60 @@
+{
+  "entries": [
+    {
+      "created_on": "2026-09-21T07:56:20.539446",
+      "display_name": "Alice Nguy\u1ec5n",
+      "http_etag": "\"4acf4ed4d61b410c8cbf8d5f7c9a7f325cb7c684\"",
+      "is_server_owner": false,
+      "self_link": "http://127.0.0.1:8199/3.1/users/e42d0fc9366c4e13b2250f34bbf57796",
+      "user_id": "e42d0fc9366c4e13b2250f34bbf57796"
+    },
+    {
+      "created_on": "2026-09-21T07:56:20.555923",
+      "display_name": "Bob",
+      "http_etag": "\"f885407e2b1468ee638031f0efa354922c2f96e4\"",
+      "is_server_owner": false,
+      "self_link": "http://127.0.0.1:8199/3.1/users/6e6424246e2043a599248276a0159323",
+      "user_id": "6e6424246e2043a599248276a0159323"
+    },
+    {
+      "created_on": "2026-09-21T07:56:20.571776",
+      "http_etag": "\"830736c152660bb30a04f8e3f1debeea05d9d0fd\"",
+      "is_server_owner": false,
+      "self_link": "http://127.0.0.1:8199/3.1/users/5f4a5ccfb50b45808bffc3bec0529118",
+      "user_id": "5f4a5ccfb50b45808bffc3bec0529118"
+    },
+    {
+      "created_on": "2026-09-21T07:56:20.588110",
+      "http_etag": "\"4ada863d790a3a82e5005c77d8736fdfa25e340d\"",
+      "is_server_owner": false,
+      "self_link": "http://127.0.0.1:8199/3.1/users/bf24b748210541769716577130a7bdc4",
+      "user_id": "bf24b748210541769716577130a7bdc4"
+    },
+    {
+      "created_on": "2026-09-21T07:56:20.595793",
+      "http_etag": "\"00cb94245e82bf7e0e1f60160f3a320f23c7ab43\"",
+      "is_server_owner": false,
+      "self_link": "http://127.0.0.1:8199/3.1/users/fd459ce960834e6b904ca8042c847816",
+      "user_id": "fd459ce960834e6b904ca8042c847816"
+    },
+    {
+      "created_on": "2026-09-21T07:56:20.602897",
+      "http_etag": "\"e52c342a0068fd15ad3647919b8e914cc697f74f\"",
+      "is_server_owner": false,
+      "self_link": "http://127.0.0.1:8199/3.1/users/d4f82648ee4e425c8340e7b0052cb703",
+      "user_id": "d4f82648ee4e425c8340e7b0052cb703"
+    },
+    {
+      "created_on": "2026-09-21T07:56:20.675515",
+      "display_name": "Dave",
+      "http_etag": "\"1d265d6b5134e0ac86c2daf198cb636217a029b7\"",
+      "is_server_owner": false,
+      "password": "$6$rounds=656000$.SxXwMqjE84S.HGz$uiwBWGWZSAOdVyS.UzHSd4lkvWnrrjUqTrK3BNuQ1M1uCL63XoIq0ZUD1bXnr2j.A5D0tVW9vuQaNEcY9ztyV/",
+      "self_link": "http://127.0.0.1:8199/3.1/users/9bfcfb46bfae4a03814b3c14e12d5d9a",
+      "user_id": "9bfcfb46bfae4a03814b3c14e12d5d9a"
+    }
+  ],
+  "http_etag": "\"1e943a1cde94d7e8587495cc7256f412bff6dc07\"",
+  "start": 0,
+  "total_size": 7
+}

@@ -42,6 +42,17 @@ pub fn classify(error: &anyhow::Error) -> (u8, &'static str, &'static str) {
             CoreError::Database(_) => (10, "CLI-DATABASE", "database operation failed"),
         };
     }
+    if let Some(error) = error.downcast_ref::<listmngr_import::Error>() {
+        return match error {
+            listmngr_import::Error::Rest(_) => (
+                11,
+                "CLI-IMPORT-SOURCE",
+                "the Mailman site could not be read",
+            ),
+            listmngr_import::Error::Pickle(_) => (2, "CLI-VALIDATION", "invalid input"),
+            listmngr_import::Error::Core(_) => (1, "CLI-INTERNAL", "operation failed"),
+        };
+    }
     if error.downcast_ref::<std::io::Error>().is_some() {
         return (9, "CLI-IO", "input/output operation failed");
     }

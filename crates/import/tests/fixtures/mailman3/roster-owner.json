@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "address": "http://127.0.0.1:8199/3.1/addresses/owner@example.invalid",
+      "bounce_score": 0,
+      "delivery_mode": "regular",
+      "display_name": "",
+      "email": "owner@example.invalid",
+      "http_etag": "\"0a31259541d42a6ac69e09dcc14e58e6ecdf9127\"",
+      "last_warning_sent": "0001-01-01T00:00:00",
+      "list_id": "rust-users.example.invalid",
+      "member_id": "ada6b0ada3d3487e92ba6c280f75b815",
+      "moderation_action": "accept",
+      "role": "owner",
+      "self_link": "http://127.0.0.1:8199/3.1/members/ada6b0ada3d3487e92ba6c280f75b815",
+      "subscription_mode": "as_address",
+      "total_warnings_sent": 0,
+      "user": "http://127.0.0.1:8199/3.1/users/bf24b748210541769716577130a7bdc4"
+    }
+  ],
+  "http_etag": "\"c3aec653eb60f808b7041a8d020448fb70ba1451\"",
+  "start": 0,
+  "total_size": 1
+}

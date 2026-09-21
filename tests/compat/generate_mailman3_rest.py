@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""Populate a real Mailman 3 core over its REST API and dump the answers
+as fixtures for `crates/import/tests/import3.rs`.
+
+The fixtures are what `listmngr import3 --rest` reads, recorded from GNU
+Mailman 3.3.10 so the importer is tested against the real shapes
+(pagination envelopes, `http_etag`, the `config` and `preferences`
+resources) rather than hand-written JSON.
+
+Run against a disposable core (never a production one):
+
+    mailman -C mailman.cfg start
+    python3 tests/compat/generate_mailman3_rest.py \
+        --url http://127.0.0.1:8199/3.1 --user restadmin --password restpass
+
+Writes `crates/import/tests/fixtures/mailman3/<name>.json`.
+"""
+import argparse
+import base64
+import json
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+OUT = ROOT / "crates/import/tests/fixtures/mailman3"
+
+
+class Rest:
+    def __init__(self, url, user, password):
+        self.url = url.rstrip("/")
+        token = base64.b64encode(f"{user}:{password}".encode()).decode()
+        self.auth = f"Basic {token}"
+
+    def request(self, method, path, data=None):
+        url = path if path.startswith("http") else f"{self.url}/{path.lstrip('/')}"
+        body = None
+        headers = {"Authorization": self.auth}
+        if data is not None:
+            body = "&".join(
+                f"{key}={urllib.parse.quote(str(value))}" for key, value in data.items()
+            ).encode()
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        request = urllib.request.Request(url, data=body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request) as response:
+                raw = response.read()
+                return response.status, (json.loads(raw) if raw else None)
+        except urllib.error.HTTPError as error:
+            return error.code, error.read().decode()
+
+    def get(self, path):
+        status, body = self.request("GET", path)
+        assert status == 200, (path, status, body)
+        return body
+
+    def post(self, path, **data):
+        status, body = self.request("POST", path, data)
+        assert status in (200, 201, 204), (path, status, body)
+        return body
+
+    def patch(self, path, **data):
+        status, body = self.request("PATCH", path, data)
+        assert status in (200, 204), (path, status, body)
+        return body
+
+    def put(self, path, **data):
+        status, body = self.request("PUT", path, data)
+        assert status in (200, 204), (path, status, body)
+        return body
+
+
+def populate(rest):
+    """A small site with everything the importer reads."""
+    rest.post("domains", mail_host="example.invalid", description="Example")
+    rest.post("domains", mail_host="other.invalid", description="Other")
+    rest.post("lists", fqdn_listname="rust-users@example.invalid", style_name="legacy-default")
+    rest.post("lists", fqdn_listname="announce@other.invalid", style_name="legacy-announce")
+    rest.patch(
+        "lists/rust-users.example.invalid/config",
+        display_name="Rust-Users",
+        description="Rust users of Example",
+        info="Long description\nwith two lines",
+        subject_prefix="[Rust] ",
+        preferred_language="en",
+        advertised="False",
+        anonymous_list="True",
+        administrivia="False",
+        archive_policy="private",
+        collapse_alternatives="False",
+        convert_html_to_plaintext="True",
+        default_member_action="reject",
+        default_nonmember_action="discard",
+        digest_size_threshold="45.0",
+        dmarc_mitigate_action="wrap_message",
+        dmarc_mitigate_unconditionally="True",
+        dmarc_moderation_notice="Your domain publishes a DMARC policy.",
+        dmarc_wrapped_message_text="The original post is attached.",
+        emergency="True",
+        first_strip_reply_to="True",
+        max_message_size="120",
+        max_num_recipients="25",
+        member_roster_visibility="moderators",
+        personalize="individual",
+        reply_goes_to_list="explicit_header",
+        reply_to_address="replies@example.invalid",
+        require_explicit_destination="False",
+        respond_to_post_requests="False",
+        send_welcome_message="False",
+        send_goodbye_message="False",
+        subscription_policy="confirm_then_moderate",
+        unsubscription_policy="confirm",
+        acceptable_aliases="rust-users-alias@example.invalid\n^announce-.*@example\\.invalid",
+        gateway_to_mail="True",
+        gateway_to_news="True",
+        linked_newsgroup="comp.lang.rust.lists",
+        newsgroup_moderation="moderated",
+        nntp_prefix_subject_too="False",
+    )
+    # Members, owners, moderators, a nonmember with an action.
+    for email, name in [
+        ("alice@example.invalid", "Alice Nguyễn"),
+        ("bob@example.invalid", "Bob"),
+        ("carol@elsewhere.invalid", ""),
+    ]:
+        rest.post(
+            "members",
+            list_id="rust-users.example.invalid",
+            subscriber=email,
+            display_name=name,
+            role="member",
+            pre_verified="True",
+            pre_confirmed="True",
+            pre_approved="True",
+        )
+    for role, email in [
+        ("owner", "owner@example.invalid"),
+        ("moderator", "mod@example.invalid"),
+        ("nonmember", "stranger@example.invalid"),
+    ]:
+        rest.post(
+            "members",
+            list_id="rust-users.example.invalid",
+            subscriber=email,
+            role=role,
+            pre_verified="True",
+            pre_confirmed="True",
+            pre_approved="True",
+        )
+    members = {
+        entry["email"]: entry
+        for entry in rest.get("lists/rust-users.example.invalid/roster/member")["entries"]
+    }
+    rest.patch(
+        members["alice@example.invalid"]["self_link"] + "/preferences",
+        acknowledge_posts="True",
+        hide_address="True",
+        receive_own_postings="False",
+        delivery_mode="plaintext_digests",
+    )
+    rest.patch(members["bob@example.invalid"]["self_link"], moderation_action="hold")
+    rest.patch(
+        members["carol@elsewhere.invalid"]["self_link"] + "/preferences",
+        delivery_status="by_bounces",
+    )
+    nonmember = rest.get("lists/rust-users.example.invalid/roster/nonmember")["entries"][0]
+    rest.patch(nonmember["self_link"], moderation_action="discard")
+    # Bans, header matches, one template.
+    rest.post("lists/rust-users.example.invalid/bans", email="spammer@example.invalid")
+    rest.post("lists/rust-users.example.invalid/bans", email="^.*@spam\\.invalid")
+    rest.post("bans", email="global-spammer@example.invalid")
+    rest.post(
+        "lists/rust-users.example.invalid/header-matches",
+        header="x-spam-flag",
+        pattern="YES",
+        action="discard",
+    )
+    rest.post(
+        "lists/rust-users.example.invalid/header-matches",
+        header="subject",
+        pattern=".*viagra.*",
+        action="reject",
+    )
+    rest.patch(
+        "lists/rust-users.example.invalid/uris",
+        **{"list:member:regular:footer": "http://example.invalid/footer.txt"},
+    )
+    # A user with two addresses, both verified, subscribed as the user so
+    # the roster carries a user id instead of an address.
+    rest.post("users", email="dave@example.invalid", display_name="Dave", password="x" * 12)
+    user = rest.get("users/dave@example.invalid")
+    rest.post(user["self_link"] + "/addresses", email="dave@work.invalid")
+    for email in ("dave@example.invalid", "dave@work.invalid"):
+        rest.post(f"addresses/{email}/verify")
+    rest.post(user["self_link"] + "/preferred_address", email="dave@example.invalid")
+    rest.post(
+        "members",
+        list_id="rust-users.example.invalid",
+        subscriber=user["user_id"],
+        role="member",
+        pre_verified="True",
+        pre_confirmed="True",
+        pre_approved="True",
+    )
+
+
+def dump(rest):
+    OUT.mkdir(parents=True, exist_ok=True)
+    wanted = {
+        "domains": "domains",
+        "lists": "lists?advertised=false",
+        "list-config": "lists/rust-users.example.invalid/config",
+        "roster-member": "lists/rust-users.example.invalid/roster/member",
+        "roster-owner": "lists/rust-users.example.invalid/roster/owner",
+        "roster-moderator": "lists/rust-users.example.invalid/roster/moderator",
+        "roster-nonmember": "lists/rust-users.example.invalid/roster/nonmember",
+        "bans-list": "lists/rust-users.example.invalid/bans",
+        "bans-global": "bans",
+        "header-matches": "lists/rust-users.example.invalid/header-matches",
+        "uris": "lists/rust-users.example.invalid/uris",
+        "members-page": "members?count=2&page=1",
+        "users": "users",
+        "announce-config": "lists/announce.other.invalid/config",
+        "announce-roster-member": "lists/announce.other.invalid/roster/member",
+        "announce-bans": "lists/announce.other.invalid/bans",
+        "announce-header-matches": "lists/announce.other.invalid/header-matches",
+        "announce-uris": "lists/announce.other.invalid/uris",
+    }
+    for name, path in wanted.items():
+        body = rest.get(path)
+        (OUT / f"{name}.json").write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
+        print(name, path)
+    # Every member's preferences, by the member id the roster gives.
+    preferences = {}
+    for role in ("member", "owner", "moderator", "nonmember"):
+        for entry in rest.get(f"lists/rust-users.example.invalid/roster/{role}")["entries"]:
+            preferences[entry["member_id"]] = rest.get(entry["self_link"] + "/preferences")
+    (OUT / "preferences.json").write_text(
+        json.dumps(preferences, indent=2, sort_keys=True) + "\n"
+    )
+    print("preferences", len(preferences))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", default="http://127.0.0.1:8199/3.1")
+    parser.add_argument("--user", default="restadmin")
+    parser.add_argument("--password", default="restpass")
+    parser.add_argument("--no-populate", action="store_true")
+    args = parser.parse_args()
+    rest = Rest(args.url, args.user, args.password)
+    if not args.no_populate:
+        populate(rest)
+    dump(rest)
+
+
+if __name__ == "__main__":
+    main()

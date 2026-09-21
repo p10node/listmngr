@@ -1,0 +1,41 @@
+{
+  "32033ad91daf4ade9598a39ab005349a": {
+    "http_etag": "\"680a93271209d0cfedefe6d4e317ac10241b4bda\"",
+    "self_link": "http://127.0.0.1:8199/3.1/members/32033ad91daf4ade9598a39ab005349a/preferences"
+  },
+  "4371eced9bd64467944ac0fc2f6bddea": {
+    "http_etag": "\"e4fe37f58d238902ebe57f37ba8c5db439a67193\"",
+    "self_link": "http://127.0.0.1:8199/3.1/members/4371eced9bd64467944ac0fc2f6bddea/preferences"
+  },
+  "656182b814864ab7a7aa5589368bcade": {
+    "delivery_status": "by_bounces",
+    "http_etag": "\"627fb7fcf3acafe67ce1baae95158ad8bc17eff2\"",
+    "self_link": "http://127.0.0.1:8199/3.1/members/656182b814864ab7a7aa5589368bcade/preferences"
+  },
+  "6d8a6db890b24247aa757ea43a4f752a": {
+    "delivery_mode": "regular",
+    "http_etag": "\"5d59e5f3e96cdf99e69bf5980869a417f2fd229a\"",
+    "preferred_language": "en",
+    "self_link": "http://127.0.0.1:8199/3.1/members/6d8a6db890b24247aa757ea43a4f752a/preferences"
+  },
+  "82a70572514947c5809a3b2280acc0a4": {
+    "acknowledge_posts": true,
+    "delivery_mode": "plaintext_digests",
+    "hide_address": true,
+    "http_etag": "\"766ba7be64f6f23088dc0ff9949f1fce3ec37200\"",
+    "receive_own_postings": false,
+    "self_link": "http://127.0.0.1:8199/3.1/members/82a70572514947c5809a3b2280acc0a4/preferences"
+  },
+  "ada6b0ada3d3487e92ba6c280f75b815": {
+    "delivery_mode": "regular",
+    "http_etag": "\"ecf1a5e4678ff49b8d12b56fd6b4dd3eaa58e069\"",
+    "preferred_language": "en",
+    "self_link": "http://127.0.0.1:8199/3.1/members/ada6b0ada3d3487e92ba6c280f75b815/preferences"
+  },
+  "ff9619e011a24d00bc14be469857e19a": {
+    "delivery_mode": "regular",
+    "http_etag": "\"b2b81fd83f781354b7f233fb8f290a3c74246a12\"",
+    "preferred_language": "en",
+    "self_link": "http://127.0.0.1:8199/3.1/members/ff9619e011a24d00bc14be469857e19a/preferences"
+  }
+}

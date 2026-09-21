@@ -1,0 +1,23 @@
+{
+  "entries": [
+    {
+      "alias_domain": null,
+      "base_url": null,
+      "description": "Example",
+      "http_etag": "\"403e6a64aa4dface9ba180868aab62a3d7f9f0e0\"",
+      "mail_host": "example.invalid",
+      "self_link": "http://127.0.0.1:8199/3.1/domains/example.invalid"
+    },
+    {
+      "alias_domain": null,
+      "base_url": null,
+      "description": "Other",
+      "http_etag": "\"5c1cebb904a7e2a7fb708cb41aa4d48039393e29\"",
+      "mail_host": "other.invalid",
+      "self_link": "http://127.0.0.1:8199/3.1/domains/other.invalid"
+    }
+  ],
+  "http_etag": "\"0e81524d9daddc2cb9545c38aa7fe17c1922bb65\"",
+  "start": 0,
+  "total_size": 2
+}
