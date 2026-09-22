@@ -491,7 +491,13 @@ impl Reader<'_> {
             b'\x93' => {
                 let name = self.pop()?;
                 let module = self.pop()?;
-                let (Node::Text(module), Node::Text(name)) = (module, name) else {
+                let deref = |node: Node, arena: &[Node]| match node {
+                    Node::Ref(index) => arena[index].clone(),
+                    other => other,
+                };
+                let (Node::Text(module), Node::Text(name)) =
+                    (deref(module, &self.arena), deref(name, &self.arena))
+                else {
                     return self.error("STACK_GLOBAL without two strings");
                 };
                 self.stack.push(Node::Global(format!("{module}.{name}")));
@@ -561,6 +567,14 @@ impl Reader<'_> {
             | "builtins.list"
             | "__builtin__.tuple"
             | "builtins.tuple" => args.pop().map_or_else(|| Node::List(Vec::new()), deref),
+            // SQLAlchemy's mutable collections pickle as a call on the
+            // plain collection; Mailman's list columns are those.
+            "sqlalchemy.ext.mutable.MutableList"
+            | "sqlalchemy.ext.mutable.MutableDict"
+            | "sqlalchemy.ext.mutable.MutableSet" => args
+                .into_iter()
+                .next()
+                .map_or_else(|| Node::List(Vec::new()), deref),
             // Python 3 pickles `bytes` at protocol 2 as
             // `_codecs.encode(text, 'latin1')`.
             "_codecs.encode" => match args.into_iter().next().map(deref) {

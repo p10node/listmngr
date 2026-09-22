@@ -68,11 +68,10 @@ fn answer(path: &str) -> String {
                 "held" => read(&format!("{prefix}held")),
                 "requests" => read(&format!("{prefix}requests")),
                 "uris" => read(&format!("{prefix}uris")),
-                tail if tail.starts_with("roster/") => {
-                    let role = tail.trim_start_matches("roster/");
-                    read(&format!("{prefix}roster-{role}"))
-                        .or_else(|| read("announce-roster-member"))
-                }
+                tail if tail.starts_with("roster/") => read(&format!(
+                    "{prefix}roster-{}",
+                    tail.trim_start_matches("roster/")
+                )),
                 _ => None,
             }
         }
@@ -203,6 +202,113 @@ fn import3_plans_dry_then_writes_the_site_it_read() {
     let report: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
     assert_eq!(report["lists"], 0);
     assert_eq!(report["members"], 0);
-    assert_eq!(report["skipped"], 22);
+    assert_eq!(report["skipped"], 23);
+    drop(rt);
+}
+
+/// The same site straight from the core's database and message store:
+/// no core, no REST credentials, the same report.
+#[test]
+fn import3_reads_the_cores_database_without_a_core() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("import3db.db").display()
+    );
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let db = Database::connect(&url, 1).await.unwrap();
+        db.migrate().await.unwrap();
+        db.pool().close().await;
+    });
+    let mailman_db = format!(
+        "sqlite://{}?mode=ro",
+        fixtures().join("mailman.db").display()
+    );
+    let var_dir = fixtures().join("var");
+    // --rest and --db exclude each other; --var-dir needs --db.
+    Command::cargo_bin("listmngr")
+        .unwrap()
+        .env_clear()
+        .current_dir(dir.path())
+        .env("LISTMNGR__DATABASE__URL", &url)
+        .args([
+            "import3",
+            "--db",
+            &mailman_db,
+            "--rest",
+            "http://127.0.0.1:1/3.1",
+        ])
+        .assert()
+        .failure();
+    // A database nobody can open exits 11 and never prints a URL password.
+    let output = Command::cargo_bin("listmngr")
+        .unwrap()
+        .env_clear()
+        .current_dir(dir.path())
+        .env("LISTMNGR__DATABASE__URL", &url)
+        .args([
+            "import3",
+            "--db",
+            "postgres://mailman:hunter2hunter2@127.0.0.1:1/mailman",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(11), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error[CLI-IMPORT-SOURCE]"), "{stderr}");
+    assert!(!stderr.contains("hunter2hunter2"), "{stderr}");
+    // Without the message store the held message is a warning; with it,
+    // it comes.
+    let output = Command::cargo_bin("listmngr")
+        .unwrap()
+        .env_clear()
+        .current_dir(dir.path())
+        .env("LISTMNGR__DATABASE__URL", &url)
+        .args(["import3", "--db", &mailman_db, "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--var-dir"),
+        "{output:?}"
+    );
+    let output = Command::cargo_bin("listmngr")
+        .unwrap()
+        .env_clear()
+        .current_dir(dir.path())
+        .env("LISTMNGR__DATABASE__URL", &url)
+        .args(["import3", "--db", &mailman_db, "--var-dir"])
+        .arg(&var_dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
+    assert_eq!(report["domains"], 2);
+    assert_eq!(report["users"], 9);
+    assert_eq!(report["lists"], 2);
+    assert_eq!(report["members"], 4);
+    assert_eq!(report["held"], 1);
+    assert_eq!(report["requests"], 1);
+    assert_eq!(report["skipped"], 0);
+    // One list only, from the database.
+    let output = Command::cargo_bin("listmngr")
+        .unwrap()
+        .env_clear()
+        .current_dir(dir.path())
+        .env("LISTMNGR__DATABASE__URL", &url)
+        .args([
+            "import3",
+            "--db",
+            &mailman_db,
+            "--list",
+            "announce.other.invalid",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let plan: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
+    assert_eq!(plan["lists"].as_array().unwrap().len(), 1);
     drop(rt);
 }

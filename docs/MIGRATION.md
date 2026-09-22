@@ -118,9 +118,15 @@ The 2.1 `archives/private/<list>.mbox/<list>.mbox` is imported separately
 with `listmngr archive import <list_id> <file.mbox>`, which keeps the
 Message-ID-Hash URLs Mailman 3 would give the same messages.
 
-## From Mailman 3 over REST (`listmngr import3`)
+## From Mailman 3 (`listmngr import3`)
 
-A running Mailman 3 core is read through its REST API and written here:
+A Mailman 3 core is read either through its REST API while it runs, or
+straight from its database and `var_dir` once it is stopped, and written
+here. Both give the same plan.
+
+### Over REST
+
+A running core is read through its REST API:
 
 ```sh
 printf '%s' "$MAILMAN_REST_PASSWORD" > /protected/path/rest.pass
@@ -135,6 +141,29 @@ from a file so it stays out of the shell history. `--list <list_id>`
 imports one list; `--dry-run` prints the plan. Everything that is
 already here is left alone, so the command can be run again — for
 instance to catch up a site that kept running during the migration.
+
+### From the database
+
+With the core stopped, the same site comes from its own storage:
+
+```sh
+listmngr import3 --db sqlite:////var/lib/mailman/data/mailman.db \
+    --var-dir /var/lib/mailman --dry-run
+listmngr import3 --db postgres://mailman:…@127.0.0.1/mailman \
+    --var-dir /var/lib/mailman
+```
+
+`--db` takes the `[database] url` of the core's `mailman.cfg` (its
+`postgresql://` spelling is accepted); `--var-dir` is its `var_dir`,
+where `messages/` holds the held messages — without it they are reported
+and left behind. The tables are decoded into what the REST API would
+have answered: enums by the integers of `mailman.interfaces`, the three
+intervals as whole days, the nonmember and DMARC lists from their pickled
+columns, the pending subscriptions and held-message metadata from
+`pended`/`pendedkeyvalue`, and each held message from the pickled
+`email.message.Message` in the store, rendered back as Python would. A
+database nobody can open exits `11`, and the URL's password never reaches
+the output.
 
 ### What is read
 
@@ -197,6 +226,6 @@ reported so the operator can ask those people to join again.
 
 ### Not imported yet
 
-Passwords (see above), the Mailman 3 and HyperKitty databases read
-directly without a running core (`P6-IMPORT3-DB`), and the archive,
-which comes over as an mbox (`listmngr archive import`).
+Passwords (see above), the HyperKitty database (`P6-IMPORT3-HYPERKITTY`),
+and the archive, which comes over as an mbox (`listmngr archive
+import`).

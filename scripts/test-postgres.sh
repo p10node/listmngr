@@ -68,6 +68,8 @@ cargo test --locked -p listmngr-db --test imported_users \
   postgres_imported_user_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test imported_moderation \
   postgres_imported_moderation_contract -- --ignored --exact
+cargo test --locked -p listmngr-import --test db3 \
+  postgres_import3_db_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test subject_prefix \
   postgres_subject_prefix_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test mail_queue_runtime \
