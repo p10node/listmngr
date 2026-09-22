@@ -131,6 +131,8 @@ pub struct Site {
     pub site_bans: Vec<String>,
     pub users: Vec<User3>,
     pub lists: Vec<List3>,
+    /// What the source could not read, for the plan to carry.
+    pub warnings: Vec<String>,
 }
 
 /// What an import will write for one list.
@@ -432,6 +434,7 @@ pub async fn fetch<S: Source + Sync>(source: &S, only: Option<&ListId>) -> Resul
         site_bans: Vec::new(),
         users: Vec::new(),
         lists: Vec::new(),
+        warnings: Vec::new(),
     };
     for entry in collection(source, "domains").await? {
         site.domains.push(Domain3 {
@@ -557,7 +560,7 @@ async fn one_list<S: Source + Sync>(source: &S, list_id: &ListId, entry: &Json) 
                 })
                 .filter(|reason| !reason.is_empty())
                 .unwrap_or_else(|| text(&found, "reason")),
-            hold_date: milliseconds(&text(&found, "hold_date")),
+            hold_date: milliseconds_of(&text(&found, "hold_date")),
             raw: text(&found, "msg").into_bytes(),
         });
     }
@@ -568,7 +571,7 @@ async fn one_list<S: Source + Sync>(source: &S, list_id: &ListId, entry: &Json) 
             display_name: text(&found, "display_name"),
             action: text(&found, "type"),
             token_owner: text(&found, "token_owner"),
-            requested_at: milliseconds(&text(&found, "when")),
+            requested_at: milliseconds_of(&text(&found, "when")),
         });
     }
     Ok(List3 {
@@ -588,7 +591,8 @@ async fn one_list<S: Source + Sync>(source: &S, list_id: &ListId, entry: &Json) 
 /// A Mailman timestamp (`2026-09-21T11:49:26.586592`, no zone: the core
 /// writes UTC) in milliseconds; an unreadable one is "now", so a hold
 /// still comes over.
-fn milliseconds(stamp: &str) -> i64 {
+#[must_use]
+pub fn milliseconds_of(stamp: &str) -> i64 {
     chrono::NaiveDateTime::parse_from_str(stamp, "%Y-%m-%dT%H:%M:%S%.f").map_or_else(
         |_| chrono::Utc::now().timestamp_millis(),
         |naive| naive.and_utc().timestamp_millis(),
@@ -701,6 +705,7 @@ pub fn plan(site: &Site) -> Plan3 {
         domains: site.domains.clone(),
         site_bans: site.site_bans.clone(),
         users: site.users.clone(),
+        warnings: site.warnings.clone(),
         ..Plan3::default()
     };
     for user in &site.users {

@@ -12,3 +12,6 @@ __pycache__/
 .cargo/
 # Session handoff notes; docs/PLAN.md and docs/FEATURE_PARITY.md are the record.
 docs/HANDOFF.md
+
+# The real Mailman 3 database the importer is tested against.
+!crates/import/tests/fixtures/mailman3/mailman.db

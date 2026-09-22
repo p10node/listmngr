@@ -39,14 +39,14 @@
       "delivery_mode": "regular",
       "display_name": "",
       "email": "carol@elsewhere.invalid",
-      "http_etag": "\"5204be02ccfe4dfe83dbdca9faad50e5c62d2049\"",
-      "last_warning_sent": "0001-01-01T00:00:00",
+      "http_etag": "\"450240a8220d65e1d2e23f5d110333eabaf414ca\"",
+      "last_warning_sent": "2026-09-21T11:51:01.489555",
       "list_id": "rust-users.example.invalid",
       "member_id": "5b31181c3c4a45ca81837bb231aff2c6",
       "role": "member",
       "self_link": "http://127.0.0.1:8199/3.1/members/5b31181c3c4a45ca81837bb231aff2c6",
       "subscription_mode": "as_address",
-      "total_warnings_sent": 0,
+      "total_warnings_sent": 1,
       "user": "http://127.0.0.1:8199/3.1/users/27216dba45c147be92eec79ce4a4fea8"
     },
     {
@@ -66,7 +66,7 @@
       "user": "http://127.0.0.1:8199/3.1/users/8470d847368f45d7868a434b2b9ad856"
     }
   ],
-  "http_etag": "\"4a58429ddc5662815b7723a40f77da9aa1cf68bd\"",
+  "http_etag": "\"048e9db356dbca2ddbff6f0d9342da72d3d2694d\"",
   "start": 0,
   "total_size": 4
 }

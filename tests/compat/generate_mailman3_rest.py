@@ -13,7 +13,13 @@ Run against a disposable core (never a production one):
     python3 tests/compat/generate_mailman3_rest.py \
         --url http://127.0.0.1:8199/3.1 --user restadmin --password restpass
 
-Writes `crates/import/tests/fixtures/mailman3/<name>.json`.
+Writes `crates/import/tests/fixtures/mailman3/<name>.json`. The core's own
+database and message store are copied next to them afterwards, for the
+`--db` path of the importer:
+
+    cp var/mailman.db crates/import/tests/fixtures/mailman3/mailman.db
+    sqlite3 crates/import/tests/fixtures/mailman3/mailman.db VACUUM
+    cp -R var/messages crates/import/tests/fixtures/mailman3/var/
 """
 import argparse
 import base64
@@ -268,6 +274,9 @@ def dump(rest):
         "users": "users",
         "announce-config": "lists/announce.other.invalid/config",
         "announce-roster-member": "lists/announce.other.invalid/roster/member",
+        "announce-roster-owner": "lists/announce.other.invalid/roster/owner",
+        "announce-roster-moderator": "lists/announce.other.invalid/roster/moderator",
+        "announce-roster-nonmember": "lists/announce.other.invalid/roster/nonmember",
         "announce-bans": "lists/announce.other.invalid/bans",
         "announce-header-matches": "lists/announce.other.invalid/header-matches",
         "announce-uris": "lists/announce.other.invalid/uris",
@@ -297,13 +306,52 @@ def dump(rest):
         print(name, len(data))
     # Every member's preferences, by the member id the roster gives.
     preferences = {}
-    for role in ("member", "owner", "moderator", "nonmember"):
-        for entry in rest.get(f"lists/rust-users.example.invalid/roster/{role}")["entries"]:
-            preferences[entry["member_id"]] = rest.get(entry["self_link"] + "/preferences")
+    for list_id in ("rust-users.example.invalid", "announce.other.invalid"):
+        for role in ("member", "owner", "moderator", "nonmember"):
+            for entry in rest.get(f"lists/{list_id}/roster/{role}").get("entries", []):
+                preferences[entry["member_id"]] = rest.get(entry["self_link"] + "/preferences")
     (OUT / "preferences.json").write_text(
         json.dumps(preferences, indent=2, sort_keys=True) + "\n"
     )
     print("preferences", len(preferences))
+
+
+MULTIPART = """From: alice@example.invalid
+To: dev@example.invalid
+Subject: =?utf-8?b?WGluIGNow6Bv?=
+Message-ID: <multi@example.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=-=frontier=-="
+
+preamble text
+--=-=frontier=-=
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Xin ch\u00e0o m\u1ecdi ng\u01b0\u1eddi.
+--=-=frontier=-=
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="a.bin"
+
+AAECAw==
+--=-=frontier=-=--
+epilogue text
+"""
+
+
+def multipart_fixture():
+    """A multipart message pickled the way the core's message store
+    pickles one (`mailman.email.message.Message`), for the renderer test;
+    needs the `mailman` package importable."""
+    import pickle
+    from email import message_from_string
+    from mailman.email.message import Message
+
+    (OUT / "var").mkdir(parents=True, exist_ok=True)
+    with open(OUT / "var" / "multipart.pck", "wb") as fp:
+        pickle.dump(message_from_string(MULTIPART, _class=Message), fp)
+    print("var/multipart.pck")
 
 
 def main():
@@ -312,12 +360,15 @@ def main():
     parser.add_argument("--user", default="restadmin")
     parser.add_argument("--password", default="restpass")
     parser.add_argument("--no-populate", action="store_true")
+    parser.add_argument("--multipart", action="store_true", help="also write var/multipart.pck")
     args = parser.parse_args()
     rest = Rest(args.url, args.user, args.password)
     if not args.no_populate:
         populate(rest)
         waiting(rest)
     dump(rest)
+    if args.multipart:
+        multipart_fixture()
 
 
 if __name__ == "__main__":

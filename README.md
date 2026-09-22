@@ -1,6 +1,6 @@
 # listmngr
 
-## Mailman 3 import over REST (`P6-IMPORT3-REST`, `P6-IMPORT3-USERS`, `P6-IMPORT3-HELD`) — bounded local acceptance verified
+## Mailman 3 import (`P6-IMPORT3-REST`, `P6-IMPORT3-USERS`, `P6-IMPORT3-HELD`, `P6-IMPORT3-DB`) — bounded local acceptance verified
 
 A whole Mailman 3 site moves over from a running core, read-only:
 
@@ -11,6 +11,24 @@ listmngr import3 --rest http://127.0.0.1:8001/3.1 \
 listmngr import3 --rest http://127.0.0.1:8001/3.1 \
     --user restadmin --password-file /protected/path/rest.pass
 ```
+
+Or, with the core stopped, straight from its database and `var_dir`
+(the `[database] url` of its `mailman.cfg`, `sqlite:///…` or
+`postgres://…`; the held messages live in `var/messages`):
+
+```sh
+listmngr import3 --db sqlite:////var/lib/mailman/data/mailman.db \
+    --var-dir /var/lib/mailman --dry-run
+listmngr import3 --db postgres://mailman:…@127.0.0.1/mailman \
+    --var-dir /var/lib/mailman
+```
+
+Both read the same site into the same plan: the database path decodes
+what Mailman stores — its enums as integers, its intervals, the pickled
+lists, the pending key/values, the pickled `email.message.Message` of
+each held message — into what the REST API would have answered, and is
+checked against the REST answers of the very same core. Without
+`--var-dir` the held messages are reported and left behind.
 
 The importer reads the core's domains, its site bans, its accounts (each
 with its addresses, the one it prefers and its own preferences), every
