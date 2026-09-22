@@ -123,7 +123,7 @@ Người đang tìm/đang dùng Mailman có thể chọn listmngr mà **không m
 | Errors/log        | `thiserror`, `anyhow`, `tracing`, `tracing-subscriber`                      | 2 / 1 / 0.1               |                                            |
 | IDs/time          | `uuid` (v7), `chrono`                                                       | 1.26 / 0.4                |                                            |
 | IDN               | `idna`                                                                      | 1.1                       |                                            |
-| Pickle (import21) | reader riêng trong `crates/import` (`pickle.rs`)                            | –                         | `config.pck` Mailman 2.1 (serde-pickle 1.2.0 đọc sai opcode `OBJ`) |
+| Pickle (import21, import3 --db) | reader riêng trong `crates/import` (`pickle.rs`)              | –                         | `config.pck` Mailman 2.1; cột pickled + message store của Mailman 3 (serde-pickle 1.2.0 đọc sai opcode `OBJ`) |
 | Test              | `testcontainers`, `proptest`, `cargo-fuzz`, `insta`, Playwright (dev only)  | –                         |                                            |
 | Supply chain      | `cargo-deny`, `cargo-audit`, `cargo-sbom`, `cosign`                         | –                         |                                            |
 
@@ -968,7 +968,8 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
   - [x] ~~**P6-IMPORT3-REST**~~ (xong) (M): `listmngr import3 --rest` — `rest3::Rest` (Basic auth, chỉ GET, password từ file), `import3::fetch` (domains, site bans, lists + config, 4 roster + preferences, bans, header-matches, uris; phân trang `count`/`page`), `plan()` (bảng 75 setting, `7d` → ngày, alias theo dòng, phần còn lại thành warning), `apply()` audited và chạy lại được.
   - [x] ~~**P6-IMPORT3-USERS**~~ (xong) (M): user + address + preferred address + preferences qua `UserRepo::create_imported_with_context` (credential `usable=0`, adopt address bare, giữ verification, membership `as_user`); password Mailman (passlib) **không** import — chủ tài khoản đặt lại qua recovery.
   - [x] ~~**P6-IMPORT3-HELD**~~ (xong) (M): held messages + pending requests của Mailman 3 → `ModerationRepo::hold_imported_with_context` (giữ nguyên bytes + `hold_date`, audit `moderation.import`, không gửi notice) và `WorkflowRepo::import_request_with_context` (`pending_moderation`, audit `subscription.import`); confirmation subscriber còn nợ thì cảnh báo, không import.
-  - [ ] **P6-IMPORT3-DB** (L): đọc thẳng Mailman 3 DB (không cần core chạy) và HyperKitty DB (threads/votes/tags/categories/favorites).
+  - [x] ~~**P6-IMPORT3-DB**~~ (xong) (L): `import3 --db` đọc thẳng DB Mailman 3 (SQLite/PostgreSQL qua sqlx Any) + `var/messages` (pickle `email.message.Message` → `render_message`) ra cùng `Site` với REST; enum int, interval, pickled `MutableList`, `pended`/`pendedkeyvalue`, `_request`; kiểm chéo REST ↔ DB trên cùng một core.
+  - [ ] **P6-IMPORT3-HYPERKITTY** (L): đọc HyperKitty DB (threads/votes/tags/categories/favorites) → archive tại đây.
 - [ ] `.po` import → 40+ ngôn ngữ templates
 - [ ] Webhooks + deliveries retry; plugins (Rust trait registry: rules/handlers/archivers)
 - [ ] Remote HyperKitty archiver, Exim snippets, built-in inbound SMTP (experimental), S3 message store

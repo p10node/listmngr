@@ -30,4 +30,5 @@ exec cargo test --locked --workspace --all-targets -- --ignored \
   --skip real_postfix_lookup_agrees_with_runtime_recipient_validation \
   --skip real_postmap_compiles_hash_maps_that_answer_exact_lookups \
   --skip import21_reads_mailman3s_own_fixture \
-  --skip import3_reads_a_real_mailman3_core
+  --skip import3_reads_a_real_mailman3_core \
+  --skip import3_reads_a_real_cores_database

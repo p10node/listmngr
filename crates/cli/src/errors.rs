@@ -44,7 +44,7 @@ pub fn classify(error: &anyhow::Error) -> (u8, &'static str, &'static str) {
     }
     if let Some(error) = error.downcast_ref::<listmngr_import::Error>() {
         return match error {
-            listmngr_import::Error::Rest(_) => (
+            listmngr_import::Error::Rest(_) | listmngr_import::Error::Database(_) => (
                 11,
                 "CLI-IMPORT-SOURCE",
                 "the Mailman site could not be read",
