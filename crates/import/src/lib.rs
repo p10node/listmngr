@@ -2,9 +2,11 @@
 //!
 //! `import21` reads a Mailman 2.1 list's `config.pck` and applies it the
 //! way Mailman 3's own importer does (`mailman/utilities/importer.py`);
-//! `import3` reads a whole Mailman 3 site over its REST API (`rest3`)
-//! and applies it here.
+//! `import3` reads a whole Mailman 3 site over its REST API (`rest3`) or
+//! straight from its database and message store (`db3`) and applies it
+//! here.
 pub mod config21;
+pub mod db3;
 pub mod import21;
 pub mod import3;
 pub mod pickle;
@@ -20,6 +22,8 @@ pub enum Error {
     Pickle(String),
     #[error("the Mailman 3 core could not be read: {0}")]
     Rest(String),
+    #[error("the Mailman 3 database could not be read: {0}")]
+    Database(String),
     #[error(transparent)]
     Core(#[from] listmngr_core::Error),
 }

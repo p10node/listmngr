@@ -61,15 +61,15 @@ impl Recorded {
             ),
             (
                 "lists/announce.other.invalid/roster/owner",
-                "announce-roster-member",
+                "announce-roster-owner",
             ),
             (
                 "lists/announce.other.invalid/roster/moderator",
-                "announce-roster-member",
+                "announce-roster-moderator",
             ),
             (
                 "lists/announce.other.invalid/roster/nonmember",
-                "announce-roster-member",
+                "announce-roster-nonmember",
             ),
             ("lists/announce.other.invalid/bans", "announce-bans"),
             (
@@ -488,7 +488,7 @@ async fn scenario(db: &Database) {
         (report.members, 4),
         (report.owners, 1),
         (report.moderators, 1),
-        (report.nonmembers, 1),
+        (report.nonmembers, 2),
         (report.bans, 2),
         (report.site_bans, 1),
         (report.header_matches, 2),
@@ -514,9 +514,9 @@ async fn scenario(db: &Database) {
     assert_eq!(again.header_matches, 0);
     assert_eq!(again.held, 0, "a message already held is not held twice");
     assert_eq!(again.requests, 0);
-    // Two domains, nine accounts, two lists, seven members, the held
+    // Two domains, nine accounts, two lists, eight members, the held
     // message and the waiting request were all there already.
-    assert_eq!(again.skipped, 22);
+    assert_eq!(again.skipped, 23);
 }
 
 /// The domains and both lists, with the settings the core gave.

@@ -1,5 +1,31 @@
 # Architecture
 
+## Mailman 3 import from the database — bounded local acceptance verified
+
+`listmngr_import::db3::fetch_db(url, var_dir)` reads a Mailman 3 core's
+own database (SQLite or PostgreSQL through `sqlx::Any`, Mailman's
+`postgresql://` accepted) into the same `Site` the REST client gives, so
+`import3::plan` and `apply` are shared and the two sources are checked
+against each other on the same core. What REST spells out, the tables
+keep as storage: enums as the integers of `mailman.interfaces` (the
+`ACTION`, `FILTER_ACTION`, `ARCHIVE_POLICY`, … tables), booleans that
+SQLite's driver cannot type (`CAST(… AS INTEGER)`), the three intervals
+as a datetime counted from the epoch on SQLite and a real interval on
+PostgreSQL (both asked for in seconds), the nonmember and DMARC lists as
+pickled `MutableList`s (the crate's own pickle reader, which now also
+resolves `STACK_GLOBAL` and SQLAlchemy's mutable collections), the user
+id as a UUID spelt with hyphens on PostgreSQL, the pending
+subscriptions and each held message's metadata as JSON key/values under
+a token (`pended`/`pendedkeyvalue`, the `_pck_*` values pickles inside
+JSON strings), and each held message as a pickled
+`email.message.Message` under `var/messages/<path>`, which
+`render_message` writes back the way Python's generator would (headers,
+`Header` chunks, preamble, boundaries, epilogue). A held message the
+store cannot give — no `--var-dir`, no file — is a warning on the `Site`
+and left behind. `listmngr import3 --db URL [--var-dir DIR]` is the
+command; `--rest` and `--db` exclude each other, and a database nobody
+can open exits `11` with the URL's userinfo scrubbed.
+
 ## Mailman 3 import over REST — bounded local acceptance verified
 
 `listmngr_import::rest3::Rest` is a read-only client of a Mailman 3

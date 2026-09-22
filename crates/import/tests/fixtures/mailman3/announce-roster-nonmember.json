@@ -1,0 +1,23 @@
+{
+  "entries": [
+    {
+      "address": "http://127.0.0.1:8199/3.1/addresses/stranger@example.invalid",
+      "bounce_score": 0,
+      "delivery_mode": "regular",
+      "display_name": "",
+      "email": "stranger@example.invalid",
+      "http_etag": "\"e6d32325c58631c926e4f7a4238cb9c8c7e29af8\"",
+      "last_warning_sent": "0001-01-01T00:00:00",
+      "list_id": "announce.other.invalid",
+      "member_id": "b41bb3233adf4684b40dbea8ae742d17",
+      "role": "nonmember",
+      "self_link": "http://127.0.0.1:8199/3.1/members/b41bb3233adf4684b40dbea8ae742d17",
+      "subscription_mode": "as_address",
+      "total_warnings_sent": 0,
+      "user": "http://127.0.0.1:8199/3.1/users/3c19e008527f4dd38d01256badc6845f"
+    }
+  ],
+  "http_etag": "\"59319d5e2f8882e5cd650bf83c6a99ad72664f5d\"",
+  "start": 0,
+  "total_size": 1
+}

@@ -26,6 +26,10 @@
     "receive_own_postings": false,
     "self_link": "http://127.0.0.1:8199/3.1/members/ad0dce9201074e0b87fa2dde62d4d4cb/preferences"
   },
+  "b41bb3233adf4684b40dbea8ae742d17": {
+    "http_etag": "\"a0f320f905925052d6401cf9b1820b213bf34c1e\"",
+    "self_link": "http://127.0.0.1:8199/3.1/members/b41bb3233adf4684b40dbea8ae742d17/preferences"
+  },
   "c84a53880c764a01840112e1fec69372": {
     "delivery_mode": "regular",
     "http_etag": "\"3105f7a23803d4ef9d5f872bc4e6191ff644564a\"",
