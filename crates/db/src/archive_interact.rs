@@ -62,6 +62,13 @@ pub(crate) fn normalize_label(value: &str, max: usize, what: &str) -> Result<Str
     Ok(out)
 }
 
+/// A category name as the archive keeps it.
+/// # Errors
+/// Returns validation for an empty or over-long result.
+pub fn normalize_category(name: &str) -> Result<String> {
+    normalize_label(name, 40, "archive category")
+}
+
 /// A tag as stored: `normalize_label` at forty characters.
 /// # Errors
 /// Returns validation for an empty or over-long result.
