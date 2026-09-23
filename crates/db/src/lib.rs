@@ -10,6 +10,7 @@ pub mod bounce_processing;
 pub mod bounces;
 pub mod digests;
 pub mod header_matches;
+pub use archive::interact_import::{ImportedInteractions, InteractionReport};
 pub use header_matches::{FieldEdit, HeaderMatchPatch, HeaderMatchRow};
 pub use moderation_import::{ImportedHold, ImportedRequest};
 pub use user_import::{ImportedAddress, ImportedUser};

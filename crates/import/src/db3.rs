@@ -186,7 +186,7 @@ fn boundary_of(content_type: &str) -> Option<String> {
 }
 
 /// A database error message with any URL userinfo replaced.
-fn scrub(message: &str) -> String {
+pub(crate) fn scrub(message: &str) -> String {
     message
         .split_whitespace()
         .map(|word| {

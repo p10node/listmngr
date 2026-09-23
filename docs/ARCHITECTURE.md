@@ -1,5 +1,29 @@
 # Architecture
 
+## HyperKitty interactions import — bounded local acceptance verified
+
+`listmngr_import::hyperkitty::fetch(url, only)` reads a HyperKitty
+database (SQLite or PostgreSQL through `sqlx::Any`, one connection, the
+URL's userinfo scrubbed from errors like `db3`) into one `Archive` per
+`hyperkitty_mailinglist` row: the votes as `(message_id_hash, reader
+address, ±1)` joined through `hyperkitty_email` and `auth_user`, the
+taggings as `(thread_id, tag, address)`, each thread's category name,
+and the favourites, plus the message and thread counts for `--dry-run`.
+HyperKitty's `message_id_hash` is the hash this archive computes and its
+`thread_id` is the hash of the thread's first post, which is how threads
+are named here, so no mapping table is needed.
+
+`ArchiveRepo::import_interactions` (`crates/db/src/archive_interact_import.rs`)
+writes them in one transaction with one `archive.import_interactions`
+audit event carrying the report: a reader is resolved to an account
+through `addresses.user_id`, a vote needs a visible post with that hash,
+a tag, category or favourite a visible thread; anything else is
+`skipped`. Each row is deleted and rewritten on its primary key, so a
+second run changes nothing; a category is created on the list when it is
+missing. Nothing is queued. `listmngr import3 --hyperkitty URL` runs it
+after the site (`--rest`/`--db`) when both are given, prints one JSON
+line per list, and warns for a list that is not here.
+
 ## Mailman 3 import from the database — bounded local acceptance verified
 
 `listmngr_import::db3::fetch_db(url, var_dir)` reads a Mailman 3 core's
