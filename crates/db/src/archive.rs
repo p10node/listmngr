@@ -15,6 +15,8 @@ mod browser;
 pub mod import;
 #[path = "archive_interact.rs"]
 pub mod interact;
+#[path = "archive_interact_import.rs"]
+pub mod interact_import;
 enum Selection<'a> {
     Thread(Option<&'a str>),
     Message(&'a str),
@@ -79,6 +81,13 @@ pub struct AttachmentContent {
 pub struct ArchiveRepo<'a> {
     db: &'a Database,
     clock: Option<&'a dyn crate::mail_queue::LeaseClock>,
+}
+impl<'a> ArchiveRepo<'a> {
+    /// The database this repository writes to, for the import module.
+    #[must_use]
+    pub(crate) const fn database(&self) -> &'a Database {
+        self.db
+    }
 }
 impl Database {
     #[must_use]

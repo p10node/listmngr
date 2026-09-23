@@ -103,7 +103,9 @@ enum Command {
     },
     /// Import a Mailman 3 site over its REST API: its domains, lists and
     /// their settings, rosters with each member's own preferences, bans
-    /// and header matches. What is here already is left alone.
+    /// and header matches; and, with `--hyperkitty`, the votes, tags,
+    /// categories and favourites of its archive. What is here already is
+    /// left alone.
     Import3(import3::Options),
     /// Import a Mailman 2.1 list's `config.pck` into an existing list:
     /// its settings, bans, header filter rules, decorations and rosters.
