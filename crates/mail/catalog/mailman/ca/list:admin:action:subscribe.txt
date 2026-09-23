@@ -1,0 +1,1 @@
+La vostra autorització és necessària per a una sol·licitud de subscripció a la llista de correu:    Per:  ${member}    Llista: ${listname}

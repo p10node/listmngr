@@ -1,0 +1,9 @@
+We hebben een bericht van uw e-mailadres <$sender_email> ontvangen dat vraagt
+om een automatisch antwoord van de $listname maillijst.
+
+Het aantal berichten dat we vandaag ontvangen hebben is: $count.  Om problemen zoals
+lussen tussen e-mail robots te vermijden, zullen we u vandaag geen antwoorden meer sturen.
+Gelieve het morgen opnieuw te proberen.
+
+Als u ervan overtuigd bent dat dit bericht niet juist is, of als u vragen heeft,
+gelieve dan de lijstbeheerder te contacteren via $owner_email.

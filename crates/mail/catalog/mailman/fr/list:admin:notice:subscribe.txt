@@ -1,0 +1,1 @@
+${member} a été inscrit⋅e à ${display_name} avec succès.

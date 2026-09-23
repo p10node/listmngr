@@ -1,0 +1,13 @@
+En tant qu’administrateur d’une liste, votre autorisation est nécessaire pour
+valider le message suivant :
+
+    Liste : ${listname}
+    De :    ${sender_email}
+    Objet : ${subject}
+
+Ce message a besoin d’une validation car :
+
+${reasons}
+
+Vous pouvez vous rendre sur votre tableau de bord pour donner suite, ou non, à
+cette requête.

@@ -1,0 +1,5 @@
+A sua autorização é necessária para a aprovação de uma solicitação
+de cancelamento de inscrição à lista de discussão:
+
+    Para:  ${member}
+    Lista: ${listname}

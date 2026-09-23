@@ -1,0 +1,4 @@
+De $listname maillijst heeft $count moderatieverzoeken in afwachting.
+
+$data
+Gelieve deze zo snel mogelijk te bekijken.

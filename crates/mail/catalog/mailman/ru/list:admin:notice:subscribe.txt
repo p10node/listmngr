@@ -1,0 +1,1 @@
+$member успешно подписан на $display_name.

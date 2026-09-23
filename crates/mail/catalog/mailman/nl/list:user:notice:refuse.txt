@@ -1,0 +1,13 @@
+Uw verzoek aan de $listname maillijst
+
+    $request
+
+is afgekeurd door de lijstmoderator.  De moderator gaf
+de volgende redenen tot afkeuring op:
+
+"$reason"
+
+Vragen of opmerkingen moeten aan de lijstbeheerder gericht worden
+via:
+
+    $owner_email

@@ -1,0 +1,4 @@
+Ekteki mesaj bir geri dönme olarak alındı, ancak ya geri dönme biçimi
+tanınmadı ya da ondan hiçbir üye adresi çıkarılamadı.  Bu posta listesi, geri
+dönen tüm tanınmayan mesajları liste yönetici(ler)ine gönderecek şekilde
+yapılandırıldı.

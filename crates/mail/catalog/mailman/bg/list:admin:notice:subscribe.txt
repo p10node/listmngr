@@ -1,0 +1,1 @@
+$member се абонира за $display_name.

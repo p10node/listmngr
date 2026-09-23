@@ -252,9 +252,6 @@ impl Report3 {
     }
 }
 
-/// The languages this site's catalog has.
-const LANGUAGES: [&str; 2] = ["en", "vi"];
-
 /// How a Mailman value becomes this site's.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind3 {
@@ -625,6 +622,13 @@ async fn one_member<S: Source + Sync>(
     })
 }
 
+/// Mailman's language code (`pt_BR`, `zh_Hans`) as the tag this site
+/// stores (`pt-BR`, `zh-Hans`), when a notice can be written in it.
+fn site_language(code: &str) -> Option<&'static str> {
+    let tag = code.replace('_', "-");
+    listmngr_i18n::notice_languages().find(|known| *known == tag)
+}
+
 /// The preferences Mailman answers, which are only those set on the
 /// resource itself; a language this site's catalog does not have is
 /// left out.
@@ -635,7 +639,7 @@ fn preferences_of(preferences: &Json) -> Preferences {
         preferred_language: preferences
             .get("preferred_language")
             .and_then(Json::as_str)
-            .filter(|code| LANGUAGES.contains(code))
+            .and_then(site_language)
             .map(str::to_owned),
         receive_list_copy: preferences.get("receive_list_copy").and_then(Json::as_bool),
         receive_own_postings: preferences
@@ -740,14 +744,16 @@ pub fn plan(site: &Site) -> Plan3 {
                     .push(format!("{}: {key} {reason}", list.list_id.as_str())),
             }
         }
-        if let Some(code) = settings.get("preferred_language").and_then(Json::as_str)
-            && !LANGUAGES.contains(&code)
-        {
-            plan.warnings.push(format!(
-                "{}: preferred_language {code:?} is not a language this site has; kept the list's",
-                list.list_id.as_str()
-            ));
-            settings.remove("preferred_language");
+        if let Some(code) = settings.get("preferred_language").and_then(Json::as_str) {
+            if let Some(tag) = site_language(code) {
+                settings.insert("preferred_language".into(), Json::from(tag));
+            } else {
+                plan.warnings.push(format!(
+                    "{}: preferred_language {code:?} is not a language this site has; kept the list's",
+                    list.list_id.as_str()
+                ));
+                settings.remove("preferred_language");
+            }
         }
         for (name, uri) in &list.uris {
             plan.warnings.push(format!(

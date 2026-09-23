@@ -1,0 +1,12 @@
+Senden Sie Beiträge für die Mailingliste ${display_name} an
+	${listname}
+
+Um die Liste per E-Mail zu abonnieren oder um sich abzumelden,
+senden Sie bitte Nachricht mit dem Betreff oder Inhalt 'help' an
+	${request_email}
+
+Sie erreichen die Administator*in dieser Liste unter
+	${owner_email}
+
+Wenn Sie antworten, bearbeiten Sie bitte die Betreffzeile, damit sie 
+aussagekräftiger ist als "Re: Inhalt des ${display_name} Digest..."

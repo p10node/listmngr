@@ -1,0 +1,4 @@
+Priložená správa bola prijatá ako nedoručená, ale buď formát nedoručenia
+nebol rozpoznaný alebo z neho nebolo možné extrahovať žiadne členské adresy.
+Táto konferencia bola nakonfigurovaná tak, aby odosielala všetky nerozpoznané
+správy o nedoručení administrátorovi.

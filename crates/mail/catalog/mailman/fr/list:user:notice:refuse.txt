@@ -1,0 +1,13 @@
+Votre requête à la liste de diffusion ${listname}
+
+    ${request}
+
+a été rejetée par le modérateur de la liste.  Le modérateur a donné la raison
+suivante :
+
+« ${reason} »
+
+Toute question ou commentaire doit être envoyé à l’administrateur de la liste
+à l’adresse suivante :
+
+    ${owner_email}

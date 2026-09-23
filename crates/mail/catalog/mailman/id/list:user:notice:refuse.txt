@@ -1,0 +1,11 @@
+Permintaan Anda ke $listname
+
+    $request
+
+telah ditolak oleh moderator milis.  Moderator memberikan alasan berikut untuk menolak permintaan Anda:
+
+"$reason"
+
+Pertanyaan atau komentar bisa ditujukan pada administrator milis di:
+
+    $owner_email

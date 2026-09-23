@@ -1,0 +1,13 @@
+In qualità di amministratore della lista, è richiesta la tua autorizzazione per
+l'inserimento nella seguente mailing list:
+
+    Lista:    ${listname}
+    Da:    ${sender_email}
+    Oggetto: ${subject}
+
+Il messaggio viene mantenuto perché:
+
+${reasons}
+
+A tuo piacimento, visita pannello di controllo per approvare o negare la
+richiesta.

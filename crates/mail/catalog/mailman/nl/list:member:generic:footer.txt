@@ -1,0 +1,3 @@
+_______________________________________________
+$display_name maillijst -- $listname
+Stuur een e-mail naar ${short_listname}-leave@${domain} om je uit te schrijven

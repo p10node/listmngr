@@ -1,0 +1,1 @@
+${member}, ${display_name} listesine başarıyla abone oldu.

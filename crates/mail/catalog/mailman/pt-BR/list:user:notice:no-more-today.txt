@@ -1,0 +1,9 @@
+Recebemos uma mensagem de seu endereço <${sender_email}> solicitando
+uma resposta automática da lista de discussão ${listname}.
+
+O número que vimos hoje: ${count}. Para evitar problemas como reenvio de
+repetitivo de mensagens entre robôs de e-mail, não lhe enviaremos mais
+respostas hoje. Por favor, tente novamente amanhã.
+
+Se você acredita que esta mensagem é um erro, ou se você tiver alguma
+dúvida, entre em contato com o dono da lista em ${owner_email}.

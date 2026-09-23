@@ -154,7 +154,7 @@ const UNRECOGNIZED: Options = &[
     ("site_owner", "web-ls-unrecognized-site-owner"),
     ("administrators", "web-ls-unrecognized-administrators"),
 ];
-const LANGUAGES: Options = &[("en", "web-language-en"), ("vi", "web-language-vi")];
+const LANGUAGES: Options = listmngr_i18n::NOTICE_LANGUAGE_OPTIONS;
 const PIPELINES: Options = &[
     ("default-posting-pipeline", "web-ls-pipeline-default"),
     ("virgin", "web-ls-pipeline-virgin"),

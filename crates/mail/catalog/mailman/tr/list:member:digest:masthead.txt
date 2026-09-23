@@ -1,0 +1,12 @@
+${display_name} posta listesi gönderilerini aşağıdaki adrese gönder:
+	${listname}
+
+Abone olmak veya abonelikten çıkmak için aşağıdaki adrese konusu veya
+gövdesi 'help' olan bir mesaj gönderin:
+	${request_email}
+
+Listeyi yöneten kişiye aşağıdaki adresten ulaşabilirsiniz:
+	${owner_email}
+
+Yanıtlarken, lütfen Konu satırınızı "Re: ${display_name} özeti içeriği..."
+değil de daha açıklayıcı olacak şekilde düzenleyin

@@ -1,0 +1,1 @@
+Uživatel ${member} byl odebrán z listu ${display_name}.

@@ -1,0 +1,11 @@
+发送 ${display_name} 邮件列表提交至
+	${listname}
+
+要通过电子邮件订阅或退订，请发送以“help”为主题或正文的消息至
+	${request_email}
+
+你可以通过以下地址联系到管理列表的人员
+	${owner_email}
+
+回复时，请编辑你的主题行，使其比
+“Re: Contents of ${display_name} digest...”更具体

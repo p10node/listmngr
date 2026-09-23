@@ -1,0 +1,4 @@
+The $listname list has $count moderation requests waiting.
+
+$data
+Please attend to this at your earliest convenience.

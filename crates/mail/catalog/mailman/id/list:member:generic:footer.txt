@@ -1,0 +1,3 @@
+_______________________________________________
+milis $display_name mailing list -- $listname
+Untuk membatalkan langganan, kirim surel ke ${short_listname}-leave@${domain}

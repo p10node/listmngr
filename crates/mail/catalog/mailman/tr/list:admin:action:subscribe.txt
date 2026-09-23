@@ -1,0 +1,5 @@
+Bir posta listesi abonelik isteği onayı için yetkilendirmeniz
+gerekiyor:
+
+    Kim için:  ${member}
+    Liste: ${listname}

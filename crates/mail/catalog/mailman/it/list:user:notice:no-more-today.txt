@@ -1,0 +1,9 @@
+Abbiamo ricevuto un messaggio dal tuo indirizzo <${sender_email}> che richiede una
+risposta automatica dalla mailing list ${listname}.
+
+Il numero che abbiamo visto oggi: ${count}.  Per evitare problemi quali
+loop di posta tra i robots di posta elettronica, oggi non ti invieremo ulteriori
+risposte. Per favore riprova domani.
+
+Se ritieni che questo messaggio sia un errore o se hai domande,
+contatta il proprietario della lista a ${owner_email}.

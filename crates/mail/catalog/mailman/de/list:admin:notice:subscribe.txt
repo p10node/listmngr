@@ -1,0 +1,1 @@
+${member} hat ${display_name} erfolgreich abonniert.

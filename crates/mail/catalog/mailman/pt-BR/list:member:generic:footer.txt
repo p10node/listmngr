@@ -1,0 +1,3 @@
+_______________________________________________
+Lista discussão ${display_name} -- ${listname}
+Para se desinscrever, envie um e-mail para ${short_listname}-leave@${domain}

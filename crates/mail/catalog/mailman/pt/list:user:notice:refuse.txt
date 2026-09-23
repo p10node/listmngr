@@ -1,0 +1,13 @@
+A sua solicitação à lista de discussão ${listname}
+
+    ${request}
+
+foi rejeitada pelo moderador da lista. O moderador deu o seguinte
+motivo para rejeitar a sua solicitação:
+
+"${reason}"
+
+Quaisquer perguntas ou comentários devem ser dirigidos ao
+administrador da lista em:
+
+    ${owner_email}

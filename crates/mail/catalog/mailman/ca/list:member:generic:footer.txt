@@ -1,0 +1,1 @@
+_______________________________________________Llista de correu ${display_name} -- ${listname} Per donar-se de baixa envieu un correu a ${short_listname}-leave@${domain}

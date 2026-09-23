@@ -242,7 +242,7 @@ async fn identity(db: &Database, app: &axum::Router, owner: &str) {
             ("info", "Long <info>"),
             ("subject_prefix", "[grp] "),
             ("advertised", "true"),
-            ("preferred_language", "vi"),
+            ("preferred_language", "de"),
         ]),
     )
     .await;
@@ -252,7 +252,10 @@ async fn identity(db: &Database, app: &axum::Router, owner: &str) {
     assert_eq!(list.display_name, "Groups <list>");
     assert_eq!(list.info, "Long <info>");
     assert_eq!(list.subject_prefix, "[grp] ");
-    assert_eq!(list.preferred_language, "vi");
+    assert_eq!(
+        list.preferred_language, "de",
+        "a language Mailman translated"
+    );
     assert_eq!(
         count(
             db,

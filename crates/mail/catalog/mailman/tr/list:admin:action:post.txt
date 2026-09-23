@@ -1,0 +1,13 @@
+Liste yöneticisi olarak, aşağıdaki posta listesi gönderisi için
+yetkilendirmeniz isteniyor:
+
+    Liste:    ${listname}
+    Kimden:    ${sender_email}
+    Konu: ${subject}
+
+Mesaj aşağıdaki nedenden dolayı bekletiliyor:
+
+${reasons}
+
+İstediğiniz zaman, isteği onaylamak veya reddetmek için denetim
+panelinizi ziyaret edin.

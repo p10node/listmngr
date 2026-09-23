@@ -1,0 +1,12 @@
+Vaša správa pre '$listname' s predmetom
+
+    $subject
+
+sa pozastavuje, kým ju schváli moderátor konferencie.
+
+Správa sa pozastavuje, pretože:
+
+$reasons
+
+Buď bude správa zverejnená v konferencii, alebo dostanete oznámenie
+o rozhodnutí moderátora.

@@ -1,0 +1,3 @@
+_______________________________________________
+${display_name} mailing-list -- ${listname}
+Pro odhlášení odešlete email na ${short_listname}-leave@${domain}

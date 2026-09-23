@@ -1,0 +1,10 @@
+La liste de diffusion '${listname}' vient d’être créée pour vous.  Voici quelques
+informations basiques concernant cette liste.
+
+Il y a une interface par courriel pour les utilisateurs (pas lesa dministrateurs) de votre liste.
+Vous pouvez obtenir des informations sur sonutilisation en envoyant un courriel avec
+seulement le mot 'help' dans l’objet ou corps à l’adresse :
+
+    ${request_email}
+
+Veuillez envoyer toutes vos questions à ${site_email}.

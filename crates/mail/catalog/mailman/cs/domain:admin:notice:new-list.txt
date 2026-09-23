@@ -1,0 +1,10 @@
+Byl pro Vás právě vytvořen mailing-list '${listname}'.
+Níže pár základních informací.
+
+Mailing-list je vybaven emailovým rozhraním pro uživatele listu (nikoliv jeho administrátory).
+Návod k jeho použití získáte tak, že pošlete na adresu listu zprávu obsahující jediné slovo: 'help' buď v předmětu, nebo v těle zprávy, na emailovou adresu:
+
+    ${request_email}
+
+
+S případnými dotazy se prosím obraťte na ${site_email}.

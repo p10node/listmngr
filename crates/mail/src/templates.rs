@@ -382,16 +382,28 @@ pub fn builtin(name: &str) -> Option<&'static str> {
 }
 
 /// The built-in body for `name` in `language`, falling back to English.
-/// Only `en` and `vi` ship; other tags are served English.
+///
+/// `vi` is this project's own translation; the other notice languages
+/// serve Mailman's translation of the templates whose English here is
+/// Mailman's ([`crate::templates_mailman::IMPORTED`]).
 #[must_use]
 pub fn builtin_in(name: &str, language: &str) -> Option<&'static str> {
-    let language = listmngr_i18n::negotiate(language);
-    if language == "vi"
-        && let Some(body) = crate::templates_vi::builtin(name)
-    {
-        return Some(body);
+    builtin_language(name, language).map(|(body, _)| body)
+}
+
+/// [`builtin_in`] with the language the body is actually in.
+#[must_use]
+pub fn builtin_language(name: &str, language: &str) -> Option<(&'static str, &'static str)> {
+    let language = listmngr_i18n::negotiate_notice(language);
+    let translated = if language == "vi" {
+        crate::templates_vi::builtin(name)
+    } else {
+        crate::templates_mailman::builtin(language, name)
+    };
+    if let Some(body) = translated {
+        return Some((body, language));
     }
-    builtin(name)
+    builtin(name).map(|body| (body, "en"))
 }
 
 /// Every placeholder name a list template may use: the list's own, then
@@ -610,7 +622,7 @@ pub fn parse_uri(uri: &str) -> Result<Source, TemplateError> {
     }
     if let Some(rest) = uri.strip_prefix("mailman:///") {
         // An optional leading language segment (`vi/name`) is accepted and
-        // ignored: the catalog is English-only today.
+        // ignored: the recipient's language picks the translation.
         let name = rest.rsplit_once('/').map_or(rest, |(_, name)| name);
         if rest.matches('/').count() > 1 || name.is_empty() {
             return Err(TemplateError::InvalidUri);
@@ -644,7 +656,7 @@ pub fn parse_uri(uri: &str) -> Result<Source, TemplateError> {
 }
 
 /// Load the text behind a source. `language` selects a catalog translation
-/// when one exists (`vi` today); English is the fallback.
+/// when one exists (`vi`, or Mailman's); English is the fallback.
 ///
 /// # Errors
 /// Returns [`TemplateError`] for an unknown built-in, an unreadable or

@@ -56,11 +56,13 @@ const DELIVERY_STATUSES: Options = &[
     ("by_moderator", "web-status-by-moderator"),
     ("by_bounces", "web-status-by-bounces"),
 ];
-const LANGUAGES: Options = &[
-    ("default", "web-member-inherit"),
-    ("en", "web-language-en"),
-    ("vi", "web-language-vi"),
-];
+/// Inherit, then every language a notice can be written in.
+static LANGUAGES: std::sync::LazyLock<Vec<(&'static str, &'static str)>> =
+    std::sync::LazyLock::new(|| {
+        std::iter::once(("default", "web-member-inherit"))
+            .chain(listmngr_i18n::NOTICE_LANGUAGE_OPTIONS.iter().copied())
+            .collect()
+    });
 
 /// The most addresses one mass form takes.
 const MASS_LIMIT: usize = 1000;
@@ -323,7 +325,7 @@ fn option_fields(
         ("hide_address", TRISTATE, false),
         ("receive_list_copy", TRISTATE, false),
         ("receive_own_postings", TRISTATE, false),
-        ("preferred_language", LANGUAGES, false),
+        ("preferred_language", LANGUAGES.as_slice(), false),
     ];
     specs
         .iter()
