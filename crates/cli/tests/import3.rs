@@ -312,3 +312,147 @@ fn import3_reads_the_cores_database_without_a_core() {
     assert_eq!(plan["lists"].as_array().unwrap().len(), 1);
     drop(rt);
 }
+
+/// `HyperKitty`'s archive on top: the posts come from its mbox export
+/// (`listmngr archive import`), the readers from the site import, and
+/// `--hyperkitty` places the votes, tags, category and favourite of a
+/// real `HyperKitty` 1.3.12 database on them.
+#[test]
+fn import3_brings_what_readers_left_on_hyperkitty() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("hyperkitty.db").display()
+    );
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(readers_site(&url));
+    let mbox = hyperkitty_mbox();
+    let mbox_path = dir.path().join("rust-users.mbox");
+    std::fs::write(&mbox_path, mbox).unwrap();
+    let command = || {
+        let mut command = Command::cargo_bin("listmngr").unwrap();
+        command
+            .env_clear()
+            .current_dir(dir.path())
+            .env("LISTMNGR__DATABASE__URL", &url);
+        command
+    };
+    command()
+        .args(["archive", "import", "rust-users.example.invalid"])
+        .arg(&mbox_path)
+        .assert()
+        .success();
+    let hyperkitty = format!(
+        "sqlite://{}?mode=ro",
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../import/tests/fixtures/hyperkitty/hyperkitty.db")
+            .display()
+    );
+    // A dry run counts what HyperKitty holds and writes nothing.
+    let output = command()
+        .args(["import3", "--hyperkitty", &hyperkitty, "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let plan: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
+    assert_eq!(plan["hyperkitty"]["messages"], 3, "{plan}");
+    assert_eq!(plan["hyperkitty"]["votes"], 3);
+    // The real run lands every vote, tag, category and favourite.
+    let output = command()
+        .args(["import3", "--hyperkitty", &hyperkitty])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(output.stdout.trim_ascii()).unwrap();
+    let report = &report["hyperkitty"];
+    assert_eq!(report["list_id"], "rust-users.example.invalid", "{report}");
+    assert_eq!(report["votes"], 3);
+    assert_eq!(report["tags"], 2);
+    assert_eq!(report["categories"], 1);
+    assert_eq!(report["favorites"], 1);
+    assert_eq!(report["skipped"], 0);
+    rt.block_on(async {
+        let db = Database::connect(&url, 1).await.unwrap();
+        let list = "rust-users.example.invalid".parse().unwrap();
+        let meta = db
+            .archive()
+            .browser_thread_meta(&list, None, "WYKGK4F2CNJFZTD2CVSSNJYJ3EP4JHZU")
+            .await
+            .unwrap();
+        assert_eq!(meta.category.as_deref(), Some("announcements"));
+        assert_eq!(meta.tags.len(), 2);
+        db.pool().close().await;
+    });
+    // A HyperKitty nobody can open exits 11 without its password.
+    let output = command()
+        .args([
+            "import3",
+            "--hyperkitty",
+            "postgres://hyperkitty:hunter2hunter2@127.0.0.1:1/hyperkitty",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(11), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error[CLI-IMPORT-SOURCE]"), "{stderr}");
+    assert!(!stderr.contains("hunter2hunter2"), "{stderr}");
+    drop(rt);
+}
+
+/// The list the archive belongs to, and the two readers with accounts.
+async fn readers_site(url: &str) {
+    use listmngr_db::{AuditContext, ImportedAddress, ImportedUser, NewList};
+    let db = Database::connect(url, 1).await.unwrap();
+    db.migrate().await.unwrap();
+    db.domains()
+        .create("example.invalid", "", None)
+        .await
+        .unwrap();
+    let list = db
+        .lists()
+        .create(NewList {
+            list_id: "rust-users.example.invalid".parse().unwrap(),
+            display_name: "Rust".into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap();
+    db.lists()
+        .update(&list.id, &serde_json::json!({"archive_policy": "public"}))
+        .await
+        .unwrap();
+    for email in ["alice@example.invalid", "bob@example.invalid"] {
+        db.users()
+            .create_imported_with_context(
+                ImportedUser {
+                    display_name: String::new(),
+                    is_server_owner: false,
+                    locale: "en".into(),
+                    addresses: vec![ImportedAddress {
+                        email: email.into(),
+                        display_name: String::new(),
+                        verified: true,
+                    }],
+                    preferred: None,
+                },
+                &AuditContext::system(),
+            )
+            .await
+            .unwrap();
+    }
+    db.pool().close().await;
+}
+
+/// The fixture's three posts as `HyperKitty`'s mbox export writes them.
+fn hyperkitty_mbox() -> Vec<u8> {
+    use listmngr_archive::mbox::write_message;
+    let mut mbox = Vec::new();
+    for message in [
+        "Message-ID: <root-1@example.invalid>\r\nFrom: alice@example.invalid\r\nDate: Mon, 21 Sep 2026 09:00:00 +0000\r\nSubject: Hello archive\r\n\r\nThe first post.\r\n",
+        "Message-ID: <reply-1@example.invalid>\r\nIn-Reply-To: <root-1@example.invalid>\r\nFrom: bob@example.invalid\r\nDate: Mon, 21 Sep 2026 10:00:00 +0000\r\nSubject: Re: Hello archive\r\n\r\nA reply.\r\n",
+        "Message-ID: <root-2@example.invalid>\r\nFrom: carol@elsewhere.invalid\r\nDate: Tue, 22 Sep 2026 08:30:00 +0000\r\nSubject: Another thread\r\n\r\nA second thread.\r\n",
+    ] {
+        write_message(&mut mbox, message.as_bytes()).unwrap();
+    }
+    mbox
+}

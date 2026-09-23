@@ -224,8 +224,46 @@ confirmation the subscriber still owed is *not* imported — the token was
 issued by the other site and cannot be honoured here — and each one is
 reported so the operator can ask those people to join again.
 
+### The archive (HyperKitty)
+
+HyperKitty keeps each post's text, not the message, so the posts come
+over as an mbox — HyperKitty's own export
+(`/archives/list/<list>/export/<name>.mbox.gz`) or the mbox it was
+imported from — imported with `listmngr archive import <list_id>
+<file.mbox>`. The Message-ID-Hash computed here is
+HyperKitty's, and a thread is named by its first post's hash as
+HyperKitty names it, so the URLs stay the same.
+
+What an mbox cannot carry — what readers left on the archive — comes
+from HyperKitty's own database, after the site and the mbox:
+
+```sh
+listmngr import3 --hyperkitty sqlite:////var/lib/mailman-web/mailman-web.db --dry-run
+listmngr import3 --hyperkitty postgres://mailmanweb:…@127.0.0.1/mailmanweb
+```
+
+`--hyperkitty` takes the Django `DATABASES` of the Mailman web
+installation as a URL, and may be given alone or together with `--rest`
+or `--db` (the site is imported first). `--list` limits it to one list.
+
+| HyperKitty | Here |
+| --- | --- |
+| `hyperkitty_vote` (`email`, `user`, `value` ±1) | a vote on the post with that Message-ID-Hash |
+| `hyperkitty_tagging` → `hyperkitty_tag.name` | a tag on the thread, by the reader who tagged it |
+| `hyperkitty_thread.category` → `hyperkitty_threadcategory.name` | the thread's category (the category is created on the list; its colour is not kept) |
+| `hyperkitty_favorite` | a favourite thread of that reader |
+
+A reader is matched by the email address of their Django account
+(`auth_user.email`) to an account imported here; a row whose reader has
+no account here, or whose post or thread the mbox did not bring, is
+counted as `skipped`, never invented. Each list prints one JSON line
+(`votes`, `tags`, `categories`, `favorites`, `skipped`), one
+`archive.import_interactions` audit event records it, nothing is mailed,
+and running it again writes the same rows, not more. A list HyperKitty
+archives that is not a list here is a warning.
+
 ### Not imported yet
 
-Passwords (see above), the HyperKitty database (`P6-IMPORT3-HYPERKITTY`),
-and the archive, which comes over as an mbox (`listmngr archive
-import`).
+Passwords (see above); HyperKitty's Django profiles, social logins,
+per-reader "last read" markers, thread `starting_email` overrides and
+category colours.

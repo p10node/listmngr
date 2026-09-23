@@ -1,6 +1,6 @@
 # listmngr
 
-## Mailman 3 import (`P6-IMPORT3-REST`, `P6-IMPORT3-USERS`, `P6-IMPORT3-HELD`, `P6-IMPORT3-DB`) — bounded local acceptance verified
+## Mailman 3 import (`P6-IMPORT3-REST`, `P6-IMPORT3-USERS`, `P6-IMPORT3-HELD`, `P6-IMPORT3-DB`, `P6-IMPORT3-HYPERKITTY`) — bounded local acceptance verified
 
 A whole Mailman 3 site moves over from a running core, read-only:
 
@@ -29,6 +29,21 @@ lists, the pending key/values, the pickled `email.message.Message` of
 each held message — into what the REST API would have answered, and is
 checked against the REST answers of the very same core. Without
 `--var-dir` the held messages are reported and left behind.
+
+The archive's posts come over as HyperKitty's mbox export (`listmngr
+archive import`, under the same Message-ID-Hashes and threads); what
+readers left on them — votes, tags, each thread's category, favourites —
+comes from HyperKitty's own database, alone or after the site:
+
+```sh
+listmngr archive import rust-users.example.invalid rust-users.mbox
+listmngr import3 --hyperkitty postgres://mailmanweb:…@127.0.0.1/mailmanweb
+```
+
+Each reader is matched to an imported account by the address of their
+Django account; what has no post, thread or account here is counted as
+`skipped`, one `archive.import_interactions` audit event records each
+list, and a second run writes nothing new. See `docs/MIGRATION.md`.
 
 The importer reads the core's domains, its site bans, its accounts (each
 with its addresses, the one it prefers and its own preferences), every

@@ -4,9 +4,10 @@
 //! way Mailman 3's own importer does (`mailman/utilities/importer.py`);
 //! `import3` reads a whole Mailman 3 site over its REST API (`rest3`) or
 //! straight from its database and message store (`db3`) and applies it
-//! here.
+//! here; `hyperkitty` brings what readers left on its archive.
 pub mod config21;
 pub mod db3;
+pub mod hyperkitty;
 pub mod import21;
 pub mod import3;
 pub mod pickle;
