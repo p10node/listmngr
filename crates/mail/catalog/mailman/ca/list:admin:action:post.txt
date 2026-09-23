@@ -1,0 +1,1 @@
+Com a administrador de la llista, es demana la seva autorització pel següent enviament a la llista de correu: Llista: $listname De: ${sender_email} Assumpte: ${subject} El missatge es manté retingut perquè: ${reasons} Per la seva comoditat, visiteu el vostre tauler per aprovar o denegar la petició.

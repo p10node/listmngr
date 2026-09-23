@@ -1,0 +1,6 @@
+GNU Mailman 3.3.10, mailman/templates/<lang>/*.txt and
+mailman/messages/<lang>/LC_MESSAGES/mailman.po.
+Copyright (C) the GNU Mailman developers and translators.
+GPL-3.0-or-later; combined with listmngr (AGPL-3.0-or-later) under
+section 13 of the GNU GPL version 3. Imported unchanged by
+tests/compat/import_mailman_templates.py.

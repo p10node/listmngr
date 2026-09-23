@@ -1,0 +1,5 @@
+Ihre Einwilligung als Administrator*in ist für folgende Anmeldung für
+die Mailingliste nötig:
+
+    Für:    ${member}
+    Liste:  ${listname}

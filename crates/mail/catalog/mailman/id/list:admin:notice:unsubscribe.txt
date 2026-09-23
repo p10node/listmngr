@@ -1,0 +1,1 @@
+$member telah berhasil dihapus dari $display_name.

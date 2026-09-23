@@ -1,0 +1,5 @@
+Ihre Nachricht mit dem Betreff
+
+    ${subject}
+
+ist erfolgreich bei der Mailingliste ${display_name} eingegangen.

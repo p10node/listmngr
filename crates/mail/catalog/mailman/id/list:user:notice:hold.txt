@@ -1,0 +1,11 @@
+Surel Anda ke $listname' dengan subjek
+
+    $subject
+
+Ditahan hingga moderator milis bisa meninjaunya untuk persetujuan.
+
+Pesan ditahan dikarenakan:
+
+$reasons
+
+Antar pesan akan dipos ke milis, atau Anda akan menerima notifikasi putusan moderator.

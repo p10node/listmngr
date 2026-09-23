@@ -1,0 +1,1 @@
+"${display_name} 메일 링리스트 제출을 ${listname} (으)로 보내기 이메일을 통해 구독 또는 탈퇴하려면 제목 또는 본문이있는 메시지를 ${request_email}로 보내십시오. ${owner_email}에서 목록을 관리하는 사람에게 연락 할 수 있습니다. "Re : ${display_name} digest의 내용 ..." "보다 구체적

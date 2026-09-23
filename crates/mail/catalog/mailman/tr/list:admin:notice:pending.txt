@@ -1,0 +1,4 @@
+${listname} listesinde bekleyen ${count} denetim isteği var.
+
+${data}
+Lütfen en kısa zamanda bununla ilgilenin.

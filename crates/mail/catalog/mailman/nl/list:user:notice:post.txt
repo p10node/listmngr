@@ -1,0 +1,5 @@
+Uw bericht met titel
+
+    $subject
+
+werd goed ontvangen door de $display_name maillijst.

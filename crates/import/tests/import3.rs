@@ -461,7 +461,7 @@ async fn unknown_settings_and_values_become_warnings() {
     let list = &mut site.lists[1];
     list.config
         .insert("some_new_mailman_setting".into(), json!(true));
-    list.config.insert("preferred_language".into(), json!("el"));
+    list.config.insert("preferred_language".into(), json!("ar"));
     list.config.insert("max_days_to_hold".into(), json!(3));
     list.config
         .insert("moderator_password".into(), json!("{plaintext}secret"));
@@ -470,10 +470,26 @@ async fn unknown_settings_and_values_become_warnings() {
     assert!(warnings.contains("some_new_mailman_setting"), "{warnings}");
     assert!(warnings.contains("max_days_to_hold"), "{warnings}");
     assert!(warnings.contains("moderator password"), "{warnings}");
-    assert!(warnings.contains("\"el\""), "{warnings}");
+    assert!(warnings.contains("\"ar\""), "{warnings}");
     assert!(!warnings.contains("secret"), "a password is never logged");
     assert!(!plan.lists[1].settings.contains_key("preferred_language"));
     assert_eq!(plan.lists[1].settings["display_name"], "Rust-Users");
+}
+
+/// Mailman spells a language `pt_BR`; a notice language here is `pt-BR`.
+#[tokio::test]
+async fn a_mailman_language_code_becomes_this_sites_tag() {
+    let mut site = recorded_site().await;
+    site.lists[1]
+        .config
+        .insert("preferred_language".into(), json!("pt_BR"));
+    let plan = plan(&site);
+    assert_eq!(plan.lists[1].settings["preferred_language"], "pt-BR");
+    assert!(
+        !plan.warnings.join("\n").contains("preferred_language"),
+        "{:?}",
+        plan.warnings
+    );
 }
 
 async fn scenario(db: &Database) {

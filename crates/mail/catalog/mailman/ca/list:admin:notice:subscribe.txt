@@ -1,0 +1,1 @@
+${member} s'ha subscrit amb èxit a ${display_name}.

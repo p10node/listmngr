@@ -1,0 +1,5 @@
+Se requiere su autorización para la aprobación de la siguiente solicitud
+de desuscripción:
+
+    Para:  ${member}
+    Lista: ${listname}

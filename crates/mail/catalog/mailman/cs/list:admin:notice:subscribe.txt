@@ -1,0 +1,1 @@
+Uživateli ${member} byl úspěšně přihlášený odběr mailing-listu ${display_name}.

@@ -1,0 +1,5 @@
+K Vašemu mailing-listu by se rád přihlásil nový odběratel.
+Tento požadavek musíte nejdříve schválit:
+
+    Kdo:  ${member}
+    List: ${listname}

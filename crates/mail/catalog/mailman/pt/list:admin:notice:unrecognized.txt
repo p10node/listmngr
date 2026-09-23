@@ -1,0 +1,5 @@
+A mensagem em anexo foi recebida como uma devolução, mas o formato de
+devolução não foi reconhecido ou nenhum endereço de membro pôde ser
+extraído dela. Esta lista de discussão foi configurada para enviar
+todas as mensagens devolvidas não reconhecidas para administrador(es)
+da lista.

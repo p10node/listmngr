@@ -1,0 +1,12 @@
+Invia la mailing list ${display_name} a
+	${listname}
+
+Per iscriverti o annullare l'iscrizione tramite e-mail, invia un messaggio con oggetto o corpo
+'help' a
+	${request_email}
+
+Puoi contattare la persona che gestisce la lista all'indirizzo
+	${owner_email}
+
+Quando rispondi, modifica la riga dell'oggetto in modo che sia più specifica di
+"Re: Contenuto di ${display_name} digest..."

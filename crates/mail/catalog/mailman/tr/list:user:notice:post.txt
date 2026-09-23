@@ -1,0 +1,5 @@
+${display_name} posta listesi tarafından
+
+    ${subject}
+
+konulu mesajınız başarıyla alındı.

@@ -1,0 +1,5 @@
+Votre message avec l’objet
+
+    ${subject}
+
+a été reçu avec succès par la liste de diffusion ${display_name}.

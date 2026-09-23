@@ -1,0 +1,12 @@
+Verstuur berichten aan de $display_name maillijst naar
+	$listname
+
+Om te abonneren of je abonnement op te zeggen via e-mail, stuur je een bericht met 'help'
+in het onderwerp of de body naar
+	$request_email
+
+Je kan de lijstbeheerder bereiken op
+	$owner_email
+
+Indien je antwoordt op deze e-mail, wijzig dan het onderwerp zodat het meer informatie bevat dan
+alleen maar "Antw: Inhoud van $display_name verzamelmail..."

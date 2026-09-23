@@ -1,0 +1,1 @@
+${member} el lett távolítva a(z) ${listname} listáról túl sok visszapattanó levél miatt.

@@ -1,0 +1,13 @@
+Como administrador de listas, se requiere su autorización para
+el siguiente envío a la lista de correo:
+
+    Lista:    ${listname}
+    Origen:   ${sender_email}
+    Asunto:   ${subject}
+
+El mensaje ha sido retenido por:
+
+${reasons}
+
+Cuando pueda, visite la página de administración para aprobar o
+denegar el envío.

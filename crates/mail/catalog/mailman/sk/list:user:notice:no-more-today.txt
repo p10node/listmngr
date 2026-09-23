@@ -1,0 +1,9 @@
+Dostali sme správu z vašej adresy <$sender_email> so žiadosťou o automatickú
+odpoveď z konferencie $listname.
+
+Počet, ktoré sme dnes videli: $count. Aby sa predišlo problémom, ako napríklad
+emailové slučky medzi e-mailovými robotmi, vám dnes už nebudeme posielať
+odpovede. Skúste to prosím zajtra.
+
+Ak si myslíte, že táto správa je nesprávna, alebo máte ďalšie otázky, prosím
+kontaktujte vlastníka konferencie na $owner_email.

@@ -449,10 +449,10 @@ async fn resolve_candidates(
             }
         }
     }
-    let body = listmngr_mail::templates::builtin_in(name, language)
+    let (body, served) = listmngr_mail::templates::builtin_language(name, language)
         .ok_or_else(|| Error::Validation(format!("unknown template name: {name}")))?;
     Ok(Resolved {
         body: body.to_owned(),
-        source: format!("builtin:{}", listmngr_i18n::negotiate(language)),
+        source: format!("builtin:{served}"),
     })
 }

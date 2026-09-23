@@ -1,0 +1,4 @@
+La liste ${listname} list a ${count} demandes de moderation en attente.
+
+${data}
+Veuillez vous en occuper dès que cela vous sera possible.

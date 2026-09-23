@@ -1,0 +1,1 @@
+${member} е изтрит от ${display_name}.

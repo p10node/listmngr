@@ -1,0 +1,5 @@
+Uw goedkeuring is vereist voor een afmelding van de
+maillijst:
+
+    Voor:  $member
+    Lijst: $listname

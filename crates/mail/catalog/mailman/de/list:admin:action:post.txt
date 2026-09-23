@@ -1,0 +1,13 @@
+Ihre Einwilligung als Administrator*in ist für folgende Nachricht
+an die Mailingliste nötig:
+
+    Liste:    ${listname}
+    Absender: ${sender_email}
+    Betreff:  ${subject}
+
+Die Nachricht wurde aus folgenden Gründen zurückgehalten:
+
+${reasons}
+
+Besuchen Sie die Administrations-Seiten, um die Nachricht
+anzunehmen oder abzulehnen.

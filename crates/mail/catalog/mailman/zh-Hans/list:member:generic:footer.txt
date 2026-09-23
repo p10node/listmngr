@@ -1,0 +1,3 @@
+_______________________________________________
+${display_name} 邮件列表——${listname}
+要取消订阅，请发送电子邮件至 ${short_listname}-leave@${domain}

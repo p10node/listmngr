@@ -1,0 +1,10 @@
+De '$listname' maillijst is zonet voor u aangemaakt.  Hier
+volgt wat praktische informatie over uw nieuwe maillijst.
+
+Voor de leden van uw maillijst (niet voor beheerders) is er een gebruikersinterface beschikbaar via e-mail;
+je kan informatie over het gebruik verkrijgen door een bericht met het woord 'help'
+in het onderwerp of de body te sturen naar:
+
+    $request_email
+
+Gelieve alle vragen te richten aan $site_email.

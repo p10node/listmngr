@@ -1,0 +1,13 @@
+Ako správca konferencie sa vyžaduje vaše oprávnenie pre nasledujúce
+uverejňovanie v konferencii:
+
+    Konferencia: $listname
+    Od:          $sender_email
+    Predmet:     $subject
+
+Správa sa pozastavuje, pretože:
+
+$reasons
+
+Pre vaše pohodlie navštívte svoj informačný panel, kde žiadosť schválite alebo
+zamietnete.

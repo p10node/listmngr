@@ -1,0 +1,12 @@
+Envie mensagens para lista de discussão ${display_name} para
+	${listname}
+
+Para se inscrever ou cancelar a sua inscrição por e-mail, envie uma
+mensagem com assunto ou corpo "help" para
+	${request_email}
+
+Pode contatar a pessoa a gerir a lista em
+	${owner_email}
+
+Ao responder, edite a linha Assunto para ficar mais claro do que
+"Re: Conteúdo do resumo ${display_name}..."

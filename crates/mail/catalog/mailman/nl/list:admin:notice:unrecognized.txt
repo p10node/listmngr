@@ -1,0 +1,4 @@
+Het bijgevoegde bericht werd ontvangen als melding van een afleveringsprobleem, maar ofwel werd het formaat
+van de melding niet herkend of er kon geen e-mailadres van een lid uitgehaald worden.  Deze
+maillijst is zo ingesteld dat alle onherkenbare meldingen van afleveringsproblemen naar de
+beheerder(s) van de lijst gestuurd worden.

@@ -1,0 +1,1 @@
+"${member}가 ${display_name}에서 제거되었습니다."

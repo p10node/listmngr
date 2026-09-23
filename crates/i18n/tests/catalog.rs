@@ -50,7 +50,7 @@ fn messages_resolve_in_the_requested_language_with_arguments() {
 #[test]
 fn unknown_languages_and_missing_messages_fall_back_without_panicking() {
     assert_eq!(
-        message("fr", "notice-welcome-subject", &[("display_name", "X")]),
+        message("ar", "notice-welcome-subject", &[("display_name", "X")]),
         "Welcome to the \"X\" mailing list"
     );
     // A message only English has still resolves for Vietnamese callers.
@@ -145,4 +145,87 @@ fn the_receipt_subject_translates_the_action_word() {
         listmngr_i18n::message("en", "notice-receipt-subject", &[("action", "join")]),
         "List join request completed"
     );
+}
+
+#[test]
+fn the_interface_speaks_its_own_languages_and_notices_speak_mailmans_too() {
+    // Mailman's translations never change what the interface negotiates.
+    assert_eq!(listmngr_i18n::supported_match("fr"), None);
+    assert_eq!(negotiate("fr"), "en");
+    let languages: Vec<_> = listmngr_i18n::notice_languages().collect();
+    assert_eq!(&languages[..2], ["en", "vi"]);
+    assert!(languages.len() >= 25, "{languages:?}");
+    assert_eq!(listmngr_i18n::notice_match("fr-CA"), Some("fr"));
+    assert_eq!(listmngr_i18n::notice_match("pt-BR"), Some("pt-BR"));
+    assert_eq!(listmngr_i18n::notice_match("ar"), None);
+    assert_eq!(listmngr_i18n::negotiate_notice("ar"), "en");
+    assert_eq!(
+        listmngr_i18n::choose_notice(["ar", "de", "vi"]),
+        "de",
+        "the first preference a notice can be written in"
+    );
+    let codes: Vec<_> = listmngr_i18n::NOTICE_LANGUAGE_OPTIONS
+        .iter()
+        .map(|(code, _)| *code)
+        .collect();
+    assert_eq!(codes, languages);
+}
+
+#[test]
+fn a_notice_subject_comes_from_mailmans_translation_with_english_behind_it() {
+    assert_eq!(
+        message(
+            "fr",
+            "notice-hold-subject",
+            &[("listname", "dev@example.invalid")]
+        ),
+        "Votre message à dev@example.invalid attend la validation d'un modérateur"
+    );
+    assert_eq!(
+        message("de-AT", "notice-no-subject", &[]),
+        message("de", "notice-no-subject", &[])
+    );
+    // Mailman has no such subject, so a French notice gets English.
+    assert_eq!(
+        message("fr", "notice-help-subject", &[]),
+        message("en", "notice-help-subject", &[])
+    );
+    // The interface's strings stay English in a notice-only language.
+    assert_eq!(
+        message("fr", "web-title-error", &[]),
+        message("en", "web-title-error", &[])
+    );
+}
+
+#[test]
+fn every_notice_language_resolves_its_subjects_and_its_name() {
+    let args = [
+        ("display_name", "Dev"),
+        ("listname", "dev@example.invalid"),
+        ("sender", "a@example.invalid"),
+        ("member", "b@example.invalid"),
+        ("count", "3"),
+        ("action", "join"),
+        ("site_name", "Example"),
+    ];
+    let subjects: Vec<_> = listmngr_i18n::message_ids()
+        .into_iter()
+        .filter(|id| {
+            id.starts_with("notice-") && id.ends_with("-subject") || *id == "notice-no-subject"
+        })
+        .collect();
+    for language in listmngr_i18n::notice_languages() {
+        for id in &subjects {
+            let text = message(language, id, &args);
+            assert!(!text.is_empty() && text != *id, "{language}/{id}");
+            assert!(!text.contains('{'), "{language}/{id}: {text}");
+        }
+    }
+    for (code, id) in listmngr_i18n::NOTICE_LANGUAGE_OPTIONS {
+        for interface in SUPPORTED {
+            let name = message(interface, id, &[]);
+            assert_ne!(name, *id, "{code} has no name in {interface}");
+        }
+    }
+    assert_eq!(message("vi", "web-language-ja", &[]), "日本語");
 }

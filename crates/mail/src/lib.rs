@@ -37,6 +37,7 @@ pub mod personalize;
 pub mod reply_to;
 pub mod smtp;
 pub mod templates;
+pub mod templates_mailman;
 mod templates_vi;
 pub mod topics;
 pub mod visible_recipients;

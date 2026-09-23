@@ -1,0 +1,3 @@
+_______________________________________________
+Liste de diffusion ${display_name} -- ${listname}
+Pour vous désinscrire, envoyez un courriel à ${short_listname}-leave@${domain}

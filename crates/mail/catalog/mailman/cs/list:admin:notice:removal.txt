@@ -1,0 +1,1 @@
+Uživateli ${member} byl z důvodu příliš mnoho nedoručenek odhlášen odběr listu ${listname}.

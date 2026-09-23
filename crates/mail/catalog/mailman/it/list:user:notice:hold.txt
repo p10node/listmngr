@@ -1,0 +1,12 @@
+La tua mail a '${listname}' con oggetto
+
+    ${subject}
+
+Viene trattenuto fino a quando il moderatore della lista non può esaminarlo per l'approvazione.
+
+Il messaggio viene mantenuto perché:
+
+${reasons}
+
+Il messaggio verrà pubblicato nella lista o riceverai
+notifica della decisione del moderatore.
