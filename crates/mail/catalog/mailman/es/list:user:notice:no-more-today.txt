@@ -1,0 +1,9 @@
+Se ha recibido un mensaje desde su dirección <${sender_email}> solicitando una
+respuesta automática desde la lista de correo ${listname}.
+
+Hoy hemos visto un total de: ${count}. Para evitar problemas del tipo bucle de
+correos entre robots de email, vamos a suspender el envío de posteriores respuestas
+hoy. Vuelva a intentarlo mañana, por favor. 
+
+Si considera que este mensaje es un error o tiene alguna duda, por favor
+contacte con el propietario de la lista vía ${owner_email}.

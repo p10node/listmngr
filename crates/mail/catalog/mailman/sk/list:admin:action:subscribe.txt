@@ -1,0 +1,4 @@
+Vaše povolenie je potrebné pre schválenie požiadavky na odber konferencie:
+
+    Pre:         $member
+    Konferencia: $listname

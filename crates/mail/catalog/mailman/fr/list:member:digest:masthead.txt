@@ -1,0 +1,12 @@
+Envoyez vos messages pour la liste de diffusion ${display_name} à
+	${listname}
+
+Pour vous abonner ou désabonner par courriel, envoyez un message avec
+« help » dans l’objet ou le corps à
+	${request_email}
+
+Vous pouvez contacter la personne gérant la liste en écrivant à
+	${owner_email}
+
+Quand vous répondez, veuillez éditer l’objet pour qu’il soit plus précis que
+« Re: Contenu du condensé de ${display_name}... »

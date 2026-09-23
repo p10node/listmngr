@@ -1,0 +1,9 @@
+Nous avons reçu un message de votre adresse <${sender_email}> demandant une
+réponse automatique de la part de la liste de diffusion ${listname}.
+
+Le nombre de messages que nous avons reçus aujourd’hui : ${count}. Pour éviter
+des problèmes tels que des boucles de courriels entre des robots, nous n'enverrons
+pas de réponses supplémentaires aujourd’hui. Veuillez réessayer demain.
+
+Si vous pensez que ce message est une erreur, ou si vous avez des questions,
+veuillez contacter le propriétaire de la liste à l’adresse ${owner_email}.

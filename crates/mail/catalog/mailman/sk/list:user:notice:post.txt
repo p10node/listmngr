@@ -1,0 +1,5 @@
+Vaša správa pomenovaná
+
+    $subject
+
+bol úspešne prijatý do konferencie $display_name.

@@ -64,7 +64,7 @@ pub async fn recipient_language(
     .await
     .map_err(db_error)?
     .flatten();
-    let chosen = listmngr_i18n::choose(
+    let chosen = listmngr_i18n::choose_notice(
         [
             preferred.as_deref().unwrap_or(""),
             list.preferred_language.as_str(),

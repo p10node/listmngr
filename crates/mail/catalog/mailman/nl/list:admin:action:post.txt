@@ -1,0 +1,13 @@
+Als lijstbeheerder wordt uw goedkeuring gevraagd voor
+volgend bericht:
+
+    Lijst:    $listname
+    Van:    $sender_email
+    Onderwerp: $subject
+
+Het bericht wordt om volgende redenen vastgehouden:
+
+$reasons
+
+Ga wanneer het u uitkomt naar uw dashboard om dit verzoek
+goed of af te keuren.

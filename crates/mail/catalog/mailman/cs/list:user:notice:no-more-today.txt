@@ -1,0 +1,6 @@
+Z Vaší adresy <${sender_email}> jsme dostali zprávu požadující automatickou odpověď mailing-listu ${listname}.
+
+Dnes jsme takových zpráv dostali už: ${count}.  Abychom zabránili případným problémům, jako například smyčkám mezi emailovými roboty, dnes už Vám nebudeme posílat žádné další automatické odpovědi.
+Vše můžete opět vyzkoušet zítra. 
+
+Pokud si myslíte, že je tato informace chybná nebo máte jiné dotazy, kontaktujte, prosím, vlastníka listu na adrese ${owner_email}.

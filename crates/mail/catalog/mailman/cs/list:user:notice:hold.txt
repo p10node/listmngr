@@ -1,0 +1,10 @@
+Váš příspěvek do mailing-listu '${listname}' s předmětem
+    ${subject}
+
+je prozatím přidržen ke kontrole moderátorem.
+
+Zpráva byla přidržena, protože:
+
+${reasons}
+
+Email bude do listu buď odeslán, nebo dostanete notifikaci o moderátorově rozhodnutí.

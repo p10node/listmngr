@@ -1,0 +1,1 @@
+${member} wurde von ${listname} abgemeldet aufgrund zahlreicher unzustellbarer Rückläufer.

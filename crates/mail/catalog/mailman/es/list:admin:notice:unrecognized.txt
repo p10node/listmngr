@@ -1,0 +1,4 @@
+El mensaje adjunto se ha recibido como un rebote (bounce), pero no se
+reconoce el formato o no se pueden extraer direcciones de miembros de el. 
+Esta lista está configurada para reenviar este tipo de mensajes a sus
+administradores.

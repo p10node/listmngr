@@ -1,0 +1,5 @@
+Se requiere su autorización para la aprobación de la siguiente solicitud
+de suscripción:
+
+    Para:  ${member}
+    Lista: ${listname}

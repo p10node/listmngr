@@ -1,0 +1,4 @@
+Persetujuan Anda diperlukan untuk permintaan pembatalan langganan:
+
+    Untuk:  $member
+    Milis: $listname

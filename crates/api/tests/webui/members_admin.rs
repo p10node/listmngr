@@ -210,6 +210,9 @@ async fn options(db: &Database, app: &axum::Router, owner: &str, member: listmng
     ] {
         assert!(html.contains(&format!("name=\"{name}\"")), "{name}: {html}");
     }
+    // Every language a notice can be written in, Mailman's included.
+    assert!(html.contains("value=\"pt-BR\""), "{html}");
+    assert!(html.contains("Português (Brasil)"), "{html}");
     let token = csrf(&html);
     let audits = count(
         db,
@@ -230,7 +233,7 @@ async fn options(db: &Database, app: &axum::Router, owner: &str, member: listmng
             ("hide_address", "default"),
             ("receive_list_copy", "false"),
             ("receive_own_postings", "true"),
-            ("preferred_language", "vi"),
+            ("preferred_language", "pt-BR"),
             ("role", "member"),
         ]),
     )
@@ -260,7 +263,7 @@ async fn options(db: &Database, app: &axum::Router, owner: &str, member: listmng
     assert_eq!(preferences.hide_address, None);
     assert_eq!(preferences.receive_list_copy, Some(false));
     assert_eq!(preferences.receive_own_postings, Some(true));
-    assert_eq!(preferences.preferred_language.as_deref(), Some("vi"));
+    assert_eq!(preferences.preferred_language.as_deref(), Some("pt-BR"));
     assert_eq!(
         count(
             db,

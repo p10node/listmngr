@@ -1,0 +1,1 @@
+${member} a été désinscrit⋅e de ${listname} à cause de retours répétitifs.

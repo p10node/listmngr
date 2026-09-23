@@ -1,0 +1,10 @@
+Kirim pos milis $display_name ke
+	$listname
+
+Untuk berlangganan atau membatalkan langganan lewat surel, kirim pesan dengan di subjek atau badan bertulis 'help' ke
+	$request_email
+
+Anda bisa menghubungi yang mengelola milis di
+	$owner_email
+
+Ketika membalas, sunting baris subjek Anda sehingga bisa lebih rinci dari "Re: Konten dari ringkasan $display_name..."

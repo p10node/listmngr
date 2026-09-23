@@ -1,0 +1,1 @@
+$member bol úspešne prihlásený na odber $display_name.

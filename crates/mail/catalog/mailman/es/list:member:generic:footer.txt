@@ -1,0 +1,3 @@
+_______________________________________________
+Lista de correo ${display_name} -- ${listname}
+Para desuscribirse envíe un email a ${short_listname}-leave@${domain}

@@ -59,7 +59,7 @@ impl DeliveryRepo<'_> {
         let address_name: String = row.try_get("address_name").map_err(db_error)?;
         let delivered_to: String = row.try_get("original_email").map_err(db_error)?;
         let preference: Option<String> = row.try_get("language").map_err(db_error)?;
-        let language = listmngr_i18n::choose(
+        let language = listmngr_i18n::choose_notice(
             [
                 preference.as_deref().unwrap_or(""),
                 list.preferred_language.as_str(),

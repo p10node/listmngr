@@ -1,0 +1,1 @@
+${member} foi removido(a) de ${display_name}.

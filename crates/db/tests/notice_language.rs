@@ -283,21 +283,91 @@ async fn owner_language_scenario(db: &Database, list: &ListId) {
 
 #[tokio::test]
 async fn unsupported_languages_fall_back_to_the_site_default_then_english() {
-    let (db, list) = fixture("fr", "vi").await;
+    let (db, list) = fixture("ar", "vi").await;
     subscribe(&db, &list, "member@example.invalid", MemberRole::Member).await;
     let notices = notices(&db).await;
     assert_eq!(notices.len(), 1);
-    // `fr` is not shipped; the site default `vi` is.
+    // Mailman's Arabic catalog translates nothing this site can use; the
+    // site default `vi` ships.
     assert_eq!(
         notices[0].1,
         "Chào mừng bạn đến với hộp thư chung \"Dev Chat\""
     );
 
-    let (db, list) = fixture("fr", "de").await;
+    let (db, list) = fixture("ar", "fa").await;
     subscribe(&db, &list, "member@example.invalid", MemberRole::Member).await;
     let english = self::notices(&db).await;
     assert_eq!(
         english[0].1, "Welcome to the \"Dev Chat\" mailing list",
         "neither list nor site language ships, so English"
     );
+}
+
+/// A language Mailman's translators brought: the subject from its `.po`,
+/// the body from its template where this site's English is Mailman's, and
+/// this site's own English where it is not.
+#[tokio::test]
+async fn a_french_list_speaks_mailmans_french() {
+    let (db, list) = fixture("fr", "en").await;
+    subscribe(&db, &list, "member@example.invalid", MemberRole::Member).await;
+    let welcome = notices(&db).await;
+    assert_eq!(welcome.len(), 1);
+    assert_eq!(
+        welcome[0].1,
+        "Bienvenue sur la liste de diffusion « Dev Chat »"
+    );
+    // The welcome body here tells no password story, so it stays English.
+    assert!(welcome[0].2.contains("Welcome to the"), "{}", welcome[0].2);
+    db.lists()
+        .update(
+            &list,
+            &json!({"respond_to_post_requests": true, "admin_immed_notify": false}),
+        )
+        .await
+        .unwrap();
+    db.mail_queue()
+        .enqueue(
+            NewMessage {
+                raw: RAW.to_vec(),
+                external_id: "<held@example.invalid>".into(),
+                context: json!({"list_id": list, "envelope_sender": "member@example.invalid"})
+                    .to_string(),
+                queue: Queue::In,
+                max_attempts: 3,
+            },
+            100,
+        )
+        .await
+        .unwrap();
+    let lease = db
+        .mail_queue()
+        .claim(Queue::In, "worker", 100, 100)
+        .await
+        .unwrap()
+        .unwrap();
+    db.moderation()
+        .hold(
+            &lease,
+            &list,
+            "member@example.invalid",
+            "private subject",
+            "reason",
+            101,
+        )
+        .await
+        .unwrap();
+    let hold = notices(&db).await;
+    assert_eq!(hold.len(), 1);
+    assert_eq!(
+        hold[0].1,
+        "Votre message à dev@example.invalid attend la validation d'un modérateur"
+    );
+    assert!(
+        hold[0]
+            .2
+            .contains("est en attente de validation par un modérateur"),
+        "{}",
+        hold[0].2
+    );
+    assert!(hold[0].2.contains("'dev@example.invalid'"), "{}", hold[0].2);
 }

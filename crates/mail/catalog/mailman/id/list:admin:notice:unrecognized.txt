@@ -1,0 +1,1 @@
+Pesan yang dilampirkan diterima sebagai galat pengiriman, tetapi antara format galat tidak dikenali atau tidak ada surel anggota yang didapatkan dari itu.  Milis ini telah diatur agar semua pesan galat pengiriman dikirim ke administrator milis.

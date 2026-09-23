@@ -1,0 +1,5 @@
+La tua autorizzazione è richiesta per l'annullamento dell'iscrizione a una mailing list
+richiesta approvazione:
+
+    Per:  ${member}
+    Lista: ${listname}

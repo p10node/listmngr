@@ -1,0 +1,5 @@
+A sua mensagem intitulada
+
+    ${subject}
+
+foi recebida com sucesso pela lista de discussão ${display_name}.

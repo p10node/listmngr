@@ -1,0 +1,1 @@
+${member} 已从 ${display_name} 中移除。

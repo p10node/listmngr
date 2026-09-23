@@ -1,0 +1,10 @@
+Práve bola pre vás vytvorená konferencia '$listname'.
+Nasleduje niekoľko základných informácií o vašej konferencii.
+
+Pre používateľov (nie správcov) vašej konferencie existuje e-mailové rozhranie;
+informácie o jeho použití môžete získať odoslaním správy iba so slovom 'help'
+ako Predmet alebo v tele:
+
+    $request_email
+
+Všetky otázky adresujte na adresu $site_email.

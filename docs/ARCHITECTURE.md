@@ -1,5 +1,37 @@
 # Architecture
 
+## Notice languages from Mailman's translations — bounded local acceptance verified
+
+The interface and the notices now have separate language sets.
+`listmngr_i18n::SUPPORTED` (`en`, `vi`) is what the interface negotiates
+(`supported_match`, `negotiate`, `choose`), unchanged. `notice_languages()`
+is those plus the languages of the generated `crates/i18n/src/mailman.rs`,
+negotiated by `notice_match`/`negotiate_notice`/`choose_notice` with the same
+exact-then-primary-subtag rule; `message()` negotiates over them, so a
+subject resolves in Mailman's translation where one was imported and in
+English otherwise, per message. Every bundle also carries the generated
+`languages.ftl`, the endonyms behind `NOTICE_LANGUAGE_OPTIONS`, which the
+list and member language pickers use. `notices::recipient_language` and
+`delivery` choose with `choose_notice`.
+
+Bodies: `listmngr_mail::templates::builtin_language(name, language)` →
+`(body, served language)` tries this project's `vi`, else
+`templates_mailman::builtin(language, name)` (generated, one `include_str!`
+per `crates/mail/catalog/mailman/<lang>/<name>.txt`), else English; the
+resolved template's `source` says `builtin:<served>`. Only the names in
+`templates_mailman::IMPORTED` have Mailman translations, and
+`crates/mail/tests/mailman_catalog.rs` holds each one's English here equal,
+word for word, to the vendored `catalog/mailman/en/<name>.txt` — rewording
+one of them breaks that test, which is the signal that its translations no
+longer fit. `tests/compat/import_mailman_templates.py` is the only writer:
+it keeps a body that is non-empty, differs from the English and uses a
+subset of the English's placeholders, and a subject whose `msgid`, with the
+placeholders renamed by its table (`${mlist.display_name}` → `display_name`
+or `listname` as the English here uses, positional `{}` by place,
+`${digmode}` dropped), is exactly the Fluent English, from a non-fuzzy
+`msgstr` with the same placeholders; then it runs `rustfmt` on the two
+tables. `import3::site_language` maps Mailman's `pt_BR` to `pt-BR`.
+
 ## HyperKitty interactions import — bounded local acceptance verified
 
 `listmngr_import::hyperkitty::fetch(url, only)` reads a HyperKitty

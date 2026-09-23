@@ -1,0 +1,9 @@
+Milis '$listname' telah dibuat untuk Anda.
+Berikut adalah beberapa informasi dasar tentang milis Anda.
+
+Tersedia tampilan berbasis surel untuk pengguna (bukan admin) untuk milis Anda;
+Anda bisa mendapatkan informasi tentang penggunaannya dengan mengirim pesan dengan kata 'help' di subjek atau badan, ke:
+
+    $request_email
+
+Mohon tanyakan semua pertanyaan ke $site_email.

@@ -1,0 +1,1 @@
+$member bol odhlásený z odberu $listname z dôvodu nadmerných nedoporučení.

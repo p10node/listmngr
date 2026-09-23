@@ -1,0 +1,12 @@
+Posielať príspevky do konferencie $display_name na
+	$listname
+
+Ak sa chcete prihlásiť alebo odhlásiť prostredníctvom e-mailu, pošlite správu
+s predmetom alebo telom 'help' na
+	$request_email
+
+Správcu konferencie môžete kontaktovať na
+	$owner_email
+
+Keď odpovedáte, prosím upravte Predmet: aby bol konkrétnejší ako
+"Re: Obsah súhrnu $display_name ..."

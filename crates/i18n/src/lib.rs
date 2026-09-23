@@ -7,6 +7,11 @@
 //! language, per message. Template *bodies* are a separate catalog in
 //! `listmngr-mail`; this crate holds the strings code generates itself
 //! (notice subjects, fixed phrases).
+//!
+//! The interface speaks the [`SUPPORTED`] languages. Notices speak those
+//! and every language Mailman's translators brought ([`notice_languages`]):
+//! their subjects come from Mailman's `.po` catalogs where the English is
+//! the same, and everything else falls back to English per message.
 use fluent_bundle::{FluentArgs, FluentResource, FluentValue, bundle::FluentBundle};
 use std::sync::OnceLock;
 use unic_langid::LanguageIdentifier;
@@ -20,6 +25,9 @@ const CATALOGS: &[(&str, &str)] = &[
     ("en", include_str!("../locales/en.ftl")),
     ("vi", include_str!("../locales/vi.ftl")),
 ];
+
+#[path = "mailman.rs"]
+mod mailman;
 
 /// A bundle that never carries thread-local state, so it can live in a
 /// `OnceLock` and be read from any runner.
@@ -35,6 +43,7 @@ fn catalogs() -> &'static [Catalog] {
     CATALOG.get_or_init(|| {
         CATALOGS
             .iter()
+            .chain(mailman::CATALOGS)
             .map(|(language, source)| {
                 let id: LanguageIdentifier = language.parse().expect("catalog language tag");
                 let resource =
@@ -47,6 +56,11 @@ fn catalogs() -> &'static [Catalog] {
                 bundle
                     .add_resource(resource)
                     .unwrap_or_else(|errors| panic!("{language}.ftl has duplicates: {errors:?}"));
+                // Every catalog names the notice languages the same way.
+                let names = FluentResource::try_new(mailman::NAMES.to_owned()).unwrap_or_else(
+                    |(_, errors)| panic!("languages.ftl does not parse: {errors:?}"),
+                );
+                bundle.add_resource_overriding(names);
                 Catalog { language, bundle }
             })
             .collect()
@@ -65,12 +79,54 @@ pub fn is_supported(language: &str) -> bool {
 /// next preference.
 #[must_use]
 pub fn supported_match(requested: &str) -> Option<&'static str> {
-    let wanted = requested.trim().parse::<LanguageIdentifier>().ok()?;
-    let supported = SUPPORTED
+    closest(SUPPORTED.iter().copied(), requested)
+}
+
+/// The notice language that serves `requested`, if any: the interface's
+/// languages and Mailman's, matched as [`supported_match`] matches.
+#[must_use]
+pub fn notice_match(requested: &str) -> Option<&'static str> {
+    closest(notice_languages(), requested)
+}
+
+/// Every language a notice can be written in, English first.
+pub fn notice_languages() -> impl Iterator<Item = &'static str> {
+    SUPPORTED
         .iter()
-        .filter_map(|candidate| Some((*candidate, candidate.parse::<LanguageIdentifier>().ok()?)));
+        .copied()
+        .chain(mailman::LANGUAGES.iter().map(|(code, _)| *code))
+}
+
+/// Every notice language as a picker option, English first: the code and
+/// the Fluent id of its name.
+pub const NOTICE_LANGUAGE_OPTIONS: &[(&str, &str)] = mailman::OPTIONS;
+
+/// The notice language closest to `requested`, falling back to English.
+#[must_use]
+pub fn negotiate_notice(requested: &str) -> &'static str {
+    notice_match(requested).unwrap_or(DEFAULT)
+}
+
+/// [`choose`] over the notice languages: the first preference a notice can
+/// be written in, else English.
+#[must_use]
+pub fn choose_notice<'a>(preferences: impl IntoIterator<Item = &'a str>) -> &'static str {
+    preferences
+        .into_iter()
+        .find_map(notice_match)
+        .unwrap_or(DEFAULT)
+}
+
+fn closest(
+    candidates: impl Iterator<Item = &'static str>,
+    requested: &str,
+) -> Option<&'static str> {
+    let wanted = requested.trim().parse::<LanguageIdentifier>().ok()?;
     let mut family = None;
-    for (candidate, tag) in supported {
+    for candidate in candidates {
+        let Ok(tag) = candidate.parse::<LanguageIdentifier>() else {
+            continue;
+        };
         if tag.matches(&wanted, false, false) {
             return Some(candidate);
         }
@@ -111,15 +167,16 @@ fn lookup(language: &str, id: &str, args: &FluentArgs<'_>) -> Option<String> {
     errors.is_empty().then_some(text)
 }
 
-/// The message `id` in `language`, falling back to English and finally to
-/// the id itself, so a missing translation never produces an empty string.
+/// The message `id` in `language` (any notice language), falling back to
+/// English and finally to the id itself, so a missing translation never
+/// produces an empty string.
 #[must_use]
 pub fn message(language: &str, id: &str, args: &[(&str, &str)]) -> String {
     let mut fluent_args = FluentArgs::new();
     for (name, value) in args {
         fluent_args.set(*name, FluentValue::from(*value));
     }
-    let language = negotiate(language);
+    let language = negotiate_notice(language);
     lookup(language, id, &fluent_args)
         .or_else(|| lookup(DEFAULT, id, &fluent_args))
         .unwrap_or_else(|| id.to_owned())

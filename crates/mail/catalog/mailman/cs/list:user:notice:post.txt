@@ -1,0 +1,5 @@
+Vaše zpráva s názvem
+
+    ${subject}
+
+byla úspěšně přijata mailing-listem ${display_name}.

@@ -1,0 +1,11 @@
+Sebagai administrator milis, persetujuan Anda diperlukan untuk pos milis berikut:
+
+    Milis:    $listname
+    Dari:    $sender_email
+    Subjek: $subject
+
+Pesan ini ditahan karena:
+
+$reasons
+
+Untuk kemudahan Anda, kunjungi bilah admin untuk menyetujui atau menolak permintaan.
