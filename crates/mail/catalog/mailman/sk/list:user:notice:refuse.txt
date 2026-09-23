@@ -1,0 +1,12 @@
+Vaša požiadavka pre konferenciu $listname
+
+    $request
+
+bola odmietnutá moderátorom konferencie. Moderátor uviedol nasledujúci
+dôvod zamietnutia vašej žiadosti:
+
+"$reason"
+
+Prípadné otázky alebo pripomienky smerujte na správcu konferencie:
+
+    $owner_email

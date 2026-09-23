@@ -1,0 +1,5 @@
+Votre autorisation est nécessaire pour approuver une demande
+d'abonnement à une liste de diffusion :
+
+    Pour :  ${member}
+    Liste : ${listname}

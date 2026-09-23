@@ -1,0 +1,5 @@
+Pesan Anda dengan judul
+
+    $subject
+
+telah berhasil diterima oleh milis $display_name.

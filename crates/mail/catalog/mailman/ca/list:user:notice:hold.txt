@@ -1,0 +1,1 @@
+El vostre correu a '${listname}' amb l'assumpte    ${subject} està retingut fins que el moderador de la llista pugui revisar-lo per a la seva aprovació. El missatge està retingut perquè: ${reasons} El missatge es publicarà a la llista o es rebrà notificació de la decisió del moderador.

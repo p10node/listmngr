@@ -1,0 +1,5 @@
+Vaše povolenie je potrebné pre schválenie požiadavky na zrušenie odberu
+konferencie:
+
+    Pre:         $member
+    Konferencia: $listname

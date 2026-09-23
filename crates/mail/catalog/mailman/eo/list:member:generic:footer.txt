@@ -1,0 +1,3 @@
+_______________________________________________
+Dissendolisto ${display_name} -- ${listname}
+Por malaboni, sendu retmesaĝon al ${short_listname}-leave@${domain}

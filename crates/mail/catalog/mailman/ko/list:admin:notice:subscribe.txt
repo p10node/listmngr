@@ -1,0 +1,1 @@
+"${member}가 ${display_name}에 성공적으로 등록되었습니다."

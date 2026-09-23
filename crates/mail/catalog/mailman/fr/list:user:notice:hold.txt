@@ -1,0 +1,12 @@
+Votre courriel à destination de '${listname}' avec l’objet
+
+    ${subject}
+
+est en attente de validation par un modérateur.
+
+Ce message a besoin d’une validation car :
+
+${reasons}
+
+Soit ce message sera posté sur la liste, soit vous recevrez une
+notification avec la décision du modérateur.

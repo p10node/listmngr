@@ -1,0 +1,3 @@
+_______________________________________________
+$display_name konferencia -- $listname
+Ak sa chcete odhlásiť z odberu, pošlite e-mail na adresu ${short_listname}-leave@${domain}

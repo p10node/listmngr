@@ -1,0 +1,1 @@
+${member} teve a inscrição de ${listname} cancelada por excesso de devoluções.

@@ -1,0 +1,13 @@
+O seu e-mail para "${listname}" com assunto
+
+    ${subject}
+
+está a ser retido até que o moderador da lista possa analisá-lo
+para aprovação.
+
+A mensagem está a ser retida porque:
+
+${reasons}
+
+A mensagem será postada na lista ou receberá uma notificação
+da decisão do moderador.

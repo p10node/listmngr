@@ -1,0 +1,3 @@
+_______________________________________________
+${display_name} posta listesi -- ${listname}
+Abonelikten çıkmak için ${short_listname}-leave@${domain} adresine bir e-posta gönderin

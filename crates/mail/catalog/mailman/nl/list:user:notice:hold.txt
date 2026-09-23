@@ -1,0 +1,12 @@
+Uw bericht naar de '$listname' maillijst met onderwerp
+
+    $subject
+
+wordt vastgehouden tot een moderator het kan verwerken voor goedkeuring.
+
+Het bericht wordt om volgende redenen vastgehouden:
+
+$reasons
+
+Ofwel wordt het bericht naar de lijst verstuurd, ofwel krijgt u een
+melding van de beslissing van de moderator.

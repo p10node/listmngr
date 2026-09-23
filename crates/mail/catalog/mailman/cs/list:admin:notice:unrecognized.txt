@@ -1,0 +1,4 @@
+Přiložená zpráva byla přijata jako nedoručenka (bounce), ale její formát buď nebyl automaticky rozeznán, nebo se z něj nepovedlo získat adresu žádného z přihlášených členů.
+
+
+Tento mailing-list je nastaven tak, aby všechny nerozeznané nedoručenky přeposlal administrátorům.

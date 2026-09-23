@@ -1,0 +1,4 @@
+Le message de rejet attaché a été reçu, mais le format du rejet n’a pas été
+reconnu ou aucune adresse de membre n’a pu être extraite de celui-ci.  Cette
+liste de diffusion a été configurée pour envoyer tous les messages de rejet
+inconnus aux administrateurs de la liste.

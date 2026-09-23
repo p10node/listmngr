@@ -1,0 +1,13 @@
+${listname} posta listesine isteğiniz
+
+    ${request}
+
+liste moderatörü tarafından reddedildi.  Moderatör, isteğinizi reddetmek
+için aşağıdaki nedeni belirtti:
+
+"${reason}"
+
+Herhangi bir soru veya yorum aşağıdaki adresten liste yöneticisine
+iletilmelidir:
+
+    ${owner_email}

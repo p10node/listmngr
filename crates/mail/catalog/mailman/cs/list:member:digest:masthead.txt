@@ -1,0 +1,12 @@
+Příspěvky do mailing-listu ${display_name} odesílejte na adresu 
+	${listname}
+
+K přihlášení nebo odhlášení jeho odběru pomocí emailu odešlete email s předmětem nebo tělem 'help' na adresu
+	${request_email}
+
+Správce tohoto listu můžete kontaktovat na
+	${owner_email}
+
+
+
+Při odpovědi prosím upravte předmět tak, aby z něj bylo jasné, co potřebujete.

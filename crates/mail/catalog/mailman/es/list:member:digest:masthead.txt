@@ -1,0 +1,12 @@
+Envíe los mensajes a ${display_name} a
+	${listname}
+
+Para suscribirse o desuscribirse vía email, envíe un mensaje con la
+palabra 'help' en el asunto o en el cuerpo del mismo a
+	${request_email}
+
+Puede ponerse en contacto con el administrador de la lista en
+	${owner_email}
+
+Cuando conteste, por favor modifique el asunto de su correo para que sea algo más específico que
+"Re: ${display_name} Resumen..."

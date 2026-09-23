@@ -1,0 +1,5 @@
+Il tuo messaggio intitolato
+
+    ${subject}
+
+è stato ricevuto con successo dalla mailing list ${display_name}.

@@ -1,0 +1,4 @@
+Auf die Liste $listname warten $count Moderationsanfragen.
+
+$data
+Bitte kümmern Sie sich so bald wie möglich darum.

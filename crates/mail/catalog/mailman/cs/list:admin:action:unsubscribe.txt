@@ -1,0 +1,5 @@
+Od Vašeho mailing-listu by se rád odhlásil jeden ze stávajících uživatelů.
+Tento požadavek musíte nejdříve schválit:
+
+    Kdo:  ${member}
+    List: ${listname}

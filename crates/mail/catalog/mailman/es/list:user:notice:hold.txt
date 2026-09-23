@@ -1,0 +1,12 @@
+Su mensaje a la lista '${listname}' con el asunto
+
+    ${subject}
+
+Ha sido retenido hasta que el moderador de la lista pueda revisarlo y aprobarlo.
+
+El mensaje está siendo retenido por:
+
+${reasons}
+
+O bien el mensaje será enviado a la lista, o bien recibirá una
+notificación con la decisión del moderador.

@@ -1,0 +1,10 @@
+Acaba de crear la lista de correo '${listname}'. A continuación tiene un poco de
+información básica sobre su nueva lista.
+
+Existe un modo de interactuar con su lista para los usuarios (no para administradores)
+basado en email; puede obtener información acerca de cómo usarlo enviando
+un mensaje con solo la palabra 'help' como asunto o en el cuerpo del mensaje a: 
+
+    ${request_email}
+
+Dirija, por favor, sus posibles dudas a ${site_email}.

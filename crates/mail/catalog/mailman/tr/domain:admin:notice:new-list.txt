@@ -1,0 +1,10 @@
+'${listname}' sizin için oluşturuldu.  Posta listeniz hakkında bazı
+temel bilgiler aşağıdadır.
+
+Listenizin kullanıcıları (yöneticileri değil) için e-posta tabanlı bir arayüz vardır;
+aşağıdaki adrese konusunda veya gövdesinde sadece 'help' kelimesini içeren
+bir mesaj göndererek kullanımı hakkında bilgi alabilirsiniz:
+
+    ${request_email}
+
+Lütfen tüm soruları ${site_email} adresine iletin.

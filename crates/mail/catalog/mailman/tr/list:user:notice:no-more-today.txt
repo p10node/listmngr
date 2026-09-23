@@ -1,0 +1,9 @@
+<${sender_email}> adresinizden, ${listname} posta listesinden otomatik bir yanıt
+isteyen bir mesaj aldık.
+
+Bugün gördüğümüz sayı: ${count}.  E-posta robotları arasındaki posta döngüleri
+gibi sorunlardan kaçınmak için, bugün size başka yanıt göndermeyeceğiz. 
+Lütfen yarın tekrar deneyin.
+
+Bu mesajın bir hata olduğunu düşünüyorsanız, veya herhangi bir sorunuz varsa,
+lütfen ${owner_email} adresinden liste sahibiyle iletişime geçin.

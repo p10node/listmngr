@@ -1,0 +1,4 @@
+Die angehängte Nachricht wurde als unzustellbar empfangen, aber das Format
+konnte nicht erkannt werden, oder keine Abonnenten-Adresse konnte daraus
+extrahiert werden. Diese Mailingliste ist so konfiguriert, dass alle nicht erkannten
+Bounce-Nachrichten an die Listen-Administrator*innen weitergeleitet werden.

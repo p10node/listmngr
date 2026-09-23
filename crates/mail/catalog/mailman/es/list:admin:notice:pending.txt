@@ -1,0 +1,4 @@
+La lista ${listname} tiene ${count} peticiones de moderación.
+
+${data}
+Por favor, atiéndalas en cuanto le sea posible.

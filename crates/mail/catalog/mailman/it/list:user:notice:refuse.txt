@@ -1,0 +1,13 @@
+La tua richiesta alla mailing list ${listname}
+
+    ${request}
+
+è stata rifiutata dal moderatore della lista. Il moderatore ha dato il
+seguente motivo per rifiutare la tua richiesta:
+
+"${reason}"
+
+Eventuali domande o commenti devono essere indirizzati all'amministratore della lista
+a:
+
+    ${owner_email}

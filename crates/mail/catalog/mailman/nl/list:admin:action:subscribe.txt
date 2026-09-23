@@ -1,0 +1,5 @@
+Uw goedkeuring is vereist voor een nieuw abonnement op de
+ maillijst:
+
+    Voor:  $member
+    Lijst: $listname

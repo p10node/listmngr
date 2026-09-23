@@ -1,0 +1,13 @@
+Como administrador da lista, a sua autorização é solicitada para
+a seguinte postagem na lista de discussão:
+
+    Lista:   ${listname}
+    De:      ${sender_email}
+    Assunto: ${subject}
+
+A mensagem está a ser retida pelo motivo:
+
+${reasons}
+
+Quando possível, visite o seu painel para aprovar ou negar a
+solicitação.

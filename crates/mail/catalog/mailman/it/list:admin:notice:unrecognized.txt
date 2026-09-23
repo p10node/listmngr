@@ -1,0 +1,4 @@
+Il messaggio allegato è stato ricevuto come rimbalzo, ma il formato non è stato
+riconosciuto oppure non è stato possibile estrarre gli indirizzi dei membri da esso.  Questa
+mailing list è stata configurata per inviare tutti i messaggi di mancato recapito non riconosciuti
+agli amministratori della lista.

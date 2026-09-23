@@ -1,0 +1,3 @@
+_______________________________________________
+${display_name} Mailingliste -- ${listname}
+Zur Abmeldung von dieser Mailingliste senden Sie eine Nachricht an ${short_listname}-leave@${domain}

@@ -1,0 +1,5 @@
+La tua autorizzazione è necessaria per una richiesta di iscrizione a una mailing list
+approvazione:
+
+    Per:  ${member}
+    Lista: ${listname}

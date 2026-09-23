@@ -2251,6 +2251,7 @@ dependencies = [
  "chrono",
  "listmngr-core",
  "listmngr-db",
+ "listmngr-i18n",
  "listmngr-mail",
  "regex",
  "reqwest",

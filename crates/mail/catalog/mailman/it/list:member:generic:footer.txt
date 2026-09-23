@@ -1,0 +1,3 @@
+_______________________________________________
+${display_name} mailing list -- ${listname}
+Per annullare l'iscrizione invia un'email a ${short_listname}-leave@${domain}

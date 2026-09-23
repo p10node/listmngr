@@ -1,0 +1,4 @@
+V mailing-listu ${listname} je ${count} příspěvků čekajících na schválení moderátorem.
+
+${data}
+Co nejdříve je, prosím, zkontrolujte.

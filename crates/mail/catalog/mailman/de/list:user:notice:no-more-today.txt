@@ -1,0 +1,9 @@
+Wir haben eine Anfrage von Ihrer Adresse <${sender_email}> erhalten,
+die über einen Steuerbefehl eine automatisierte Antwort anfordert.
+
+Die Anzahl der heutigen Anfragen ist: ${count}. Um Probleme wie Endlosschleifen
+zwischen automatisierten Skripten zu vermeiden,werden wir Ihnen heute keine
+weiteren Antworten zusenden. Bitte versuchen Sie es morgen noch einmal.
+
+Wenn Sie der Meinung sind, dass dies ein Irrtum ist, oder falls Sie Fragen haben, 
+wenden Sie sich bitte an die Besitzer*in der Liste unter ${owner_email}.

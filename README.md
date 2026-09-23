@@ -1,5 +1,39 @@
 # listmngr
 
+## Mailman's translations (`P6-PO-TEMPLATES`) — bounded local acceptance verified
+
+Notices speak every language GNU Mailman 3.3.10's translators brought, not
+only `en` and `vi`: 30 more (`bg`, `bn`, `ca`, `cs`, `de`, `el`, `eo`, `es`,
+`fr`, `he`, `hu`, `id`, `it`, `ja`, `ko`, `nb-NO`, `nl`, `oc`, `pl`, `pt`,
+`pt-BR`, `ru`, `si`, `sk`, `sq`, `sv`, `tr`, `uk`, `zh-Hans`, `zh-Hant`).
+A member, a list or the site set to one of them gets its notices with
+Mailman's translated subject and, for the 17 templates whose English here is
+still Mailman's (held-post and moderation notices, digest header and
+masthead, the list footer, the admin subscription notices, …), Mailman's
+translated body. The templates this project reworded — the welcome (no
+password story), the confirmations (confirmed over HTTP), the bounce
+notices, the rejection (nothing attached) — keep this site's English or
+Vietnamese, because Mailman's translation would say something untrue here.
+A translation that uses a placeholder Mailman's English does not is left
+out. The language pickers for a list and a member offer them all; the
+interface itself still speaks `en` and `vi`. `listmngr import3` keeps a
+Mailman list's or member's language (`pt_BR` becomes `pt-BR`).
+
+The catalogs are generated, never hand-edited:
+
+```sh
+uv venv mm --python 3.12 && uv pip install --python mm/bin/python mailman==3.3.10
+mm/bin/python tests/compat/import_mailman_templates.py
+```
+
+It writes `crates/mail/catalog/mailman/<lang>/<name>.txt` (with Mailman's
+English next to them, which `crates/mail/tests/mailman_catalog.rs` holds this
+site's English to), `crates/i18n/locales/mailman/<lang>.ftl` and the two
+Rust tables that embed them. Mailman's translations are GPL-3.0-or-later by
+the GNU Mailman translators; `crates/mail/catalog/mailman/SOURCE` records
+their origin and the terms under which they are combined with this
+AGPL-3.0-or-later project.
+
 ## Mailman 3 import (`P6-IMPORT3-REST`, `P6-IMPORT3-USERS`, `P6-IMPORT3-HELD`, `P6-IMPORT3-DB`, `P6-IMPORT3-HYPERKITTY`) — bounded local acceptance verified
 
 A whole Mailman 3 site moves over from a running core, read-only:
@@ -2096,8 +2130,9 @@ policies). See `P2-LIST-SETTINGS` in `docs/FEATURE_PARITY.md`.
 
 Generated notices are sent in the recipient's language. Each notice picks the
 first of the member's `preferred_language`, the list's `preferred_language`
-and `site.default_language` that ships as a catalog (`en` and `vi` today;
-regional tags such as `vi-VN` select `vi`, and an unsupported language falls
+and `site.default_language` that ships as a catalog (`en`, `vi` and the
+languages Mailman's translators brought, `P6-PO-TEMPLATES`; regional tags such
+as `vi-VN` select `vi`, and an unsupported language falls
 through to the next preference and finally English). Subjects come from the
 Fluent catalogs in `crates/i18n/locales/`, bodies from the built-in template
 catalog in that language (an operator template stored for the language, or for

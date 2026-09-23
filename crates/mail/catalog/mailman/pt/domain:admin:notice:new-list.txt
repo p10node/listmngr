@@ -1,0 +1,10 @@
+A lista de discussão "${listname}" acabou de ser criada para si. A
+seguir estão algumas informações básicas sobre a sua lista de discussão.
+
+Existe uma interface baseada em e-mail para utilizadores (não administradores)
+da sua lista; pode obter informações sobre como usá-la a enviar uma
+mensagem com apenas a palavra "help" como assunto ou no corpo, para:
+
+     ${request_email}
+
+Por favor, dirija todas as perguntas para ${site_email}.

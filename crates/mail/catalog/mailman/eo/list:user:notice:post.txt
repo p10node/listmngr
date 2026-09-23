@@ -1,0 +1,5 @@
+Via mesaĝo titolita
+
+ ${subject}
+
+estis sukcese ricevita de la dissendolisto ${display_name}.
