@@ -1,5 +1,27 @@
 # Architecture
 
+## Read-only operator diagnostics (`P6-DOCTOR`) — bounded local acceptance verified
+
+The CLI dispatches `doctor` before the ordinary database-opening path.
+`listmngr_db::doctor::inspect` forces SQLite mode=ro, or opens a PostgreSQL
+read-only transaction, then compares applied migration versions/checksums
+and dirty state to the embedded migrator. It reads at most 1000 mail domains;
+an excessive inventory fails closed. This validates the ledger, not every
+physical table/index. No raw connection error or DSN is returned.
+
+The DB deadline is 3 seconds. An enabled mail role adds a 3-second relay TCP
+greeting probe (32 lines maximum, 512 bytes per line), sending zero application
+bytes. DNS has a shared 10-second budget, absolute names, explicit MX/address
+or RFC 5321 implicit-MX checks, null-MX rejection and a 32-exchanger cap.
+Every advertised exchanger must resolve; this is deliberately stricter than
+SMTP's ability to deliver through one working alternative. Skipped TLS/AUTH,
+delivery and DNS authentication are exposed in JSON, never promoted to passed
+checks. Exit 12 carries the existing CLI's redacted `CLI-DOCTOR` error.
+The tests drive the real binary against loopback fixtures (a UDP DNS server
+of the test's own, TCP SMTP greeters, SQLite files whose bytes are compared
+before and after), which establishes the contract, not a deployed MTA or
+public DNS; the evidence is the `P6-DOCTOR` row of `docs/FEATURE_PARITY.md`.
+
 ## Notice languages from Mailman's translations — bounded local acceptance verified
 
 The interface and the notices now have separate language sets.

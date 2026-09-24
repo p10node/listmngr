@@ -1,5 +1,22 @@
 # listmngr
 
+## Operator diagnostics (`P6-DOCTOR`) — bounded local acceptance verified
+
+Run `listmngr doctor` with the same configuration as the service. It prints
+one JSON document (`version` 1, `ok`, and `checks` of `id`/`status`/`detail`
+with `ok`, `fail` or `skip`) and exits `12` (`CLI-DOCTOR`) when a required
+check fails; a configuration or usage error is still the redacted exit `2`.
+It never migrates or creates a database, sends mail or reloads an MTA. It
+checks that the database's migration ledger is exactly the embedded one
+(SQLite opened read-only, PostgreSQL in a read-only transaction), reads the
+configured relay's SMTP greeting when the mail role is enabled (no `EHLO`,
+nothing sent), and resolves each mail domain's MX exchangers or its RFC 5321
+implicit MX (`--dns-server 127.0.0.1:5353` points it at another resolver).
+A prerequisite that is disabled or unavailable is an explicit `skip`, never
+a pass, and the checks this command does not make — TLS, AUTH, delivery,
+SPF/DKIM/DMARC/ARC/PTR — are listed as `skip` so nobody reads their absence
+as health. Backup/restore is still open (`docs/PLAN.md` §7).
+
 ## Mailman's translations (`P6-PO-TEMPLATES`) — bounded local acceptance verified
 
 Notices speak every language GNU Mailman 3.3.10's translators brought, not
