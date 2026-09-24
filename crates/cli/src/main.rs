@@ -4,6 +4,7 @@ mod aliases;
 mod archive;
 mod bounce;
 mod digests;
+mod doctor;
 mod errors;
 mod import21;
 mod import3;
@@ -52,6 +53,8 @@ enum Command {
     },
     Info,
     Status,
+    /// Read-only DB/schema, relay and mail-domain DNS diagnostics as JSON.
+    Doctor(doctor::Options),
     Migrate,
     Serve,
     Domains {
@@ -310,6 +313,7 @@ async fn run() -> Result<()> {
             config.api.listen
         ),
         Command::Status => status::check(&config).await?,
+        Command::Doctor(options) => doctor::run(&config, options).await?,
         command => Box::pin(run_database(command, config)).await?,
     }
     Ok(())
@@ -400,7 +404,11 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
             path,
             dry_run,
         } => import21::run(&db, &list_id, &path, dry_run).await?,
-        Command::Version | Command::Conf { .. } | Command::Info | Command::Status => {
+        Command::Version
+        | Command::Conf { .. }
+        | Command::Info
+        | Command::Status
+        | Command::Doctor(_) => {
             bail!("command does not use database")
         }
     }

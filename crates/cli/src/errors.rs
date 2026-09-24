@@ -10,6 +10,9 @@ impl std::fmt::Display for MigrationFailure {
 impl std::error::Error for MigrationFailure {}
 
 pub fn classify(error: &anyhow::Error) -> (u8, &'static str, &'static str) {
+    if error.downcast_ref::<crate::doctor::Failure>().is_some() {
+        return (12, "CLI-DOCTOR", "required diagnostic check failed");
+    }
     if let Some(error) = error.downcast_ref::<crate::status::Failure>() {
         return match error {
             crate::status::Failure::Unreachable => {
