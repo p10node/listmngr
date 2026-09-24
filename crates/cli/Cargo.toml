@@ -9,6 +9,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+hickory-resolver = "=0.26.2"
 flate2.workspace = true
 anyhow.workspace = true
 axum.workspace = true

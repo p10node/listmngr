@@ -974,7 +974,9 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
 - [ ] Webhooks + deliveries retry; plugins (Rust trait registry: rules/handlers/archivers)
 - [ ] Remote HyperKitty archiver, Exim snippets, built-in inbound SMTP (experimental), S3 message store
 - [ ] `web.tls` + ACME, MySQL (cân nhắc)
-- [ ] `doctor`, `backup/restore`
+- [x] ~~**P6-DOCTOR**~~ (xong) (S): `listmngr doctor` — JSON v1 `ok`/`checks` (`ok`/`fail`/`skip`), exit 12 `CLI-DOCTOR`; ledger migration đối chiếu đúng migrator nhúng (SQLite read-only, PG `READ ONLY`), SMTP greeting của relay khi mail role bật (không gửi byte nào), MX/implicit-MX của từng mail domain (`--dns-server`); không migrate, không gửi mail, không reload MTA; TLS/AUTH/delivery/SPF-DKIM-DMARC-ARC-PTR là `skip` tường minh.
+- [ ] `backup/restore` + acceptance khôi phục độc lập.
+- [ ] **P6-NNTP-GATENEWS-FIX** (S): hai lỗi tìm thấy khi tái hiện bằng CLI thật trong lúc đóng P6-DOCTOR — (1) ARTICLE bị disconnect/truncated vẫn tiến watermark mà không queue → mất bài; (2) hai poller chạy đồng thời enqueue cùng một bài hai lần. Cần test RED trước, sửa trong `nntp::gate`.
 - Acceptance: migrate 1 site Mailman 2.1 thật + 1 site Mailman 3 thật → lists/members/settings/archive URL không đổi.
 
 ### Phase 7 — Hardening & 1.0 (M)
