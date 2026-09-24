@@ -2097,6 +2097,7 @@ dependencies = [
  "chrono",
  "clap",
  "flate2",
+ "hickory-resolver",
  "listmngr-api",
  "listmngr-archive",
  "listmngr-core",
