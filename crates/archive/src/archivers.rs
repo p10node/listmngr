@@ -1,7 +1,8 @@
 //! Remote archivers: what a list does with a post besides keeping it in
 //! the local archive.
 //!
-//! Three are offered, the set Mailman's `archivers` parity names.
+//! Mailman's `archivers` names, and one more: `hyperkitty` posts the
+//! archived copy to a `HyperKitty` the way `mailman-hyperkitty` does.
 //! `prototype` drops the archived copy into a maildir under an operator's
 //! directory, one file per post named by its Message-ID-Hash, so a
 //! replay overwrites rather than duplicates. `mhonarc` pipes the same
@@ -28,13 +29,19 @@ pub struct Settings {
     pub mhonarc: Vec<String>,
     /// `[archive] archivers.prototype_path`: the maildir's root.
     pub prototype: String,
+    /// `[archive] archivers.hyperkitty_url`: the `HyperKitty` to post to.
+    pub hyperkitty_url: String,
+    /// Its `MAILMAN_ARCHIVER_KEY`, sent as `Authorization: Token`.
+    pub hyperkitty_key: String,
 }
 
 impl Settings {
     /// Whether any archiver here could run at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.mhonarc.is_empty() && self.prototype.trim().is_empty()
+        self.mhonarc.is_empty()
+            && self.prototype.trim().is_empty()
+            && self.hyperkitty_url.trim().is_empty()
     }
 }
 
@@ -63,27 +70,58 @@ pub async fn run(
     }
     let enabled = db.lists().archivers(list).await?;
     let on = |name: &str| enabled.iter().any(|(stored, on)| stored == name && *on);
-    if !on("mhonarc") && !on("prototype") && !plugins.iter().any(|archiver| on(archiver.name())) {
+    if !on("mhonarc")
+        && !on("prototype")
+        && !on("hyperkitty")
+        && !plugins.iter().any(|archiver| on(archiver.name()))
+    {
         return Ok(Vec::new());
     }
     let Some(raw) = db.archive().archived_copy(list, hash).await? else {
         return Ok(Vec::new());
     };
-    let mut names = Vec::new();
-    if on("mhonarc") && !settings.mhonarc.is_empty() {
-        match mhonarc(&settings.mhonarc, list, hash, &raw).await {
-            Ok(()) => names.push("mhonarc"),
-            Err(error) => tracing::warn!(%error, list=%list, "mhonarc archiver failed"),
-        }
-    }
-    if on("prototype") && !settings.prototype.trim().is_empty() {
-        match prototype(Path::new(settings.prototype.trim()), list, hash, &raw).await {
-            Ok(()) => names.push("prototype"),
-            Err(error) => tracing::warn!(%error, list=%list, "prototype archiver failed"),
-        }
-    }
+    let mut names = run_builtin(settings, &enabled, list, hash, &raw).await;
     names.extend(run_plugins(plugins, &enabled, list, hash, &raw).await);
     Ok(names)
+}
+
+/// The built-in archivers a list switched on, each run and its failure
+/// logged.
+async fn run_builtin(
+    settings: &Settings,
+    enabled: &[(String, bool)],
+    list: &ListId,
+    hash: &str,
+    raw: &[u8],
+) -> Vec<&'static str> {
+    let on = |name: &str| enabled.iter().any(|(stored, on)| stored == name && *on);
+    let mut names = Vec::new();
+    if on("mhonarc") && !settings.mhonarc.is_empty() {
+        let result = mhonarc(&settings.mhonarc, list, hash, raw).await;
+        names.extend(logged("mhonarc", list, result));
+    }
+    if on("prototype") && !settings.prototype.trim().is_empty() {
+        let result = prototype(Path::new(settings.prototype.trim()), list, hash, raw).await;
+        names.extend(logged("prototype", list, result));
+    }
+    if on("hyperkitty") && !settings.hyperkitty_url.trim().is_empty() {
+        let result = hyperkitty(settings, list, hash, raw).await.map(|url| {
+            tracing::info!(list=%list, hash, url, "hyperkitty archived the post");
+        });
+        names.extend(logged("hyperkitty", list, result));
+    }
+    names
+}
+
+/// The archiver's name when it ran, its failure logged when it did not.
+fn logged(name: &'static str, list: &ListId, result: Result<()>) -> Option<&'static str> {
+    match result {
+        Ok(()) => Some(name),
+        Err(error) => {
+            tracing::warn!(%error, list=%list, archiver=name, "archiver failed");
+            None
+        }
+    }
 }
 
 /// The plugins' archivers that are on for the list, each run off the
@@ -170,4 +208,66 @@ async fn prototype(root: &Path, list: &ListId, hash: &str, raw: &[u8]) -> Result
     let staged = tmp.join(hash);
     tokio::fs::write(&staged, raw).await.map_err(io)?;
     tokio::fs::rename(&staged, new.join(hash)).await.map_err(io)
+}
+
+/// Post the archived copy to `HyperKitty`'s `/api/mailman/archive` as
+/// `mailman-hyperkitty` 1.2 does — `Authorization: Token <key>`, a
+/// multipart form with `mlist` (the list's posting address) and the
+/// message as a file — and return the permalink `HyperKitty` answers with.
+async fn hyperkitty(settings: &Settings, list: &ListId, hash: &str, raw: &[u8]) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let base = settings.hyperkitty_url.trim().trim_end_matches('/');
+    // A boundary that cannot occur in the message: a digest of it.
+    let digest = Sha256::digest([raw, hash.as_bytes()].concat());
+    let boundary = digest
+        .iter()
+        .take(16)
+        .fold(String::from("listmngr-"), |mut out, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{byte:02x}");
+            out
+        });
+    let fqdn = format!("{}@{}", list.list_name(), list.mail_host());
+    let mut body = Vec::with_capacity(raw.len() + 512);
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"mlist\"\r\n\r\n{fqdn}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"message\"; filename=\"{hash}.eml\"\r\nContent-Type: message/rfc822\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(raw);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("listmngr")
+        .build()
+        .map_err(|error| Error::Validation(format!("hyperkitty client: {error}")))?;
+    let response = client
+        .post(format!("{base}/api/mailman/archive"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Token {}", settings.hyperkitty_key),
+        )
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .map_err(|error| Error::Validation(format!("hyperkitty request: {error}")))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(Error::Validation(format!(
+            "hyperkitty answered {}",
+            status.as_u16()
+        )));
+    }
+    let answer: serde_json::Value = response.json().await.unwrap_or_default();
+    Ok(answer
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned())
 }
