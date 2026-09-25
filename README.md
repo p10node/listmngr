@@ -1,5 +1,22 @@
 # listmngr
 
+## Webhooks on the web (`P6-WEBHOOKS-WEB`) — bounded local acceptance verified
+
+A list owner manages the list's webhooks at `/web/lists/{id}/settings/webhooks`
+(a "Webhooks" entry in the settings navigation) and a server owner every
+webhook, the site-wide ones included, at `/web/admin/webhooks` (linked from
+the admin index). The page lists each webhook with its URL, list or
+"site-wide", enabled or disabled, events, secret fingerprint and
+description, with Enable/Disable, Ping, Rotate secret and Remove beside
+it, and an add form (URL, events comma-separated, description). Adding or
+rotating renders the page once with the new secret in a marked block and
+never again — the page is rendered on that response rather than redirected
+to, so the secret is in no URL and no history. A webhook's own page lists
+what it was owed, newest first: event, state, attempts, last status, last
+error, created, next attempt. A list owner cannot see or touch another
+list's or a site-wide webhook (`404`), every write needs the session's CSRF
+token, and each is audited with the signed-in user as its actor.
+
 ## Plugins (`P6-PLUGINS`) — bounded local acceptance verified
 
 A plugin is a Rust type linked into the binary, never loaded at run

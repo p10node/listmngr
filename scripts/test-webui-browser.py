@@ -213,6 +213,31 @@ with sync_playwright() as p:
     page.screenshot(path=str(out / '31-header-rules.png'), full_page=True)
     page.get_by_role('button', name='Remove rule', exact=True).click()
     expect(page.locator('section.rule')).to_have_count(0)
+    # Webhooks: add one and see its secret once, ping it, read its
+    # deliveries, remove it. The screenshot is taken after a reload, when
+    # the secret is no longer on the page.
+    page.get_by_role('link', name='Webhooks', exact=True).click()
+    expect(page.get_by_role('heading', name='Webhooks', exact=True)).to_be_visible()
+    axe_scan(page, '/web/lists/public.example.com/settings/webhooks')
+    page.locator('#url').fill('https://hooks.example.invalid/browser')
+    page.locator('#events').fill('member.*, list.config')
+    page.locator('#description').fill('browser')
+    page.get_by_role('button', name='Add webhook', exact=True).click()
+    expect(page.locator('#webhook-secret')).to_be_visible()
+    assert len(page.locator('#webhook-secret').inner_text().strip()) == 64
+    axe_scan(page, '/web/lists/public.example.com/settings/webhooks (secret shown)')
+    # A fresh GET, not a reload: reloading the add response would resubmit it.
+    page.goto(base + '/web/lists/public.example.com/settings/webhooks')
+    expect(page.locator('#webhook-secret')).to_have_count(0)
+    expect(page.locator('main')).to_contain_text('hooks.example.invalid/browser')
+    page.screenshot(path=str(out / '32-webhooks.png'), full_page=True)
+    page.get_by_role('button', name='Ping', exact=True).click()
+    expect(page.get_by_role('status')).to_contain_text('A ping is queued')
+    expect(page.locator('table')).to_contain_text('ping')
+    axe_scan(page, '/web/lists/public.example.com/settings/webhooks/<id>')
+    page.get_by_role('link', name='All webhooks', exact=True).click()
+    page.get_by_role('button', name='Remove', exact=True).click()
+    expect(page.locator('main')).to_contain_text('No webhook yet')
     # Bans: add and lift.
     page.get_by_role('link', name='Bans', exact=True).click()
     page.get_by_label('Address or pattern', exact=True).fill('Banned-Browser@Example.org')
