@@ -192,11 +192,19 @@ naming the list) and articles without a `From`, and hands the rest to
 the `in` queue as posts from Usenet — `To` moved to `X-Originally-To`
 and set to the list, the `From` address as the envelope sender, the
 context marked `fromusenet` so the post is admitted like any other but
-never gated back out. The watermark moves article by article, each move
-an audit event (`usenet.watermark`), so a poll cut short never repeats
-itself; an expired article is logged and passed; a group the server does
-not know, or a server that cannot be reached, is reported per list and
-moves nothing.
+never gated back out. The watermark moves article by article, and each
+move is one transaction with the article it queues and its audit event
+(`usenet.watermark`, saying whether the article was gated or passed):
+a poll cut short never repeats itself and never loses what it queued.
+An article the server no longer has, or one whose header block cannot
+be read, is logged and passed; a session that breaks while an article
+is being read — the server hangs up, times out — stops the poll with
+the watermark where it was, so the next poll reads that article again
+(`P6-NNTP-GATENEWS-FIX`). Two pollers on one list, the runner beside
+`listmngr nntp gate`, gate an article once: the watermark is moved by
+compare-and-set, and the poller that finds it already moved stops and
+says so. A group the server does not know, or a server that cannot be
+reached, is reported per list and moves nothing.
 
 Limits: one reader session per poll (all lists in turn), plain TCP as
 Mailman's; the `in` queue's admission decides the article's fate (a

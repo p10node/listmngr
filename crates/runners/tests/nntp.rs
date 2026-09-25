@@ -19,6 +19,18 @@ const LIST: &str = "dev.example.invalid";
 /// the server runs.
 type Articles = Arc<Mutex<Vec<(u64, Vec<u8>)>>>;
 
+/// How the fake server misbehaves on `ARTICLE`, if at all.
+#[derive(Clone)]
+enum Fault {
+    None,
+    /// Send the status line and part of the article, then hang up.
+    Truncate(u64),
+    /// Hang up instead of answering.
+    Drop(u64),
+    /// Answer only once every party has asked, so two pollers race.
+    Hold(Arc<tokio::sync::Barrier>),
+}
+
 /// A news server that records what it is given and refuses once on request.
 async fn news_server(refuse_first_with: Option<&'static str>) -> (u16, Arc<Mutex<Vec<Vec<u8>>>>) {
     let (port, posted, _) = news_server_with_group(refuse_first_with, "alt.test").await;
@@ -29,6 +41,20 @@ async fn news_server(refuse_first_with: Option<&'static str>) -> (u16, Arc<Mutex
 async fn news_server_with_group(
     refuse_first_with: Option<&'static str>,
     group: &'static str,
+) -> (u16, Arc<Mutex<Vec<Vec<u8>>>>, Articles) {
+    news_server_impl(refuse_first_with, group, Fault::None).await
+}
+
+/// [`news_server_with_group`] with a fault on `ARTICLE`.
+async fn faulty_news_server(group: &'static str, fault: Fault) -> (u16, Articles) {
+    let (port, _, articles) = news_server_impl(None, group, fault).await;
+    (port, articles)
+}
+
+async fn news_server_impl(
+    refuse_first_with: Option<&'static str>,
+    group: &'static str,
+    fault: Fault,
 ) -> (u16, Arc<Mutex<Vec<Vec<u8>>>>, Articles) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -42,6 +68,7 @@ async fn news_server_with_group(
             let posted = recorded.clone();
             let refusal = refusal.clone();
             let articles = served.clone();
+            let fault = fault.clone();
             tokio::spawn(async move {
                 let (read, mut write) = stream.into_split();
                 let mut read = BufReader::new(read);
@@ -69,6 +96,22 @@ async fn news_server_with_group(
                         continue;
                     }
                     if let Some(reply) = article_reply(command, &articles) {
+                        let number: u64 = command
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|n| n.parse().ok())
+                            .unwrap_or(0);
+                        match &fault {
+                            Fault::Truncate(n) if *n == number => {
+                                let _ = write.write_all(&reply.as_bytes()[..40]).await;
+                                return;
+                            }
+                            Fault::Drop(n) if *n == number => return,
+                            Fault::Hold(barrier) if command.starts_with("ARTICLE ") => {
+                                barrier.wait().await;
+                            }
+                            _ => {}
+                        }
                         write.write_all(reply.as_bytes()).await.unwrap();
                         continue;
                     }
@@ -140,6 +183,10 @@ fn article_reply(command: &str, articles: &Articles) -> Option<String> {
 
 async fn fixture(settings: Value) -> Database {
     let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    fixture_on(db, settings).await
+}
+
+async fn fixture_on(db: Database, settings: Value) -> Database {
     db.migrate().await.unwrap();
     db.domains()
         .create("example.invalid", "", None)
@@ -569,6 +616,155 @@ async fn gatenews_catches_up_then_gates_new_articles_and_moves_the_watermark() {
     assert_eq!(audited.len(), 4, "{audited:?}");
     admitted_to_members_not_gated_back(&db).await;
     unknown_group_and_no_gateway(&db, &config).await;
+}
+
+async fn queued_ids(db: &Database) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT m.external_id FROM queue_jobs q JOIN messages m ON m.id=q.message_id ORDER BY m.external_id",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap()
+}
+
+/// A poll that cannot read an article — the server hangs up mid-transfer,
+/// or before answering — moves no watermark and queues nothing, so the
+/// next poll gates the article; an article the server says it no longer
+/// has is passed over. Mailman logs both and moves on; this runtime tells
+/// them apart, because only one of them is gone.
+#[tokio::test]
+async fn a_broken_transfer_moves_no_watermark_and_the_next_poll_gates_the_article() {
+    let db =
+        fixture(json!({"gateway_to_mail": true, "linked_newsgroup": "comp.lang.rust.lists"})).await;
+    let config = |port| NntpConfig {
+        host: "127.0.0.1".into(),
+        port,
+        ..NntpConfig::default()
+    };
+    let (port, _, articles) = news_server_with_group(None, "comp.lang.rust.lists").await;
+    *articles.lock().unwrap() = vec![article(41, "old@elsewhere.invalid", "before", None)];
+    listmngr_runners::nntp::gate_news(&db, &config(port))
+        .await
+        .unwrap();
+    assert_eq!(watermark(&db).await, 41);
+    let served = || {
+        vec![
+            article(41, "old@elsewhere.invalid", "before", None),
+            article(42, "carol@elsewhere.invalid", "cut off", None),
+            article(43, "dave@elsewhere.invalid", "after", None),
+        ]
+    };
+    for fault in [Fault::Truncate(42), Fault::Drop(42)] {
+        let (port, articles) = faulty_news_server("comp.lang.rust.lists", fault).await;
+        *articles.lock().unwrap() = served();
+        let report = listmngr_runners::nntp::gate_news(&db, &config(port))
+            .await
+            .unwrap();
+        assert_eq!(report.len(), 1);
+        assert!(report[0].error.is_some(), "{report:?}");
+        assert_eq!(report[0].gated, 0, "{report:?}");
+        assert_eq!(report[0].watermark, Some(41), "{report:?}");
+        assert_eq!(
+            watermark(&db).await,
+            41,
+            "a lost article must not be passed"
+        );
+        assert!(queued_ids(&db).await.is_empty());
+    }
+    // The server no longer has 42: passed over. 43 is gated. 44 has a
+    // header block nobody can read: passed over too, or the list would
+    // never get past it.
+    let (port, _, articles) = news_server_with_group(None, "comp.lang.rust.lists").await;
+    *articles.lock().unwrap() = vec![
+        article(41, "old@elsewhere.invalid", "before", None),
+        article(43, "dave@elsewhere.invalid", "after", None),
+        (
+            44,
+            b"Path: news.invalid\r\nthis line is no header\r\nFrom: eve@elsewhere.invalid\r\n\r\nbody\r\n".to_vec(),
+        ),
+    ];
+    let report = listmngr_runners::nntp::gate_news(&db, &config(port))
+        .await
+        .unwrap();
+    assert_eq!(report[0].error, None, "{report:?}");
+    assert_eq!(report[0].gated, 1);
+    assert_eq!(report[0].watermark, Some(44));
+    assert_eq!(watermark(&db).await, 44);
+    assert_eq!(queued_ids(&db).await, ["<43@news.invalid>"]);
+    // Every step of the watermark is audited, gated or passed.
+    let audited: Vec<String> = sqlx::query_scalar(
+        "SELECT diff FROM audit_log WHERE action='usenet.watermark' ORDER BY at",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(audited.len(), 4, "{audited:?}");
+    assert!(audited[1].contains("\"gated\":false"), "{}", audited[1]);
+    assert!(audited[2].contains("\"gated\":true"), "{}", audited[2]);
+    assert!(audited[3].contains("\"gated\":false"), "{}", audited[3]);
+}
+
+/// Two pollers on the same list at once — a command run beside the
+/// runner, or two runners — gate an article once: the watermark is moved
+/// and the article queued in one transaction, and the poller that finds
+/// the watermark already moved stops.
+#[tokio::test]
+async fn two_pollers_gate_one_article_once() {
+    let db =
+        fixture(json!({"gateway_to_mail": true, "linked_newsgroup": "comp.lang.rust.lists"})).await;
+    race_scenario(&db).await;
+}
+
+async fn race_scenario(db: &Database) {
+    let (port, _, articles) = news_server_with_group(None, "comp.lang.rust.lists").await;
+    *articles.lock().unwrap() = vec![article(41, "old@elsewhere.invalid", "before", None)];
+    let config = |port| NntpConfig {
+        host: "127.0.0.1".into(),
+        port,
+        ..NntpConfig::default()
+    };
+    listmngr_runners::nntp::gate_news(db, &config(port))
+        .await
+        .unwrap();
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let (port, articles) = faulty_news_server("comp.lang.rust.lists", Fault::Hold(barrier)).await;
+    *articles.lock().unwrap() = vec![
+        article(41, "old@elsewhere.invalid", "before", None),
+        article(42, "carol@elsewhere.invalid", "raced", None),
+    ];
+    let config = config(port);
+    let (left, right) = tokio::join!(
+        listmngr_runners::nntp::gate_news(db, &config),
+        listmngr_runners::nntp::gate_news(db, &config),
+    );
+    let reports = [left.unwrap().remove(0), right.unwrap().remove(0)];
+    assert_eq!(
+        reports.iter().map(|report| report.gated).sum::<u64>(),
+        1,
+        "{reports:?}"
+    );
+    let loser = reports.iter().find(|report| report.gated == 0).unwrap();
+    assert!(loser.error.is_some(), "{reports:?}");
+    assert_eq!(watermark(db).await, 42);
+    assert_eq!(queued_ids(db).await, ["<42@news.invalid>"]);
+}
+
+/// The compare-and-set on the watermark, on an isolated `PostgreSQL`
+/// schema, where the two transactions really run side by side.
+#[tokio::test]
+#[ignore = "requires TEST_POSTGRES_URL; owns an isolated schema"]
+async fn postgres_gatenews_race_contract() {
+    let schema = listmngr_db::test_support::IsolatedSchema::create("gatenews_race")
+        .await
+        .unwrap();
+    let db = fixture_on(
+        Database::connect(&schema.url, 4).await.unwrap(),
+        json!({"gateway_to_mail": true, "linked_newsgroup": "comp.lang.rust.lists"}),
+    )
+    .await;
+    race_scenario(&db).await;
+    db.pool().close().await;
+    schema.drop().await.unwrap();
 }
 
 /// A group the server does not know is reported and moves nothing; a list
