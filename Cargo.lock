@@ -2174,6 +2174,7 @@ dependencies = [
  "listmngr-pipeline",
  "mail-parser",
  "pulldown-cmark",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

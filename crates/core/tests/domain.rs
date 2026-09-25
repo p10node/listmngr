@@ -342,3 +342,59 @@ fn preferences_overlay_only_replaces_present_values() {
     assert_eq!(resolved.delivery_mode, Some(DeliveryMode::PlaintextDigests));
     assert_eq!(resolved.preferred_language.as_deref(), Some("en"));
 }
+
+/// The `hyperkitty` archiver's settings: a URL needs a key, the key one
+/// way only, and the key file never in the redacted view.
+#[test]
+fn hyperkitty_archiver_settings_are_checked_and_the_key_file_is_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    std::fs::write(
+        &path,
+        "[archive.archivers]\nhyperkitty_url = \"https://lists.example.invalid/hyperkitty\"\n",
+    )
+    .unwrap();
+    assert!(Config::load(Some(&path)).is_err(), "a URL without a key");
+    std::fs::write(
+        &path,
+        "[archive.archivers]\nhyperkitty_url = \"ftp://lists.example.invalid\"\nhyperkitty_api_key = \"k\"\n",
+    )
+    .unwrap();
+    assert!(Config::load(Some(&path)).is_err(), "not an http(s) URL");
+    std::fs::write(&path, "[archive.archivers]\nhyperkitty_api_key = \"k\"\n").unwrap();
+    assert!(Config::load(Some(&path)).is_err(), "a key without a URL");
+    let secret = dir.path().join("hk.key");
+    std::fs::write(&secret, "archiver-key-sentinel\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    std::fs::write(
+        &path,
+        format!(
+            "[archive.archivers]\nhyperkitty_url = \"https://lists.example.invalid/hyperkitty/\"\nhyperkitty_api_key = \"k\"\nhyperkitty_api_key_file = {secret:?}\n"
+        ),
+    )
+    .unwrap();
+    assert!(Config::load(Some(&path)).is_err(), "the key one way only");
+    std::fs::write(
+        &path,
+        format!(
+            "[archive.archivers]\nhyperkitty_url = \"https://lists.example.invalid/hyperkitty/\"\nhyperkitty_api_key_file = {secret:?}\n"
+        ),
+    )
+    .unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(
+        config.archive.archivers.hyperkitty_api_key(),
+        Some("archiver-key-sentinel")
+    );
+    let rendered = config.redacted_json().to_string();
+    assert!(!rendered.contains("sentinel"), "{rendered}");
+    assert!(!rendered.contains("hyperkitty_api_key_file"), "{rendered}");
+    assert!(
+        rendered.contains("lists.example.invalid/hyperkitty"),
+        "{rendered}"
+    );
+}
