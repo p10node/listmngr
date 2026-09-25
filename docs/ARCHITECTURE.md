@@ -1,5 +1,51 @@
 # Architecture
 
+## Webhooks: the store — bounded local acceptance verified
+
+Migration `0054_webhooks.sql`: `webhooks` (`id`, `url`, `description`,
+`events` as a JSON array of patterns, `list_id` nullable and `RESTRICT`
+to `mailing_lists`, `enabled`, `secret_hash`, `secret_salt`,
+`created_at`/`updated_at` in milliseconds) and `webhook_deliveries`
+(`id`, `webhook_id` `RESTRICT` to `webhooks`, `event`, `list_id`,
+`payload` JSON, `state` `pending`/`delivered`/`failed`, `attempts`,
+`next_attempt_at`, `leased_until`, `last_status`, `last_error`,
+`created_at`, `finished_at`; indexed on `(state, next_attempt_at)` for
+the runner and `(webhook_id, created_at)` for the API). Both are
+deleted explicitly with their list in `ListRepo::delete_tx` and with
+their webhook, as the other list-owned tables are.
+
+`listmngr_db::webhooks` (`crates/db/src/webhooks.rs`):
+`WebhookRepo::create_with_context` validates the URL (`https://` unless
+`[webhooks] allow_http`; no userinfo, no whitespace, at most 2048
+bytes), the events (`*`, `name.*` or `name` of `[a-z0-9_.]`, at most 64,
+deduplicated) and the description, derives the secret and stores its
+SHA-256 and the salt; `get`, `list(Option<&ListId>)`,
+`update_with_context` (a from → to diff per changed field),
+`delete_with_context` (deliveries first), `rotate_with_context` (a new
+salt, the old fingerprint audited), `secret` (derived again for the
+runner), `ping_with_context` (a `ping` delivery outside the audit path),
+`deliveries`/`delivery`. The secret is HKDF-SHA256 by hand over the
+workspace's `hmac`: extract with the salt over the signing key, expand
+one block with `"listmngr webhook " || id`, 64 hex digits. `Database`
+carries the key and `allow_http` through `with_webhooks`, set beside
+`with_base_url` in the CLI and the API; `WebhooksConfig::resolve`
+reads `signing_key_file` (owner-only permissions, like the other secret
+files), insists on 32 characters, and on a key whenever `enabled`.
+
+`fan_out(tx, context, at, action, target_type, target_id, diff)` runs at
+the end of `Database::record_tx_with_context` and of moderation's own
+`audit_held` (target type `held_message`), inside the caller's
+transaction: `SELECT … FROM webhooks WHERE enabled=1`, `event_matches`
+per hook, the event's list resolved once (`event_list`: the target when
+it is a list, else the diff's `list_id`, else the member's or held
+message's list by id), a list-bound hook skipped for another list's
+event, then one `pending` delivery per match with the payload above and
+`next_attempt_at = created_at`. A hook subscribed to `webhook.*` hears of
+its own creation, since the row exists when its audit event is written.
+The queue's, bounce processing's and DSN issuance's own audit inserts do
+not fan out. `TaskRepo::sweep` gained `collected_webhook_deliveries`:
+`state <> 'pending'` and `finished_at` older than the retention.
+
 ## Read-only operator diagnostics (`P6-DOCTOR`) — bounded local acceptance verified
 
 The CLI dispatches `doctor` before the ordinary database-opening path.
