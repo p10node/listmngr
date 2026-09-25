@@ -1095,6 +1095,7 @@ impl Config {
         config.nntp.validate()?;
         config.webhooks.resolve()?;
         config.archive.archivers.resolve()?;
+        config.web.tls.validate(&config.web.listen)?;
         Ok(config)
     }
 
@@ -1482,7 +1483,77 @@ impl MtaConfig {
     }
 }
 
-config_struct!(WebConfig { listen: String = "127.0.0.1:8000".into(), trusted_proxies: Vec<IpNet> = vec!["127.0.0.1/32".parse().expect("valid network")], session_idle: String = "12h".into(), session_absolute: String = "7d".into(), signup: bool = true, oidc: Vec<OidcProviderConfig> = Vec::new() });
+// `[web] tls`: a second listener that speaks TLS, beside the plain one on
+// `listen` (which stays for health probes and a reverse proxy on the host).
+// The three settings go together; the key file must be the owner's alone.
+config_struct!(WebTlsConfig {
+    listen: Option<String> = None,
+    cert_file: Option<PathBuf> = None,
+    key_file: Option<PathBuf> = None
+});
+
+impl WebTlsConfig {
+    /// Whether a TLS listener is configured at all.
+    #[must_use]
+    pub const fn enabled(&self) -> bool {
+        self.listen.is_some()
+    }
+
+    /// The `[web] tls` invariants `Config::load` enforces.
+    fn validate(&self, plain_listen: &str) -> Result<()> {
+        let set = [
+            self.listen.is_some(),
+            self.cert_file.is_some(),
+            self.key_file.is_some(),
+        ];
+        if set.iter().all(|value| !value) {
+            return Ok(());
+        }
+        if !set.iter().all(|value| *value) {
+            return Err(Error::Validation(
+                "web.tls needs listen, cert_file and key_file together".into(),
+            ));
+        }
+        let listen: std::net::SocketAddr = self
+            .listen
+            .as_deref()
+            .unwrap_or_default()
+            .parse()
+            .map_err(|_| Error::Validation("web.tls.listen must be an address:port".into()))?;
+        if plain_listen.parse::<std::net::SocketAddr>().ok() == Some(listen) {
+            return Err(Error::Validation(
+                "web.tls.listen must differ from web.listen".into(),
+            ));
+        }
+        for (setting, path) in [
+            ("web.tls.cert_file", &self.cert_file),
+            ("web.tls.key_file", &self.key_file),
+        ] {
+            let path = path.as_deref().unwrap_or_else(|| Path::new(""));
+            let metadata = std::fs::metadata(path)
+                .map_err(|_| Error::Validation(format!("cannot read {setting}")))?;
+            if !metadata.is_file() {
+                return Err(Error::Validation(format!("{setting} is not a file")));
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(self.key_file.as_deref().unwrap_or_else(|| Path::new("")))
+                .map_err(|_| Error::Validation("cannot read web.tls.key_file".into()))?
+                .permissions()
+                .mode();
+            if mode & 0o077 != 0 {
+                return Err(Error::Validation(
+                    "web.tls.key_file must not be accessible by group or other users".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+config_struct!(WebConfig { listen: String = "127.0.0.1:8000".into(), trusted_proxies: Vec<IpNet> = vec!["127.0.0.1/32".parse().expect("valid network")], session_idle: String = "12h".into(), session_absolute: String = "7d".into(), signup: bool = true, oidc: Vec<OidcProviderConfig> = Vec::new(), tls: WebTlsConfig = WebTlsConfig::default() });
 
 /// `[[web.oidc]]`: unique slugs, an https issuer (http only on loopback),
 /// exactly one way to the client secret, and `openid` among the scopes.

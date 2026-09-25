@@ -14,6 +14,10 @@ plugin-example = ["listmngr-plugins/example"]
 
 [dependencies]
 hickory-resolver = "=0.26.2"
+hyper = { workspace = true, features = ["http1", "http2", "server"] }
+hyper-util = { workspace = true, features = ["server", "server-auto", "tokio", "http1", "http2", "service"] }
+tokio-rustls = { version = "=0.26.5", default-features = false, features = ["ring", "tls12"] }
+tower.workspace = true
 flate2.workspace = true
 anyhow.workspace = true
 axum.workspace = true
@@ -40,6 +44,8 @@ tempfile = "3.23.0"
 
 [dev-dependencies]
 sha2.workspace = true
+rustls-pki-types = "=1.15.1"
+tokio-rustls = { version = "=0.26.5", default-features = false, features = ["ring", "tls12"] }
 assert_cmd = "2.1.1"
 predicates = "3.1.3"
 base64.workspace = true
