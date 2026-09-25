@@ -136,6 +136,7 @@ macro_rules! uuid_id {
 
 uuid_id!(DomainId);
 uuid_id!(UserId);
+uuid_id!(WebhookId);
 uuid_id!(AddressId);
 uuid_id!(MemberId);
 uuid_id!(PreferencesId);
@@ -999,6 +1000,7 @@ pub struct Config {
     pub archive: ArchiveConfig,
     pub runners: RunnerConfig,
     pub nntp: NntpConfig,
+    pub webhooks: WebhooksConfig,
     pub observability: ObservabilityConfig,
 }
 
@@ -1091,6 +1093,7 @@ impl Config {
         config.mta.validate()?;
         config.mailman.validate()?;
         config.nntp.validate()?;
+        config.webhooks.resolve()?;
         Ok(config)
     }
 
@@ -1106,6 +1109,12 @@ impl Config {
         {
             database.insert("url".into(), serde_json::Value::String("[REDACTED]".into()));
             database.remove("url_file");
+        }
+        if let Some(webhooks) = value
+            .get_mut("webhooks")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            webhooks.remove("signing_key_file");
         }
         value
     }
@@ -1671,6 +1680,62 @@ config_struct!(NntpConfig {
         "MIME-Version X-MIME-Version".into()
     ]
 });
+// Webhooks (`P6-WEBHOOKS-*`): where the site posts what its audit log
+// records. Off by default; on, a signing key is required, since each
+// webhook's secret is derived from it and the webhook's own salt, so the
+// database holds no secret to leak.
+config_struct!(WebhooksConfig {
+    enabled: bool = false,
+    signing_key: Option<SmtpAuthSecret> = None,
+    signing_key_file: Option<PathBuf> = None,
+    // Accept `http://` targets as well as `https://` (a lab, never a site).
+    allow_http: bool = false,
+    // Deliver to loopback, link-local and private addresses (a lab).
+    allow_private_targets: bool = false,
+    // Attempts before a delivery is given up as failed.
+    max_attempts: u32 = 12,
+    // Seconds a target has to answer one delivery.
+    timeout_secs: u32 = 10
+});
+
+impl WebhooksConfig {
+    /// Read `signing_key_file` into `signing_key` and check the section.
+    fn resolve(&mut self) -> Result<()> {
+        if let Some(path) = &self.signing_key_file {
+            if self.signing_key.is_some() {
+                return Err(Error::Validation(
+                    "webhooks.signing_key and webhooks.signing_key_file are exclusive".into(),
+                ));
+            }
+            self.signing_key = Some(read_secret_file(path, "webhooks.signing_key_file")?.into());
+        }
+        if let Some(key) = &self.signing_key
+            && key.expose().len() < 32
+        {
+            return Err(Error::Validation(
+                "webhooks.signing_key must be at least 32 characters".into(),
+            ));
+        }
+        if self.enabled && self.signing_key.is_none() {
+            return Err(Error::Validation(
+                "webhooks.enabled needs webhooks.signing_key or webhooks.signing_key_file".into(),
+            ));
+        }
+        if self.max_attempts == 0 || self.timeout_secs == 0 {
+            return Err(Error::Validation(
+                "webhooks.max_attempts and webhooks.timeout_secs must be positive".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The signing key, when one is configured.
+    #[must_use]
+    pub fn signing_key(&self) -> Option<&str> {
+        self.signing_key.as_ref().map(SmtpAuthSecret::expose)
+    }
+}
+
 impl NntpConfig {
     /// Whether a news server is configured at all.
     #[must_use]

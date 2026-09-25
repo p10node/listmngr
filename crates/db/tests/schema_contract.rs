@@ -55,6 +55,7 @@ fn expected_phase_one_schema() -> String {
             .chain(include_str!("fixtures/archive-interactions-schema.snapshot").lines())
             .chain(include_str!("fixtures/archive-admin-schema.snapshot").lines())
             .chain(include_str!("fixtures/usenet-schema.snapshot").lines())
+            .chain(include_str!("fixtures/webhooks-schema.snapshot").lines())
             .map(str::to_owned)
             .collect(),
     )

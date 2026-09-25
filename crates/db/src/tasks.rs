@@ -37,6 +37,8 @@ pub struct TaskSummary {
     pub collected_held: u64,
     pub collected_messages: u64,
     pub stale_bounces_reset: u64,
+    /// Webhook deliveries posted or given up longer ago than the retention.
+    pub collected_webhook_deliveries: u64,
 }
 
 impl TaskSummary {
@@ -51,6 +53,7 @@ impl TaskSummary {
             + self.collected_held
             + self.collected_messages
             + self.stale_bounces_reset
+            + self.collected_webhook_deliveries
             > 0
     }
 }
@@ -136,6 +139,13 @@ impl TaskRepo<'_> {
             .await?;
         let collected_messages = self.collect_messages(cutoff).await?;
         let stale_bounces_reset = self.reset_stale_bounces(now_ms).await?;
+        let collected_webhook_deliveries = self
+            .purge(
+                "webhook_deliveries",
+                "DELETE FROM webhook_deliveries WHERE id IN (SELECT id FROM webhook_deliveries WHERE state<>'pending' AND finished_at<=$1 ORDER BY finished_at,id LIMIT $2)",
+                cutoff,
+            )
+            .await?;
         Ok(TaskSummary {
             expired_workflows,
             expired_probes,
@@ -145,6 +155,7 @@ impl TaskRepo<'_> {
             collected_held,
             collected_messages,
             stale_bounces_reset,
+            collected_webhook_deliveries,
         })
     }
 
