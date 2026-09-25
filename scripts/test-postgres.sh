@@ -38,6 +38,8 @@ cargo test --locked -p listmngr-db --test webhooks \
   postgres_webhooks_contract -- --ignored --exact
 cargo test --locked -p listmngr-runners --test webhooks \
   postgres_webhook_claim_contract -- --ignored --exact
+cargo test --locked -p listmngr-api --test webui \
+  webhooks::postgres_webhooks_web_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test repositories \
   postgres_repeated_migrate_schema_and_crud_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test schema_contract \
