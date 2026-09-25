@@ -214,9 +214,11 @@ moderation action), what is already there skipped and counted, and one
 
 `listmngr_mail::nntp::Client` gained a session (`connect`: greeting,
 `MODE READER`, `AUTHINFO`) shared by `post` and by `reader()`, which
-returns a `Reader` (`group` → the `211` bounds, `head`/`article` → the
-multi-line block with its dot-stuffing undone as CRLF bytes, `quit`;
-every command under the client's timeout). `nntp::inbound(article,
+returns a `Reader` (`group` → the `211` bounds, `head`/`article` → `Some`
+of the multi-line block with its dot-stuffing undone as CRLF bytes, `None`
+when the server answers `420`/`423`/`430` — no such article — and an error
+for a closed, timed-out or otherwise broken session, which a caller must
+not read past; `quit`; every command under the client's timeout). `nntp::inbound(article,
 list)` is Mailman's per-article logic: `None` for an article whose
 `List-Id` ends with `<list_id>` or that has no `From` address;
 otherwise the article with `To` moved to `X-Originally-To` (any earlier
@@ -225,13 +227,22 @@ otherwise the article with `To` moved to `X-Originally-To` (any earlier
 `GateReport` per list with `to_json`): the lists with `gateway_to_mail`
 and a group, one reader session, `group` then `poll` — a `None`
 watermark catches up to the group's last, else `max(watermark + 1,
-first)..=last`, each `article` through `gate_article`
-(`MailQueueRepo::enqueue` on `Queue::In` with `{list_id,
-envelope_sender, fromusenet: true}`, `external_id` the article's
-`Message-ID` or a minted one) and `UsenetRepo::set_watermark` after every
-article; a read error skips the article and still moves the watermark;
-the server being unreachable or a group unknown lands in the entry's
-`error`. `nntp::run` calls `poll_and_log` at start and whenever
+first)..=last`, each article read and, when `inbound` gates it, turned
+into the `in` job (`gated_message`: `{list_id, envelope_sender,
+fromusenet: true}`, `external_id` the article's `Message-ID` or a minted
+one), then `UsenetRepo::advance_watermark(list, from, to, gated)`: one
+transaction that moves the watermark by compare-and-set (`WHERE
+usenet_watermark = from`, or `IS NULL` for the first poll), queues the
+gated article through `mail_queue::enqueue_tx`, and records
+`usenet.watermark` with `from` and `gated`; `Ok(false)` — the watermark
+was no longer `from` — is `PollStop::Contended` and ends that list's
+poll with an error saying another poller moved it. An article the server
+has not got (`None`) or whose header block `inbound` cannot read is
+passed with a warning; a session error is `PollStop::Server`, which ends
+the poll with the watermark where it was, and `gate_news` then reports
+the remaining lists as `not polled` rather than driving a dead session.
+The server being unreachable or a group unknown lands in the entry's
+`error`. `set_watermark` remains for the settings surface. `nntp::run` calls `poll_and_log` at start and whenever
 `gatenews_every_secs` has elapsed between claims (`0` never); `listmngr
 nntp gate` (`crates/cli/src/nntp.rs`) refuses without a host and prints
 the report.
