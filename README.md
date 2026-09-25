@@ -1,5 +1,31 @@
 # listmngr
 
+## Webhooks: delivery (`P6-WEBHOOKS-DELIVER`) — bounded local acceptance verified
+
+With `[webhooks] enabled = true`, `listmngr serve` runs the webhook
+runner — with or without the mail role, since events come from the API
+and the web as much as from mail. It claims each due delivery under a
+lease, posts it once as JSON and records what the target answered: a
+2xx is `delivered`; anything else — a 5xx, a 4xx, a redirect (never
+followed), a timeout, a connection refused — is retried ten seconds
+later, then twenty, doubling to an hour, jittered, until `max_attempts`
+(12) gives it up as `failed` with the last status and error kept. A
+target the site may never reach is given up at once: a scheme other
+than `https://` (unless `allow_http`), or a name that resolves to a
+loopback, link-local, private, shared or unspecified address (unless
+`allow_private_targets`). The name is resolved before the check and
+the connection pinned to the addresses found, so a name that changes
+between the two cannot steer a delivery elsewhere. A disabled webhook
+keeps its deliveries until it is enabled again.
+
+Every request carries `Content-Type: application/json`,
+`X-Listmngr-Event`, `X-Listmngr-Delivery`, `X-Listmngr-Webhook`,
+`X-Listmngr-Timestamp` (Unix seconds) and `X-Listmngr-Signature:
+sha256=<hex>`, the HMAC-SHA256 of `<timestamp>.<body>` under the
+webhook's secret — recompute it, compare in constant time, and refuse a
+timestamp older than you like. `listmngr_webhook_deliveries_total`
+counts attempts by `delivered`, `retried` and `failed`.
+
 ## Webhooks: the store (`P6-WEBHOOKS-STORE`) — bounded local acceptance verified
 
 A webhook is a URL the site posts its audit events to — `list.config`,

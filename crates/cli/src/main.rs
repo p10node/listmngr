@@ -449,6 +449,17 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
     } else {
         None
     };
+    // Webhooks post from wherever `serve` runs, with or without the mail
+    // role: the events come from the API and the web as much as from mail.
+    let webhook_role = if config.webhooks.enabled {
+        let (hook_db, hook_config, hook_shutdown) =
+            (db.clone(), config.webhooks.clone(), shutdown_rx.clone());
+        Some(tokio::spawn(async move {
+            listmngr_runners::webhooks::run(hook_db, hook_config, hook_shutdown).await;
+        }))
+    } else {
+        None
+    };
     let http = std::future::IntoFuture::into_future(
         axum::serve(
             listener,
@@ -472,6 +483,10 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
         }
     } else {
         http.await?;
+    }
+    let _ = shutdown_tx.send(true);
+    if let Some(task) = webhook_role {
+        task.await.context("webhook runner panicked")?;
     }
     Ok(())
 }
