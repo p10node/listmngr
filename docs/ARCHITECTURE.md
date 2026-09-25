@@ -1,5 +1,27 @@
 # Architecture
 
+## TLS for the web — bounded local acceptance verified
+
+`WebTlsConfig` (`[web] tls`: `listen`, `cert_file`, `key_file`; `validate`
+in `Config::load`: the three together or none, an `address:port` that
+differs from `web.listen`, both files present and regular, the key file
+without group or other permissions on Unix). `crates/cli/src/tls.rs`:
+`acceptor(cert_file, key_file)` reads the PEM chain and key through
+`rustls-pki-types` and builds a rustls `ServerConfig` on the `ring`
+provider with the safe default protocol versions, no client
+authentication and ALPN `h2`, `http/1.1`; `serve(listener, acceptor,
+router, shutdown)` accepts connections until shutdown, handshakes each
+in its own task and hands it to `hyper_util`'s auto (HTTP/1.1 or HTTP/2)
+connection builder over a `service_fn` that inserts `ConnectInfo(peer)`
+into the request before `Router::oneshot`, then lets connections in
+flight finish for ten seconds; the plain listener keeps `axum::serve`
+unchanged. `serve_database` parses the address, builds the acceptor and
+binds the TLS listener before the HTTP server starts (a bad file or a
+taken port fails startup), spawns `tls::serve` with a clone of the
+router, and awaits it after shutdown. `hyper`, `hyper-util` (server,
+auto, tokio, http1, http2, service), `tokio-rustls` (ring) and `tower`
+became direct dependencies of the binary.
+
 ## Inbound SMTP, experimental — bounded local acceptance verified
 
 `listmngr_mail::lmtp::Protocol::{Lmtp, Smtp}` and

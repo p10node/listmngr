@@ -398,3 +398,51 @@ fn hyperkitty_archiver_settings_are_checked_and_the_key_file_is_hidden() {
         "{rendered}"
     );
 }
+
+/// `[web] tls`: the three settings together, an address of its own, the
+/// files present and the key the owner's alone.
+#[test]
+fn web_tls_settings_are_checked_together_and_the_key_must_be_private() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    let cert = dir.path().join("cert.pem");
+    let key = dir.path().join("key.pem");
+    std::fs::write(&cert, "not a certificate\n").unwrap();
+    std::fs::write(&key, "not a key\n").unwrap();
+    std::fs::write(
+        &path,
+        format!("[web.tls]\nlisten = \"127.0.0.1:8443\"\ncert_file = {cert:?}\n"),
+    )
+    .unwrap();
+    assert!(Config::load(Some(&path)).is_err(), "the three go together");
+    std::fs::write(
+        &path,
+        format!("[web]\nlisten = \"127.0.0.1:8443\"\n[web.tls]\nlisten = \"127.0.0.1:8443\"\ncert_file = {cert:?}\nkey_file = {key:?}\n"),
+    )
+    .unwrap();
+    assert!(Config::load(Some(&path)).is_err(), "an address of its own");
+    std::fs::write(
+        &path,
+        format!(
+            "[web.tls]\nlisten = \"127.0.0.1:8443\"\ncert_file = {cert:?}\nkey_file = {key:?}\n"
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(Config::load(Some(&path)).is_err(), "a readable key");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let config = Config::load(Some(&path)).unwrap();
+    assert!(config.web.tls.enabled());
+    assert_eq!(config.web.tls.listen.as_deref(), Some("127.0.0.1:8443"));
+    std::fs::write(
+        &path,
+        format!("[web.tls]\nlisten = \"127.0.0.1:8443\"\ncert_file = {cert:?}\nkey_file = \"{}/missing.pem\"\n", dir.path().display()),
+    )
+    .unwrap();
+    assert!(Config::load(Some(&path)).is_err(), "a missing file");
+    assert!(!Config::default().web.tls.enabled());
+}
