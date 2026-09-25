@@ -1,5 +1,32 @@
 # listmngr
 
+## TLS for the web (`P6-WEB-TLS`) — bounded local acceptance verified
+
+`[web] tls` adds a second listener that serves the same site over TLS,
+beside the plain one on `web.listen`, which stays for health probes,
+`listmngr status` and a reverse proxy on the host:
+
+```toml
+[web]
+listen = "127.0.0.1:8000"
+[web.tls]
+listen = "0.0.0.0:8443"
+cert_file = "/etc/listmngr/tls/fullchain.pem"   # the leaf and its chain, PEM
+key_file = "/etc/listmngr/tls/privkey.pem"      # PKCS#8, PKCS#1 or SEC1, PEM; owner-only
+```
+
+The three go together, the address must differ from `web.listen`, the
+files must exist and the key must not be readable by group or others —
+all checked when the configuration loads. The certificate is read and the
+port bound before the HTTP server starts, so a bad file or a taken port
+stops the start rather than a background task. TLS is rustls with its safe
+defaults (TLS 1.2 and 1.3), offering HTTP/2 and HTTP/1.1 through ALPN, and
+every connection carries its peer address as the plain listener's do, so
+rate limits and the audit log see the same thing either way. Set
+`site.base_url` to the `https://` origin. Port 443 needs
+`CAP_NET_BIND_SERVICE` or a port redirect; automatic certificates are
+`P6-WEB-ACME`.
+
 ## Inbound SMTP, experimental (`P6-INBOUND-SMTP`) — bounded local acceptance verified
 
 For a host with no MTA in front, `[mta] inbound_smtp_listen = "0.0.0.0:25"`
