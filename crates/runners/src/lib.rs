@@ -63,6 +63,8 @@ pub struct MailRoleConfig {
     pub dkim: listmngr_mail::dkim::SigningKeys,
     pub local_hostname: String,
     pub lmtp_listen: SocketAddr,
+    /// `[mta] inbound_smtp_listen`: the experimental SMTP listener, when on.
+    pub inbound_smtp_listen: Option<SocketAddr>,
     pub smtp_relay: SocketAddr,
     /// Separate SMTP sessions per recipient for non-null list envelopes only.
     pub smtp_single_recipient: bool,
@@ -116,6 +118,15 @@ impl MailRoleConfig {
             .smtp_relay
             .parse()
             .map_err(|_| listmngr_core::Error::Validation("invalid mta.smtp_relay".into()))?;
+        let inbound_smtp_listen = config
+            .mta
+            .inbound_smtp_listen
+            .as_deref()
+            .map(str::parse)
+            .transpose()
+            .map_err(|_| {
+                listmngr_core::Error::Validation("invalid mta.inbound_smtp_listen".into())
+            })?;
         Ok(Self {
             bounce_maintenance_enabled: config.mta.bounce_maintenance_enabled,
             bounce_maintenance_interval: Duration::from_secs(u64::from(
@@ -129,6 +140,7 @@ impl MailRoleConfig {
             dkim: listmngr_mail::dkim::SigningKeys::load(&config.mta.dkim_signing)?,
             local_hostname: config.mta.local_hostname.clone(),
             lmtp_listen,
+            inbound_smtp_listen,
             smtp_relay,
             smtp_single_recipient: config.mta.smtp_single_recipient,
             max_recipients_per_transaction: config.mta.max_recipients_per_transaction as usize,
@@ -185,6 +197,7 @@ impl MailRoleConfig {
 /// `shutdown` is signalled. Each connection gets its own durable-intake
 /// handler over a real socket (`listmngr_mail::lmtp::serve_session`).
 async fn run_acceptor(
+    protocol: listmngr_mail::lmtp::Protocol,
     listener: TcpListener,
     db: Database,
     role: MailRoleConfig,
@@ -203,15 +216,17 @@ async fn run_acceptor(
         };
         let (stream, peer) = accepted?;
         let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else {
-            tracing::warn!(%peer, "LMTP: connection rejected, session limit reached");
+            tracing::warn!(%peer, protocol = protocol.name(), "connection rejected, session limit reached");
             drop(stream);
             continue;
         };
         let mut handler = role.handler(db.clone());
         sessions.spawn(async move {
             let _permit = permit;
-            if let Err(error) = listmngr_mail::lmtp::serve_session(stream, &mut handler).await {
-                tracing::debug!(%peer, %error, "LMTP: session ended with a transport error");
+            if let Err(error) =
+                listmngr_mail::lmtp::serve_session_as(protocol, stream, &mut handler).await
+            {
+                tracing::debug!(%peer, %error, protocol = protocol.name(), "session ended with a transport error");
             }
         });
     }
@@ -243,6 +258,7 @@ pub async fn serve_mail_role(
     config: Config,
     role: MailRoleConfig,
     listener: TcpListener,
+    smtp_listener: Option<TcpListener>,
     shutdown: watch::Receiver<bool>,
 ) -> std::io::Result<()> {
     let mut tasks = tokio::task::JoinSet::new();
@@ -259,8 +275,7 @@ pub async fn serve_mail_role(
             Ok(())
         });
     }
-    let acceptor = run_acceptor(listener, db.clone(), role.clone(), shutdown.clone());
-    tasks.spawn(acceptor);
+    spawn_acceptors(&mut tasks, listener, smtp_listener, &db, &role, &shutdown);
     // The `in` processor's future is large (chain, pipeline and templated
     // notices all inline); keep it on the heap rather than in this frame.
     let site_owner = config.site.site_owner.clone();
@@ -395,4 +410,50 @@ pub async fn bind_lmtp(role: &MailRoleConfig) -> std::io::Result<TcpListener> {
     let listener = TcpListener::bind(role.lmtp_listen).await?;
     tracing::info!(address = %role.lmtp_listen, "LMTP listener bound");
     Ok(listener)
+}
+
+/// The LMTP acceptor and, when the experimental listener is on, the SMTP
+/// one: the same handler, so only a list's addresses are taken and nothing
+/// is relayed; no AUTH, no STARTTLS.
+fn spawn_acceptors(
+    tasks: &mut tokio::task::JoinSet<std::io::Result<()>>,
+    listener: TcpListener,
+    smtp_listener: Option<TcpListener>,
+    db: &Database,
+    role: &MailRoleConfig,
+    shutdown: &watch::Receiver<bool>,
+) {
+    tasks.spawn(run_acceptor(
+        listmngr_mail::lmtp::Protocol::Lmtp,
+        listener,
+        db.clone(),
+        role.clone(),
+        shutdown.clone(),
+    ));
+    if let Some(smtp_listener) = smtp_listener {
+        tasks.spawn(run_acceptor(
+            listmngr_mail::lmtp::Protocol::Smtp,
+            smtp_listener,
+            db.clone(),
+            role.clone(),
+            shutdown.clone(),
+        ));
+    }
+}
+
+/// Bind the experimental inbound SMTP listener, when `[mta]
+/// inbound_smtp_listen` names one; bound before the role starts so a
+/// taken port fails startup rather than a background task.
+/// # Errors
+/// Returns the bind error.
+pub async fn bind_inbound_smtp(role: &MailRoleConfig) -> std::io::Result<Option<TcpListener>> {
+    let Some(address) = role.inbound_smtp_listen else {
+        return Ok(None);
+    };
+    let listener = TcpListener::bind(address).await?;
+    tracing::warn!(
+        %address,
+        "experimental inbound SMTP listener bound: list addresses only, no relay, no AUTH, no STARTTLS"
+    );
+    Ok(Some(listener))
 }

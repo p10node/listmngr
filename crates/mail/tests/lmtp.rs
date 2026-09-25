@@ -1,4 +1,6 @@
-use listmngr_mail::lmtp::{LmtpHandler, RecipientOutcome, serve_session};
+use listmngr_mail::lmtp::{
+    LmtpHandler, Protocol, RecipientOutcome, serve_session, serve_session_as,
+};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -15,6 +17,8 @@ struct FakeHandler {
     /// `recipients.len()`, simulating a misbehaving handler (T8 cardinality).
     result_count_override: Option<usize>,
     command_timeout: Duration,
+    /// The outcome every recipient gets from `deliver`.
+    outcome: (u16, &'static str),
 }
 impl FakeHandler {
     fn new() -> Self {
@@ -25,6 +29,7 @@ impl FakeHandler {
             delivered: Arc::new(Mutex::new(Vec::new())),
             result_count_override: None,
             command_timeout: Duration::from_secs(5),
+            outcome: (250, "2.1.5 delivered"),
         }
     }
     fn deliveries(&self) -> Vec<Delivery> {
@@ -65,8 +70,8 @@ impl LmtpHandler for FakeHandler {
         let count = self.result_count_override.unwrap_or(recipients.len());
         (0..count)
             .map(|_| RecipientOutcome {
-                code: 250,
-                detail: "2.1.5 delivered".into(),
+                code: self.outcome.0,
+                detail: self.outcome.1.into(),
             })
             .collect()
     }
@@ -730,4 +735,115 @@ async fn an_eight_bit_body_is_stored_byte_for_byte_after_a_bodied_mail_from() {
         deliveries[0].2,
         b"Subject: t\xc3\xaan\r\n\r\nch\xc3\xa0o b\xe1\xba\xa1n\r\n"
     );
+}
+
+// ---- The experimental SMTP mode: the same handler, EHLO and one DATA reply ----
+
+fn smtp_session_pair(
+    mut handler: FakeHandler,
+) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
+    let (client, server) = tokio::io::duplex(8192);
+    let task = tokio::spawn(async move {
+        serve_session_as(Protocol::Smtp, server, &mut handler)
+            .await
+            .unwrap();
+    });
+    (client, task)
+}
+
+#[tokio::test]
+async fn smtp_mode_greets_ehlo_and_helo_and_refuses_lhlo() {
+    let (mut client, _task) = smtp_session_pair(FakeHandler::new());
+    let greeting = read_reply(&mut client).await;
+    assert!(
+        greeting.starts_with("220 ") && greeting.contains("ESMTP"),
+        "{greeting}"
+    );
+    send_line(&mut client, "LHLO mx.client.invalid").await;
+    assert!(read_reply(&mut client).await.starts_with("500 "));
+    send_line(&mut client, "MAIL FROM:<alice@example.invalid>").await;
+    let reply = read_reply(&mut client).await;
+    assert!(
+        reply.starts_with("503 ") && reply.contains("EHLO"),
+        "{reply}"
+    );
+    send_line(&mut client, "EHLO mx.client.invalid").await;
+    let reply = read_reply(&mut client).await;
+    assert!(reply.starts_with("250-mx.example.invalid"), "{reply}");
+    assert!(
+        reply.contains("PIPELINING") && reply.contains("SIZE 1024"),
+        "{reply}"
+    );
+    send_line(&mut client, "HELO mx.client.invalid").await;
+    assert_eq!(
+        read_reply(&mut client).await,
+        "250 2.0.0 mx.example.invalid\r\n"
+    );
+    send_line(&mut client, "QUIT").await;
+    assert!(read_reply(&mut client).await.starts_with("221 "));
+}
+
+async fn smtp_transaction(client: &mut tokio::io::DuplexStream, recipients: usize) {
+    read_reply(client).await;
+    send_line(client, "EHLO mx.client.invalid").await;
+    read_reply(client).await;
+    send_line(client, "MAIL FROM:<alice@example.invalid>").await;
+    assert!(read_reply(client).await.starts_with("250 "));
+    for _ in 0..recipients {
+        send_line(client, "RCPT TO:<list@example.invalid>").await;
+        assert!(read_reply(client).await.starts_with("250 "));
+    }
+    send_line(client, "DATA").await;
+    assert!(read_reply(client).await.starts_with("354 "));
+    send_line(client, "Subject: over smtp").await;
+    send_line(client, "").await;
+    send_line(client, "body").await;
+    send_line(client, ".").await;
+}
+
+/// Exactly one reply after `DATA`, however many recipients: a `NOOP`
+/// straight after is answered by itself, with no stray reply ahead of it.
+#[tokio::test]
+async fn smtp_mode_answers_data_once_for_every_recipient() {
+    let handler = FakeHandler::new();
+    let inspect = handler.clone();
+    let (mut client, _task) = smtp_session_pair(handler);
+    smtp_transaction(&mut client, 2).await;
+    let reply = read_reply(&mut client).await;
+    assert_eq!(reply, "250 2.1.5 delivered\r\n");
+    send_line(&mut client, "NOOP").await;
+    assert_eq!(read_reply(&mut client).await, "250 2.0.0 ok\r\n");
+    let deliveries = inspect.deliveries();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].1.len(), 2, "both recipients in one delivery");
+    assert!(deliveries[0].2.starts_with(b"Subject: over smtp"));
+}
+
+#[tokio::test]
+async fn smtp_mode_reports_a_refusal_and_an_oversized_message_once() {
+    let mut refusing = FakeHandler::new();
+    refusing.outcome = (451, "4.3.0 try later");
+    let (mut client, _task) = smtp_session_pair(refusing);
+    smtp_transaction(&mut client, 2).await;
+    assert_eq!(read_reply(&mut client).await, "451 4.3.0 try later\r\n");
+    send_line(&mut client, "NOOP").await;
+    assert_eq!(read_reply(&mut client).await, "250 2.0.0 ok\r\n");
+    // Fewer outcomes than recipients is the handler's fault, said once.
+    let mut short = FakeHandler::new();
+    short.result_count_override = Some(1);
+    let (mut client, _task) = smtp_session_pair(short);
+    smtp_transaction(&mut client, 2).await;
+    assert!(read_reply(&mut client).await.starts_with("451 "));
+    send_line(&mut client, "NOOP").await;
+    assert_eq!(read_reply(&mut client).await, "250 2.0.0 ok\r\n");
+    // Too large: one 552, and nothing delivered.
+    let mut small = FakeHandler::new();
+    small.max_message_bytes = 16;
+    let inspect = small.clone();
+    let (mut client, _task) = smtp_session_pair(small);
+    smtp_transaction(&mut client, 2).await;
+    assert!(read_reply(&mut client).await.starts_with("552 "));
+    send_line(&mut client, "NOOP").await;
+    assert_eq!(read_reply(&mut client).await, "250 2.0.0 ok\r\n");
+    assert!(inspect.deliveries().is_empty());
 }

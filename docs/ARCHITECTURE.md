@@ -1,5 +1,25 @@
 # Architecture
 
+## Inbound SMTP, experimental — bounded local acceptance verified
+
+`listmngr_mail::lmtp::Protocol::{Lmtp, Smtp}` and
+`serve_session_as(protocol, stream, handler)` (`serve_session` is the
+LMTP wrapper): the greeting names the protocol; `LHLO` is the LMTP
+greeting and `EHLO`/`HELO` the SMTP ones, each refusing the others with
+`500`; `MAIL` before a greeting says which verb to send; `DATA` answers
+`data_replies` times — once per accepted recipient on LMTP, once on
+SMTP through `summarize` (every recipient taken → the first outcome's
+`250`; none → the first refusal; some → `250 2.1.5 accepted for n of m
+recipients`; fewer outcomes than recipients → `451`), and a size refusal
+or a delivery timeout the same number of times. `MailRoleConfig` gained
+`inbound_smtp_listen: Option<SocketAddr>` from `[mta]
+inbound_smtp_listen` (checked at load to be an address that differs from
+`lmtp_listen`); `bind_inbound_smtp` binds it before the role starts,
+beside `bind_lmtp`, so a taken port fails startup; `serve_mail_role`
+takes the optional listener and spawns a second `run_acceptor`, which
+now carries the protocol, with the same `InboundHandler`, session
+limit, drain and shutdown as the LMTP one.
+
 ## HyperKitty archiver — bounded local acceptance verified
 
 `ArchiversConfig` gained `hyperkitty_url`, `hyperkitty_api_key` and

@@ -448,6 +448,7 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
     let mail_role = if config.mta.enabled {
         let role = listmngr_runners::MailRoleConfig::from_core(&config)?;
         let lmtp_listener = listmngr_runners::bind_lmtp(&role).await?;
+        let smtp_listener = listmngr_runners::bind_inbound_smtp(&role).await?;
         let mail_db = db.clone();
         let mail_config = config.clone();
         let mail_shutdown = shutdown_rx.clone();
@@ -457,6 +458,7 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
                 mail_config,
                 role,
                 lmtp_listener,
+                smtp_listener,
                 mail_shutdown,
             )
             .await
