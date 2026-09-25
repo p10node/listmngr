@@ -32,7 +32,13 @@ async fn shutdown_closes_active_stalled_lmtp_session() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (tx, rx) = watch::channel(false);
-    let task = tokio::spawn(run_acceptor(listener, db, role, rx));
+    let task = tokio::spawn(run_acceptor(
+        listmngr_mail::lmtp::Protocol::Lmtp,
+        listener,
+        db,
+        role,
+        rx,
+    ));
     let mut client = BufReader::new(tokio::net::TcpStream::connect(address).await.unwrap());
     let mut greeting = String::new();
     client.read_line(&mut greeting).await.unwrap();

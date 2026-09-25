@@ -190,7 +190,7 @@ async fn serve_case(enabled: bool, process_bounces: bool) {
         role.session_drain_timeout = Duration::from_millis(50);
         let (tx, rx) = watch::channel(false);
         let mut task = tokio::task::JoinSet::new();
-        task.spawn(serve_mail_role(db.clone(), config, role, lmtp, rx));
+        task.spawn(serve_mail_role(db.clone(), config, role, lmtp, None, rx));
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(warnings(&db).await, 0, "first page must be delayed");
         let published = timeout(Duration::from_secs(3), async {
