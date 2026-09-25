@@ -138,6 +138,7 @@ page_response!(StringPageResponse, String);
 page_response!(BanPageResponse, bans::BanResponse);
 page_response!(HeaderMatchPageResponse, header_matches::HeaderMatchResponse);
 page_response!(WebhookPageResponse, webhooks::WebhookResponse);
+page_response!(PluginPageResponse, PluginResponse);
 page_response!(DeliveryPageResponse, webhooks::DeliveryResponse);
 page_response!(QueuePageResponse, queues::QueueResponse);
 page_response!(RequestPageResponse, requests::RequestResponse);
@@ -581,6 +582,7 @@ impl utoipa::Modify for SecurityAddon {
         system_preferences,
         system_pipelines,
         system_chains,
+        plugins,
         domains_list,
         domains_create,
         domains_get,
@@ -685,6 +687,7 @@ impl utoipa::Modify for SecurityAddon {
         digest::DigestResponse, digest::DigestActionInput, digest::DigestActionResponse,
         QueuePageResponse, queues::QueueResponse, queues::JobResponse, queues::InjectInput,
         HeaderMatchPageResponse, header_matches::HeaderMatchResponse, header_matches::HeaderMatchInput, header_matches::HeaderMatchFindInput, header_matches::HeaderMatchPatchInput,
+        PluginPageResponse, PluginResponse,
         WebhookPageResponse, DeliveryPageResponse, webhooks::WebhookResponse, webhooks::WebhookInput, webhooks::WebhookPatchInput, webhooks::DeliveryResponse,
         DomainPageResponse, MailingListPageResponse,
         UserPageResponse, ArchiverPageResponse, TemplatePageResponse, MemberPageResponse,
@@ -1070,6 +1073,7 @@ fn phase_one_routes() -> Router<AppState> {
         .route("/system/preferences", get(system_preferences))
         .route("/system/pipelines", get(system_pipelines))
         .route("/system/chains", get(system_chains))
+        .route("/plugins", get(plugins))
         .route("/domains", get(domains_list).post(domains_create))
         .route("/domains/{host}", get(domains_get).delete(domains_delete))
         .route("/domains/{host}/lists", get(domain_lists))
@@ -1661,6 +1665,47 @@ async fn system_preferences(
         serde_json::to_value(Preferences::system_defaults(s.config.site.default_language))
             .expect("serialize"),
     ))
+}
+/// What one of the build's plugins adds.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct PluginResponse {
+    pub name: String,
+    pub version: String,
+    pub rules: Vec<String>,
+    pub links: Vec<String>,
+    pub handlers: Vec<String>,
+    pub pipelines: Vec<String>,
+    pub archivers: Vec<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/plugins",
+    params(PageQuery),
+    responses((status = 200, description = "The build's plugins and what each adds; none by default", body = PluginPageResponse), (status = 400, description = "Invalid request", body = ErrorResponse), (status = 401, description = "Authentication required", body = ErrorResponse), (status = 403, description = "Insufficient scope", body = ErrorResponse), (status = 404, description = "Resource not found", body = ErrorResponse), (status = 409, description = "Resource conflict", body = ErrorResponse), (status = 429, description = "Rate limit exceeded", body = ErrorResponse), (status = 500, description = "Internal error", body = ErrorResponse)),
+    security(("bearerAuth" = []))
+)]
+async fn plugins(
+    State(s): State<AppState>,
+    Query(page_query): Query<PageQuery>,
+    h: HeaderMap,
+    c: ConnectInfo<SocketAddr>,
+) -> ApiResult<Json<Value>> {
+    authorize(&s, &h, peer(c), "system:read").await?;
+    let owned = |names: Vec<&'static str>| names.into_iter().map(str::to_owned).collect();
+    let entries: Vec<PluginResponse> = listmngr_pipeline::plugins::describe()
+        .into_iter()
+        .map(|plugin| PluginResponse {
+            name: plugin.name.to_owned(),
+            version: plugin.version.to_owned(),
+            rules: owned(plugin.rules),
+            links: owned(plugin.links),
+            handlers: owned(plugin.handlers),
+            pipelines: owned(plugin.pipelines),
+            archivers: owned(plugin.archivers),
+        })
+        .collect();
+    Ok(Json(paged(s.flavor, entries, &page_query)?))
 }
 #[utoipa::path(
     get,
@@ -2520,7 +2565,7 @@ async fn list_archivers(
     if matches!(s.flavor, ApiFlavor::Compat31) {
         // Mailman's shape: every site archiver with its switch.
         let mut object = serde_json::Map::new();
-        for name in ARCHIVER_NAMES {
+        for name in archiver_names() {
             let on = stored.iter().any(|(stored, on)| stored == name && *on);
             object.insert((*name).to_owned(), json!(on));
         }
@@ -2533,6 +2578,18 @@ async fn list_archivers(
 /// The archivers a list can switch on, as `[archive] archivers` and the
 /// settings page know them.
 const ARCHIVER_NAMES: [&str; 3] = ["mail-archive", "mhonarc", "prototype"];
+
+/// The built-in archivers and the ones the build's plugins add.
+fn archiver_names() -> Vec<&'static str> {
+    ARCHIVER_NAMES
+        .into_iter()
+        .chain(
+            listmngr_pipeline::plugins::describe()
+                .into_iter()
+                .flat_map(|plugin| plugin.archivers),
+        )
+        .collect()
+}
 
 #[utoipa::path(
     patch,
@@ -2559,7 +2616,7 @@ async fn list_archivers_set(
         .ok_or_else(|| ApiError(Error::Validation("archivers".into())))?;
     let context = audit_context(&auth, addr);
     for (name, value) in object {
-        if !ARCHIVER_NAMES.contains(&name.as_str()) {
+        if !archiver_names().contains(&name.as_str()) {
             return Err(ApiError(Error::Validation(format!("archiver {name}"))));
         }
         let enabled = preference_bool(name, value)?;

@@ -2104,6 +2104,8 @@ dependencies = [
  "listmngr-db",
  "listmngr-import",
  "listmngr-mail",
+ "listmngr-pipeline",
+ "listmngr-plugins",
  "listmngr-runners",
  "mail-auth",
  "predicates",
@@ -2169,6 +2171,7 @@ dependencies = [
  "listmngr-core",
  "listmngr-db",
  "listmngr-mail",
+ "listmngr-pipeline",
  "mail-parser",
  "pulldown-cmark",
  "serde",
@@ -2295,6 +2298,16 @@ version = "0.1.0"
 dependencies = [
  "listmngr-core",
  "regex",
+]
+
+[[package]]
+name = "listmngr-plugins"
+version = "0.1.0"
+dependencies = [
+ "listmngr-core",
+ "listmngr-mail",
+ "listmngr-pipeline",
+ "tempfile",
 ]
 
 [[package]]

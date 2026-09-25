@@ -1,5 +1,34 @@
 # listmngr
 
+## Plugins (`P6-PLUGINS`) — bounded local acceptance verified
+
+A plugin is a Rust type linked into the binary, never loaded at run
+time: it implements `listmngr_pipeline::plugins::Plugin` and adds any
+of rules (with the links that put them into a `plugins` detour of the
+default posting chain, taken after the ban check and before
+moderation), handlers, pipelines a list may choose as its
+`posting_pipeline`, and archivers a list switches on by name like the
+built-in ones. `crates/plugins` lists the plugins a build carries — none
+by default — and the binary installs them at start, before any registry
+is built. `GET /plugins` (`system:read`) and `listmngr plugins` describe
+exactly what this build's plugins add:
+
+```sh
+listmngr plugins
+{"name":"example","version":"0.1.0","rules":["keyword-hold"],"links":["keyword-hold"],"handlers":["plugin-example-header"],"pipelines":["example-posting-pipeline"],"archivers":["example"]}
+```
+
+The line above is the example plugin, built with `--features
+plugin-example` to see the wiring work: a post whose subject carries
+`[hold-me]` is held, the `example-posting-pipeline` stamps
+`X-Listmngr-Plugin: example` before delivery, and the `example` archiver
+appends a line per archived post to the file
+`LISTMNGR_PLUGIN_EXAMPLE_ARCHIVE` names. Without the feature the binary
+carries no plugin and behaves, trace for trace, as before. Mailman's
+Python plugin API has no counterpart here by design (`docs/PLAN.md`
+§1): a plugin is reviewed, compiled and shipped like the rest of the
+program.
+
 ## Webhooks: the API and the command line (`P6-WEBHOOKS-API`) — bounded local acceptance verified
 
 Webhooks are managed over REST at `/api/v1/webhooks` (and `/3.1/webhooks`)

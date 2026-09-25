@@ -53,12 +53,17 @@ pub async fn run(
     hash: &str,
     settings: &Settings,
 ) -> Result<Vec<&'static str>> {
-    if settings.is_empty() {
+    let plugins: Vec<Box<dyn listmngr_pipeline::plugins::Archiver>> =
+        listmngr_pipeline::plugins::installed()
+            .iter()
+            .flat_map(|plugin| plugin.archivers())
+            .collect();
+    if settings.is_empty() && plugins.is_empty() {
         return Ok(Vec::new());
     }
     let enabled = db.lists().archivers(list).await?;
     let on = |name: &str| enabled.iter().any(|(stored, on)| stored == name && *on);
-    if !on("mhonarc") && !on("prototype") {
+    if !on("mhonarc") && !on("prototype") && !plugins.iter().any(|archiver| on(archiver.name())) {
         return Ok(Vec::new());
     }
     let Some(raw) = db.archive().archived_copy(list, hash).await? else {
@@ -77,7 +82,37 @@ pub async fn run(
             Err(error) => tracing::warn!(%error, list=%list, "prototype archiver failed"),
         }
     }
+    names.extend(run_plugins(plugins, &enabled, list, hash, &raw).await);
     Ok(names)
+}
+
+/// The plugins' archivers that are on for the list, each run off the
+/// runtime's threads like a command would be; a failure is its own.
+async fn run_plugins(
+    plugins: Vec<Box<dyn listmngr_pipeline::plugins::Archiver>>,
+    enabled: &[(String, bool)],
+    list: &ListId,
+    hash: &str,
+    raw: &[u8],
+) -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for archiver in plugins {
+        let name = archiver.name();
+        if !enabled.iter().any(|(stored, on)| stored == name && *on) {
+            continue;
+        }
+        let (list_id, hash, raw) = (list.to_string(), hash.to_owned(), raw.to_vec());
+        match tokio::task::spawn_blocking(move || archiver.archive(&list_id, &hash, &raw)).await {
+            Ok(Ok(())) => names.push(name),
+            Ok(Err(error)) => {
+                tracing::warn!(error, list=%list, archiver=name, "plugin archiver failed");
+            }
+            Err(error) => {
+                tracing::warn!(%error, list=%list, archiver=name, "plugin archiver panicked");
+            }
+        }
+    }
+    names
 }
 
 /// `$listname`, `$hostname` and `$hash` in one command argument.
