@@ -1,5 +1,41 @@
 # listmngr
 
+## Webhooks: the store (`P6-WEBHOOKS-STORE`) — bounded local acceptance verified
+
+A webhook is a URL the site posts its audit events to — `list.config`,
+`member.create`, `moderation.hold`, everything the audit log records
+through the shared path — for the whole site or for one list. Events
+are named by their audit action; a webhook subscribes to `*`, a prefix
+such as `member.*`, or an exact action. When a write commits its audit
+event, every enabled webhook the event matches is owed one delivery *in
+that same transaction*: an event can neither be lost nor exist without
+its write. A list-bound webhook receives only its list's events (the
+target list, the `list_id` the diff names, or the list a member or held
+message belongs to). This slice is the store — the tables, the
+repository, the fan-out, the sweep; posting the deliveries is
+`P6-WEBHOOKS-DELIVER`, and the REST and command-line surface
+`P6-WEBHOOKS-API`.
+
+```toml
+[webhooks]
+enabled = false                      # the runner; the store works regardless
+signing_key_file = "/run/secrets/webhook-key"   # ≥ 32 characters, or signing_key
+allow_http = false                   # only https:// targets otherwise
+allow_private_targets = false        # no loopback, link-local or private addresses
+max_attempts = 12
+timeout_secs = 10
+```
+
+A webhook's secret is derived from the signing key and the webhook's
+own salt (HKDF-SHA256) and shown once, on creation or rotation; the
+database keeps the secret's hash — the first eight hex digits are the
+fingerprint the API shows — and the salt, never the secret, so a
+database on its own cannot sign a delivery. A delivery carries `{id,
+event, at, list_id, target: {type, id}, actor: {user_id, token_id},
+data}` where `data` is the audit diff, redacted as the audit log is
+(no password, secret or hash ever leaves). Deliveries posted or given
+up are collected by the task sweep after `finished_job_retention_secs`.
+
 ## Operator diagnostics (`P6-DOCTOR`) — bounded local acceptance verified
 
 Run `listmngr doctor` with the same configuration as the service. It prints

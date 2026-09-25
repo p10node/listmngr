@@ -11,10 +11,12 @@ pub mod bounces;
 pub mod digests;
 pub mod doctor;
 pub mod header_matches;
+pub mod webhooks;
 pub use archive::interact_import::{ImportedInteractions, InteractionReport};
 pub use header_matches::{FieldEdit, HeaderMatchPatch, HeaderMatchRow};
 pub use moderation_import::{ImportedHold, ImportedRequest};
 pub use user_import::{ImportedAddress, ImportedUser};
+pub use webhooks::{Delivery, DeliveryState, NewWebhook, Webhook, WebhookPatch};
 pub mod delivery;
 pub mod mail_queue;
 pub mod moderation;
@@ -138,6 +140,11 @@ pub struct Database {
     /// `site.base_url`: the public web origin the mail layer may point at
     /// (`List-Archive`, `Archived-At`). Empty when unknown.
     base_url: String,
+    /// `[webhooks] signing_key`: what every webhook's secret is derived
+    /// from. Empty when webhooks cannot be created or signed.
+    webhook_key: String,
+    /// `[webhooks] allow_http`: whether a webhook may target `http://`.
+    webhook_allow_http: bool,
     /// Whether the pool is `SQLite`, decided once from the URL.
     sqlite: bool,
     /// `[archive] archivers.mail_archive_address`: where a public list's
@@ -210,6 +217,8 @@ impl Database {
             password_min_score: security.password_min_score,
             default_language: "en".into(),
             base_url: String::new(),
+            webhook_key: String::new(),
+            webhook_allow_http: false,
             mail_archive: String::new(),
             bounce_probes: None,
             verp_format: listmngr_core::verp::DEFAULT_FORMAT.into(),
@@ -277,6 +286,26 @@ impl Database {
         } else {
             self.pool.begin().await.map_err(db_error)
         }
+    }
+
+    /// Carry `[webhooks]`: the signing key every webhook secret derives
+    /// from, and whether `http://` targets are allowed.
+    #[must_use]
+    pub fn with_webhooks(mut self, signing_key: Option<&str>, allow_http: bool) -> Self {
+        signing_key
+            .unwrap_or_default()
+            .trim()
+            .clone_into(&mut self.webhook_key);
+        self.webhook_allow_http = allow_http;
+        self
+    }
+
+    pub(crate) fn webhook_key(&self) -> Option<&str> {
+        (!self.webhook_key.is_empty()).then_some(self.webhook_key.as_str())
+    }
+
+    pub(crate) const fn webhook_allow_http(&self) -> bool {
+        self.webhook_allow_http
     }
 
     /// The site's public base URL, when configured.
@@ -380,22 +409,27 @@ impl Database {
         target_id: &str,
         diff: serde_json::Value,
     ) -> Result<()> {
+        let at = now();
+        let diff = redact_audit_value(diff);
         sqlx::query(
             "INSERT INTO audit_log(id,at,actor_user_id,actor_token_id,ip,action,target_type,target_id,diff) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
         )
         .bind(Uuid::now_v7().to_string())
-        .bind(now())
+        .bind(&at)
         .bind(context.user_id.map(|value| value.to_string()))
         .bind(context.token_id.map(|value| value.to_string()))
         .bind(context.peer_ip.map(|value| value.to_string()))
         .bind(action)
         .bind(target_type)
         .bind(target_id)
-        .bind(redact_audit_value(diff).to_string())
+        .bind(diff.to_string())
         .execute(&mut **tx)
         .await
         .map_err(db_error)?;
-        Ok(())
+        // The webhooks subscribed to this event get their deliveries in
+        // the same transaction: no write without its event, no event
+        // without its write.
+        webhooks::fan_out(tx, context, &at, action, target_type, target_id, &diff).await
     }
 }
 
@@ -2281,6 +2315,7 @@ impl ListRepo<'_> {
             .map_err(db_error)?;
 
         digests::delete_list(tx, id).await?;
+        webhooks::WebhookRepo::delete_list_tx(tx, id).await?;
         // The list's moderation history goes with it (both tables restrict
         // the cascade on purpose, so the delete is explicit here); the queue
         // messages the held rows pointed at stay for the sweep.

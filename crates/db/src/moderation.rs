@@ -652,11 +652,23 @@ async fn audit_held(
 ) -> Result<()> {
     let at = chrono::DateTime::from_timestamp_millis(now_ms)
         .ok_or_else(|| Error::Validation("timestamp out of range".into()))?;
+    let at = at.to_rfc3339();
+    let diff = serde_json::json!({"reason": reason});
     sqlx::query("INSERT INTO audit_log(id,at,actor_user_id,action,target_type,target_id,diff) VALUES($1,$2,$3,$4,'held_message',$5,$6)")
-        .bind(Uuid::now_v7().to_string()).bind(at.to_rfc3339()).bind(moderator.map(|value| value.to_string()))
-        .bind(action).bind(id.0.to_string()).bind(serde_json::json!({"reason": reason}).to_string())
+        .bind(Uuid::now_v7().to_string()).bind(&at).bind(moderator.map(|value| value.to_string()))
+        .bind(action).bind(id.0.to_string()).bind(diff.to_string())
         .execute(&mut **tx).await.map_err(db_error)?;
-    Ok(())
+    // Moderation is an event webhooks subscribe to, like any audited write.
+    crate::webhooks::fan_out(
+        tx,
+        &crate::AuditContext::new(moderator, None, None),
+        &at,
+        action,
+        "held_message",
+        &id.0.to_string(),
+        &diff,
+    )
+    .await
 }
 
 pub(crate) fn decode_held(row: &AnyRow) -> Result<HeldMessage> {
