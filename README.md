@@ -1,5 +1,43 @@
 # listmngr
 
+## Webhooks: the API and the command line (`P6-WEBHOOKS-API`) — bounded local acceptance verified
+
+Webhooks are managed over REST at `/api/v1/webhooks` (and `/3.1/webhooks`)
+with the new `webhooks` scope, which `admin` implies:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"url":"https://hooks.example.invalid/listmngr","events":["member.*","moderation.hold"],"list_id":"dev.example.invalid"}' \
+  https://lists.example.invalid/api/v1/webhooks
+```
+
+`POST /webhooks` answers `201` with the webhook and its `secret` — shown
+this once; `GET /webhooks` (paged) and `GET /webhooks/{id}` never show it
+again, only `secret_fingerprint`; `PATCH /webhooks/{id}` changes `url`,
+`events`, `description` or `enabled`; `POST /webhooks/{id}/rotate` answers
+with a new secret; `POST /webhooks/{id}/ping` queues a `ping` delivery;
+`GET /webhooks/{id}/deliveries` lists what the webhook was owed, newest
+first, with each delivery's `state`, `attempts`, `last_status`,
+`last_error` and `payload`; `DELETE /webhooks/{id}` takes the deliveries
+with it. A token bound to a list makes and sees only that list's webhooks
+(`list_id` defaults to its list, another list is `403`, another list's
+webhook is `404`); a token bound to a domain has none to see. The same
+from the command line, one JSON line per webhook or delivery:
+
+```sh
+listmngr webhooks add https://hooks.example.invalid/ops --events 'list.*,member.create' --list dev.example.invalid
+listmngr webhooks ls [--list dev.example.invalid]
+listmngr webhooks set <id> --enabled false
+listmngr webhooks ping <id>
+listmngr webhooks deliveries <id> [--limit 50]
+listmngr webhooks rotate <id>
+listmngr webhooks rm <id>
+```
+
+Every change is audited (`webhook.create`, `webhook.update`,
+`webhook.rotate`, `webhook.ping`, `webhook.delete`) with the actor and
+never the secret. The operations are in `/openapi.json` and on `/api/docs`.
+
 ## Webhooks: delivery (`P6-WEBHOOKS-DELIVER`) — bounded local acceptance verified
 
 With `[webhooks] enabled = true`, `listmngr serve` runs the webhook
