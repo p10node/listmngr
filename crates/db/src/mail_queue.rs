@@ -795,21 +795,7 @@ impl<'a> MailQueueRepo<'a> {
         let mut tx = self.db.write_tx().await?;
         let mut jobs = Vec::with_capacity(inputs.len());
         for input in inputs {
-            let key = format!("{:x}", Sha256::digest(&input.raw));
-            let message_id = MessageId(Uuid::now_v7());
-            let id = JobId(Uuid::now_v7());
-            sqlx::query("INSERT INTO message_blobs(store_key,raw) VALUES($1,$2) ON CONFLICT(store_key) DO NOTHING")
-            .bind(&key).bind(&input.raw).execute(&mut *tx).await.map_err(db_error)?;
-            sqlx::query("INSERT INTO messages(id,store_key,external_id,context,created_at) VALUES($1,$2,$3,$4,$5)")
-            .bind(message_id.0.to_string()).bind(&key).bind(&input.external_id).bind(&input.context).bind(now_ms)
-            .execute(&mut *tx).await.map_err(db_error)?;
-            let row = sqlx::query("INSERT INTO queue_jobs(id,message_id,queue,max_attempts,run_after,state) VALUES($1,$2,$3,$4,$5,CASE WHEN $3='shunt' THEN 'shunted' ELSE 'ready' END) RETURNING *")
-            .bind(id.0.to_string()).bind(message_id.0.to_string()).bind(queue_name(input.queue)).bind(input.max_attempts).bind(now_ms)
-            .fetch_one(&mut *tx).await.map_err(db_error)?;
-            let job = decode_job(&row)?;
-            dsn::bind_message(&mut tx, message_id, &input.context).await?;
-            audit(&mut tx, &job, "queue.enqueue", now_ms).await?;
-            jobs.push(job);
+            jobs.push(enqueue_tx(&mut tx, input, now_ms).await?);
         }
         tx.commit().await.map_err(db_error)?;
         Ok(jobs)
@@ -1067,4 +1053,47 @@ pub(crate) async fn audit(
         .bind(serde_json::json!({"queue": job.queue, "state": job.state, "attempts": job.attempts, "worker": job.locked_by}).to_string())
         .execute(&mut **tx).await.map_err(db_error)?;
     Ok(())
+}
+
+/// Store one message and its job inside `tx`, for a producer whose own
+/// write must commit with it (the news gateway's watermark).
+/// # Errors
+/// Validation for a non-positive `max_attempts`, and database errors.
+pub(crate) async fn enqueue_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    input: &NewMessage,
+    now_ms: i64,
+) -> Result<QueueJob> {
+    if input.max_attempts <= 0 {
+        return Err(Error::Validation("max_attempts must be positive".into()));
+    }
+    let key = format!("{:x}", Sha256::digest(&input.raw));
+    let message_id = MessageId(Uuid::now_v7());
+    let id = JobId(Uuid::now_v7());
+    sqlx::query(
+        "INSERT INTO message_blobs(store_key,raw) VALUES($1,$2) ON CONFLICT(store_key) DO NOTHING",
+    )
+    .bind(&key)
+    .bind(&input.raw)
+    .execute(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    sqlx::query(
+        "INSERT INTO messages(id,store_key,external_id,context,created_at) VALUES($1,$2,$3,$4,$5)",
+    )
+    .bind(message_id.0.to_string())
+    .bind(&key)
+    .bind(&input.external_id)
+    .bind(&input.context)
+    .bind(now_ms)
+    .execute(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    let row = sqlx::query("INSERT INTO queue_jobs(id,message_id,queue,max_attempts,run_after,state) VALUES($1,$2,$3,$4,$5,CASE WHEN $3='shunt' THEN 'shunted' ELSE 'ready' END) RETURNING *")
+        .bind(id.0.to_string()).bind(message_id.0.to_string()).bind(queue_name(input.queue)).bind(input.max_attempts).bind(now_ms)
+        .fetch_one(&mut **tx).await.map_err(db_error)?;
+    let job = decode_job(&row)?;
+    dsn::bind_message(tx, message_id, &input.context).await?;
+    audit(tx, &job, "queue.enqueue", now_ms).await?;
+    Ok(job)
 }

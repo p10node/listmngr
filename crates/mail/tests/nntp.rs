@@ -374,21 +374,24 @@ async fn the_reader_walks_a_newsgroup() {
         reader.group("comp.lang.rust.lists").await.unwrap(),
         (41, 42)
     );
-    let head = reader.head(41).await.unwrap();
+    let head = reader.head(41).await.unwrap().unwrap();
     assert!(
         head.starts_with(b"Path: news.example.invalid"),
         "{}",
         String::from_utf8_lossy(&head)
     );
     assert!(!head.contains(&b'.') || !String::from_utf8_lossy(&head).contains("leading dot"));
-    let article = reader.article(41).await.unwrap();
+    let article = reader.article(41).await.unwrap().unwrap();
     assert_eq!(
         article,
         ARTICLE_ONE,
         "{}",
         String::from_utf8_lossy(&article)
     );
-    assert!(reader.article(43).await.is_err(), "no such article");
+    assert!(
+        reader.article(43).await.unwrap().is_none(),
+        "no such article is None, not an error"
+    );
     assert!(reader.group("alt.missing").await.is_err(), "no such group");
     reader.quit().await;
 }

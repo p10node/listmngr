@@ -287,7 +287,9 @@ pub async fn gate_news(
             return Ok(report);
         }
     };
-    for list in lists {
+    let mut lists = lists.into_iter();
+    let mut session_lost = None;
+    for list in lists.by_ref() {
         let newsgroup = list.usenet.linked_newsgroup.clone();
         let mut entry = GateReport {
             list_id: list.id.to_string(),
@@ -299,12 +301,35 @@ pub async fn gate_news(
         match reader.group(&newsgroup).await {
             Err(error) => entry.error = Some(error.to_string()),
             Ok((first, last)) => {
-                if let Err(error) = poll(db, &mut reader, &list, first, last, &mut entry).await {
-                    entry.error = Some(error.to_string());
+                match poll(db, &mut reader, &list, first, last, &mut entry).await {
+                    Ok(()) => {}
+                    Err(PollStop::Contended) => {
+                        entry.error = Some("watermark moved by another poller; stopped".into());
+                    }
+                    Err(PollStop::Database(error)) => entry.error = Some(error.to_string()),
+                    Err(PollStop::Server(error)) => {
+                        // Nothing more can be read from this session; the next
+                        // poll starts over from the watermark each list kept.
+                        entry.error = Some(error.clone());
+                        report.push(entry);
+                        session_lost = Some(error);
+                        break;
+                    }
                 }
             }
         }
         report.push(entry);
+    }
+    if let Some(error) = session_lost {
+        for list in lists {
+            report.push(GateReport {
+                list_id: list.id.to_string(),
+                newsgroup: list.usenet.linked_newsgroup,
+                watermark: list.usenet.usenet_watermark,
+                gated: 0,
+                error: Some(format!("not polled: {error}")),
+            });
+        }
     }
     reader.quit().await;
     Ok(report)
@@ -312,6 +337,16 @@ pub async fn gate_news(
 
 /// One list's poll of the group's `lowest..=highest`, from where it left
 /// off.
+/// Why a list's poll stopped before the group's last article.
+enum PollStop {
+    /// The news session failed: nothing more can be read from it, and
+    /// the article being read is not passed.
+    Server(String),
+    /// Another poller moved the watermark under this one.
+    Contended,
+    Database(listmngr_core::Error),
+}
+
 async fn poll(
     db: &Database,
     reader: &mut listmngr_mail::nntp::Reader,
@@ -319,75 +354,84 @@ async fn poll(
     lowest: u64,
     highest: u64,
     entry: &mut GateReport,
-) -> Result<(), listmngr_core::Error> {
+) -> Result<(), PollStop> {
     let watermark = |number: u64| i64::try_from(number).unwrap_or(i64::MAX);
+    let now = || chrono::Utc::now().timestamp_millis();
+    let advance = |from: Option<i64>, to: i64, gated| async move {
+        db.usenet()
+            .advance_watermark(&list.id, from, to, gated, now())
+            .await
+            .map_err(PollStop::Database)
+            .and_then(|moved| {
+                if moved {
+                    Ok(())
+                } else {
+                    Err(PollStop::Contended)
+                }
+            })
+    };
     let Some(seen) = list.usenet.usenet_watermark else {
         // Never polled: catch up without flooding the list.
-        db.usenet()
-            .set_watermark(&list.id, watermark(highest))
-            .await?;
+        advance(None, watermark(highest), None).await?;
         entry.watermark = Some(watermark(highest));
         return Ok(());
     };
+    let mut expected = seen;
     let start = u64::try_from(seen)
         .unwrap_or(0)
         .saturating_add(1)
         .max(lowest);
     for number in start..=highest {
-        match reader.article(number).await {
-            Ok(article) => {
-                if gate_article(db, list, &article).await? {
-                    entry.gated += 1;
+        let gated = match reader.article(number).await {
+            Ok(Some(article)) => match listmngr_mail::nntp::inbound(&article, list) {
+                Ok(Some((raw, sender))) => Some(gated_message(list, raw, &sender)),
+                Ok(None) => None,
+                // A header block this runtime cannot read: Mailman logs and
+                // moves on, and so does this, or the list would never get
+                // past it.
+                Err(error) => {
+                    tracing::warn!(list = %list.id, number, %error, "gatenews: article unreadable, passed");
+                    None
                 }
+            },
+            // Expired on the server: gone for good, passed.
+            Ok(None) => {
+                tracing::warn!(list = %list.id, number, "gatenews: article gone from the server, passed");
+                None
             }
-            // An expired or damaged article: Mailman logs and moves on.
-            Err(error) => {
-                tracing::warn!(list = %list.id, number, %error, "gatenews: article skipped");
-            }
+            // The session, not the article: stop here and keep the watermark.
+            Err(error) => return Err(PollStop::Server(error.to_string())),
+        };
+        let queued = gated.is_some();
+        advance(Some(expected), watermark(number), gated).await?;
+        expected = watermark(number);
+        entry.watermark = Some(expected);
+        if queued {
+            entry.gated += 1;
         }
-        db.usenet()
-            .set_watermark(&list.id, watermark(number))
-            .await?;
-        entry.watermark = Some(watermark(number));
     }
     Ok(())
 }
 
-/// Hand one article to the `in` queue as a post from Usenet; `false` when
-/// it is the list's own or has no sender.
-async fn gate_article(
-    db: &Database,
-    list: &listmngr_core::MailingList,
-    article: &[u8],
-) -> Result<bool, listmngr_core::Error> {
-    let Some((raw, sender)) = listmngr_mail::nntp::inbound(article, list)
-        .map_err(|error| listmngr_core::Error::Validation(error.to_string()))?
-    else {
-        return Ok(false);
-    };
+/// The gated article as the `in` queue takes it.
+fn gated_message(list: &listmngr_core::MailingList, raw: Vec<u8>, sender: &str) -> NewMessage {
     let external_id = listmngr_mail::header_value(&raw, "Message-ID")
         .map(|id| id.trim().to_owned())
         .filter(|id| !id.is_empty())
         .unwrap_or_else(|| listmngr_mail::nntp::list_message_id(list));
-    db.mail_queue()
-        .enqueue(
-            NewMessage {
-                raw,
-                external_id,
-                context: serde_json::json!({
-                    "version": 1,
-                    "list_id": list.id.to_string(),
-                    "envelope_sender": sender,
-                    "fromusenet": true,
-                })
-                .to_string(),
-                queue: Queue::In,
-                max_attempts: 5,
-            },
-            chrono::Utc::now().timestamp_millis(),
-        )
-        .await?;
-    Ok(true)
+    NewMessage {
+        raw,
+        external_id,
+        context: serde_json::json!({
+            "version": 1,
+            "list_id": list.id.to_string(),
+            "envelope_sender": sender,
+            "fromusenet": true,
+        })
+        .to_string(),
+        queue: Queue::In,
+        max_attempts: 5,
+    }
 }
 
 impl GateReport {

@@ -32,6 +32,8 @@ run migrate
 run domains ls >/dev/null
 cargo test --locked -p listmngr --test doctor \
   regressions::postgres_doctor_contract -- --ignored --exact
+cargo test --locked -p listmngr-runners --test nntp \
+  postgres_gatenews_race_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test repositories \
   postgres_repeated_migrate_schema_and_crud_contract -- --ignored --exact
 cargo test --locked -p listmngr-db --test schema_contract \

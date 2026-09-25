@@ -473,17 +473,20 @@ impl Reader {
         }
     }
 
-    /// The headers of article `number` in the selected group.
+    /// The headers of article `number` in the selected group, or `None`
+    /// when the server says it has no such article.
     /// # Errors
-    /// Returns an I/O error for a missing article or a broken session.
-    pub async fn head(&mut self, number: u64) -> Result<Vec<u8>> {
+    /// Returns an I/O error for a broken session: closed, timed out, or
+    /// answering with anything but a status line for the article.
+    pub async fn head(&mut self, number: u64) -> Result<Option<Vec<u8>>> {
         self.fetch("HEAD", number, "221").await
     }
 
-    /// Article `number` whole (headers, blank line, body).
+    /// Article `number` whole (headers, blank line, body), or `None` when
+    /// the server says it has no such article.
     /// # Errors
-    /// Returns an I/O error for a missing article or a broken session.
-    pub async fn article(&mut self, number: u64) -> Result<Vec<u8>> {
+    /// Returns an I/O error for a broken session, as [`Reader::head`].
+    pub async fn article(&mut self, number: u64) -> Result<Option<Vec<u8>>> {
         self.fetch("ARTICLE", number, "220").await
     }
 
@@ -505,16 +508,26 @@ impl Reader {
         .map_err(|_| io("news server timed out"))?
     }
 
-    async fn fetch(&mut self, verb: &str, number: u64, code: &str) -> Result<Vec<u8>> {
+    async fn fetch(&mut self, verb: &str, number: u64, code: &str) -> Result<Option<Vec<u8>>> {
         let answer = self.command(&format!("{verb} {number}")).await?;
-        if !answer.starts_with(code) {
-            return Err(io(&format!(
-                "news server has no article {number}: {answer}"
-            )));
+        if answer.starts_with(code) {
+            return tokio::time::timeout(self.timeout, self.session.block())
+                .await
+                .map_err(|_| io("news server timed out"))?
+                .map(Some);
         }
-        tokio::time::timeout(self.timeout, self.session.block())
-            .await
-            .map_err(|_| io("news server timed out"))?
+        // The server has no such article (RFC 3977 §6.2: 420, 423, 430).
+        // A caller may pass it; anything else — a lost session, an unknown
+        // reply — it must not read past.
+        if ["420", "423", "430"]
+            .iter()
+            .any(|gone| answer.starts_with(gone))
+        {
+            return Ok(None);
+        }
+        Err(io(&format!(
+            "news server refused {verb} {number}: {answer}"
+        )))
     }
 }
 
