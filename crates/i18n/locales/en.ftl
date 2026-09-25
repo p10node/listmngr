@@ -536,6 +536,7 @@ web-ls-pipeline-virgin = Virgin (headers only)
 web-ls-archiver-mail-archive = mail-archive.com (remote)
 web-ls-archiver-mhonarc = MHonArc (remote)
 web-ls-archiver-prototype = Prototype maildir (remote)
+web-ls-archiver-hyperkitty = HyperKitty (remote)
 web-rules-title = Header rules
 web-rules-intro = Each rule matches one header against a regular expression, in order; the first match decides. A rule without an action holds the post.
 web-rules-test-result = Test result

@@ -268,6 +268,13 @@ pub async fn serve_mail_role(
     let archivers = listmngr_archive::archivers::Settings {
         mhonarc: config.archive.archivers.mhonarc_command.clone(),
         prototype: config.archive.archivers.prototype_path.clone(),
+        hyperkitty_url: config.archive.archivers.hyperkitty_url.clone(),
+        hyperkitty_key: config
+            .archive
+            .archivers
+            .hyperkitty_api_key()
+            .unwrap_or_default()
+            .to_owned(),
     };
     // The search index follows the archive; without it the archive page
     // falls back to its substring search and `listmngr archive reindex`

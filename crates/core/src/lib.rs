@@ -1094,6 +1094,7 @@ impl Config {
         config.mailman.validate()?;
         config.nntp.validate()?;
         config.webhooks.resolve()?;
+        config.archive.archivers.resolve()?;
         Ok(config)
     }
 
@@ -1115,6 +1116,13 @@ impl Config {
             .and_then(serde_json::Value::as_object_mut)
         {
             webhooks.remove("signing_key_file");
+        }
+        if let Some(archivers) = value
+            .get_mut("archive")
+            .and_then(|archive| archive.get_mut("archivers"))
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            archivers.remove("hyperkitty_api_key_file");
         }
         value
     }
@@ -1627,8 +1635,58 @@ config_struct!(AntispamConfig {
 config_struct!(ArchiversConfig {
     mail_archive_address: String = String::new(),
     mhonarc_command: Vec<String> = Vec::new(),
-    prototype_path: String = String::new()
+    prototype_path: String = String::new(),
+    // A HyperKitty to post each archived post to, as `mailman-hyperkitty`
+    // does: its base URL (`https://lists.example.com/hyperkitty`) and its
+    // `MAILMAN_ARCHIVER_KEY`. Empty leaves the `hyperkitty` archiver off.
+    hyperkitty_url: String = String::new(),
+    hyperkitty_api_key: Option<SmtpAuthSecret> = None,
+    hyperkitty_api_key_file: Option<PathBuf> = None
 });
+
+impl ArchiversConfig {
+    /// Read `hyperkitty_api_key_file` into `hyperkitty_api_key` and check
+    /// the pair.
+    fn resolve(&mut self) -> Result<()> {
+        if let Some(path) = &self.hyperkitty_api_key_file {
+            if self.hyperkitty_api_key.is_some() {
+                return Err(Error::Validation(
+                    "archive.archivers.hyperkitty_api_key and hyperkitty_api_key_file are exclusive".into(),
+                ));
+            }
+            self.hyperkitty_api_key =
+                Some(read_secret_file(path, "archive.archivers.hyperkitty_api_key_file")?.into());
+        }
+        let url = self.hyperkitty_url.trim();
+        if url.is_empty() {
+            if self.hyperkitty_api_key.is_some() {
+                return Err(Error::Validation(
+                    "archive.archivers.hyperkitty_api_key needs hyperkitty_url".into(),
+                ));
+            }
+            return Ok(());
+        }
+        if !(url.starts_with("https://") || url.starts_with("http://"))
+            || url.chars().any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Err(Error::Validation(
+                "archive.archivers.hyperkitty_url must be an http:// or https:// URL".into(),
+            ));
+        }
+        if self.hyperkitty_api_key.is_none() {
+            return Err(Error::Validation(
+                "archive.archivers.hyperkitty_url needs hyperkitty_api_key or hyperkitty_api_key_file".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The `HyperKitty` archiver key, when one is configured.
+    #[must_use]
+    pub fn hyperkitty_api_key(&self) -> Option<&str> {
+        self.hyperkitty_api_key.as_ref().map(SmtpAuthSecret::expose)
+    }
+}
 config_struct!(ArchiveConfig {
     enabled: bool = true,
     archivers: ArchiversConfig = ArchiversConfig::default(),

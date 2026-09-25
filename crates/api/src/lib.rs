@@ -2577,7 +2577,7 @@ async fn list_archivers(
 
 /// The archivers a list can switch on, as `[archive] archivers` and the
 /// settings page know them.
-const ARCHIVER_NAMES: [&str; 3] = ["mail-archive", "mhonarc", "prototype"];
+const ARCHIVER_NAMES: [&str; 4] = ["mail-archive", "mhonarc", "prototype", "hyperkitty"];
 
 /// The built-in archivers and the ones the build's plugins add.
 fn archiver_names() -> Vec<&'static str> {
