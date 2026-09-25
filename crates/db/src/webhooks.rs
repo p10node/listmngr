@@ -748,6 +748,119 @@ impl WebhookRepo<'_> {
     }
 }
 
+/// What became of one attempt to post a delivery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// The target answered 2xx.
+    Delivered { status: i64 },
+    /// Try again at `next_attempt_at`.
+    Retry {
+        status: Option<i64>,
+        error: String,
+        next_attempt_at: i64,
+    },
+    /// Given up: too many attempts, or a target that can never be reached.
+    Failed { status: Option<i64>, error: String },
+}
+
+impl WebhookRepo<'_> {
+    /// Claim the next delivery that is due — pending, past `next_attempt_at`,
+    /// not leased, and for a webhook that is enabled — for `lease_ms`,
+    /// counting the attempt. Two runners never claim the same delivery:
+    /// `BEGIN IMMEDIATE` on `SQLite`, `FOR UPDATE SKIP LOCKED` on `PostgreSQL`.
+    /// # Errors
+    /// Validation for a non-positive lease; database errors.
+    pub async fn claim_due(
+        &self,
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<Option<(Delivery, Webhook)>> {
+        if lease_ms <= 0 {
+            return Err(Error::Validation("lease must be positive".into()));
+        }
+        let mut tx = self.db.write_tx().await?;
+        let lock = if self.db.sqlite {
+            ""
+        } else {
+            " FOR UPDATE OF d SKIP LOCKED"
+        };
+        let sql = format!(
+            "SELECT d.id AS id FROM webhook_deliveries d JOIN webhooks w ON w.id=d.webhook_id \
+             WHERE d.state='pending' AND d.next_attempt_at<=$1 AND (d.leased_until IS NULL OR d.leased_until<=$1) AND w.enabled=1 \
+             ORDER BY d.next_attempt_at, d.id LIMIT 1{lock}"
+        );
+        let id: Option<String> = sqlx::query_scalar(&sql)
+            .bind(now_ms)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        let Some(id) = id else {
+            tx.commit().await.map_err(db_error)?;
+            return Ok(None);
+        };
+        let row = sqlx::query(
+            "UPDATE webhook_deliveries SET leased_until=$1, attempts=attempts+1 WHERE id=$2 RETURNING *",
+        )
+        .bind(now_ms.saturating_add(lease_ms))
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        let delivery = decode_delivery(&row)?;
+        let webhook = Self::fetch(&mut tx, delivery.webhook_id).await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(Some((delivery, webhook)))
+    }
+
+    /// Record what became of a claimed delivery and release its lease.
+    /// # Errors
+    /// `NotFound` when the delivery is not pending any more; database
+    /// errors.
+    pub async fn record(&self, id: &str, outcome: &Outcome, now_ms: i64) -> Result<Delivery> {
+        let mut tx = self.db.write_tx().await?;
+        let updated = match outcome {
+            Outcome::Delivered { status } => {
+                sqlx::query("UPDATE webhook_deliveries SET state='delivered', leased_until=NULL, last_status=$1, last_error=NULL, finished_at=$2 WHERE id=$3 AND state='pending'")
+                    .bind(*status)
+                    .bind(now_ms)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+            }
+            Outcome::Retry { status, error, next_attempt_at } => {
+                sqlx::query("UPDATE webhook_deliveries SET leased_until=NULL, last_status=$1, last_error=$2, next_attempt_at=$3 WHERE id=$4 AND state='pending'")
+                    .bind(*status)
+                    .bind(error)
+                    .bind(*next_attempt_at)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+            }
+            Outcome::Failed { status, error } => {
+                sqlx::query("UPDATE webhook_deliveries SET state='failed', leased_until=NULL, last_status=$1, last_error=$2, finished_at=$3 WHERE id=$4 AND state='pending'")
+                    .bind(*status)
+                    .bind(error)
+                    .bind(now_ms)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+            }
+        }
+        .map_err(db_error)?;
+        if updated.rows_affected() == 0 {
+            return Err(Error::NotFound(format!("pending delivery {id}")));
+        }
+        let row = sqlx::query("SELECT * FROM webhook_deliveries WHERE id=$1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        let delivery = decode_delivery(&row)?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(delivery)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

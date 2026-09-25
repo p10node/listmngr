@@ -32,6 +32,7 @@ mod policy_facts;
 mod processor;
 pub mod tasks;
 mod visible_recipients;
+pub mod webhooks;
 
 pub use bounces::run as run_bounce_processor;
 pub use inbound::{COMMAND_SUFFIXES, InboundHandler};
