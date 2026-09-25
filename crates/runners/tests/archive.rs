@@ -45,6 +45,7 @@ async fn mail_role_consumes_archive_and_survives_database_reopen() {
         config,
         role,
         listener,
+        None,
         rx,
     ));
     let result = tokio::time::timeout(Duration::from_secs(2), async {

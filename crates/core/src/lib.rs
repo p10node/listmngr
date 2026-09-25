@@ -1262,6 +1262,10 @@ config_struct!(MtaConfig {
     local_hostname: String = "listmngr.invalid".into(),
     incoming: String = "none".into(),
     lmtp_listen: String = "127.0.0.1:8024".into(),
+    // Experimental: a second listener that speaks SMTP straight from the
+    // network for the lists' addresses — no relay, no AUTH, no STARTTLS —
+    // for a host with no MTA in front. Off by default.
+    inbound_smtp_listen: Option<String> = None,
     smtp_relay: String = "127.0.0.1:25".into(),
     smtp_single_recipient: bool = false,
     dsn_issuance_enabled: bool = false,
@@ -1315,6 +1319,16 @@ impl MtaConfig {
     /// # Errors
     /// Returns the first violated invariant as a validation error.
     pub fn validate(&self) -> Result<()> {
+        if let Some(address) = &self.inbound_smtp_listen {
+            let parsed: std::net::SocketAddr = address.parse().map_err(|_| {
+                Error::Validation("mta.inbound_smtp_listen must be an address:port".into())
+            })?;
+            if self.lmtp_listen.parse::<std::net::SocketAddr>().ok() == Some(parsed) {
+                return Err(Error::Validation(
+                    "mta.inbound_smtp_listen must differ from mta.lmtp_listen".into(),
+                ));
+            }
+        }
         if self.arc.enabled {
             if !self.authenticity_checks {
                 return Err(Error::Validation(

@@ -1,5 +1,22 @@
 # listmngr
 
+## Inbound SMTP, experimental (`P6-INBOUND-SMTP`) — bounded local acceptance verified
+
+For a host with no MTA in front, `[mta] inbound_smtp_listen = "0.0.0.0:25"`
+(off by default) adds a second listener that speaks SMTP straight from
+the network, with the same handler as LMTP: only a list's addresses are
+taken at `RCPT` (`550` for anything else, so nothing is relayed), the
+same size and recipient limits apply, and an accepted message goes into
+the `in` queue as an LMTP post would. It answers `EHLO`/`HELO` (not
+`LHLO`) and `DATA` once for the message — `250` when every recipient was
+taken, the refusal as it stands when none was, `250` naming how many when
+some were (those are already durable and must not be resent). It is
+experimental and bare: no `STARTTLS`, no `AUTH`, no greylisting or
+reputation checks, no DSNs for a partly taken message, and it must not
+share an address with `lmtp_listen`. Listening on port 25 needs the
+capability or a port redirect the systemd unit does not grant; a
+front MTA remains the recommended deployment.
+
 ## Webhooks on the web (`P6-WEBHOOKS-WEB`) — bounded local acceptance verified
 
 A list owner manages the list's webhooks at `/web/lists/{id}/settings/webhooks`

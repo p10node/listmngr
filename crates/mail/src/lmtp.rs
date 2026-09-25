@@ -376,6 +376,7 @@ async fn handle_rset<W: AsyncWrite + Unpin>(
 }
 
 async fn handle_mail<W: AsyncWrite + Unpin>(
+    protocol: Protocol,
     session: &mut Session,
     max_message_bytes: usize,
     writer: &mut W,
@@ -383,7 +384,13 @@ async fn handle_mail<W: AsyncWrite + Unpin>(
     rest: &str,
 ) -> IoResult<()> {
     if session.state == State::Init {
-        return reply(writer, timeout, 503, &["send LHLO first"]).await;
+        return reply(
+            writer,
+            timeout,
+            503,
+            &[&format!("send {} first", protocol.greeting_verb())],
+        )
+        .await;
     }
     let Some(rest) = rest
         .strip_prefix("FROM:")
@@ -513,6 +520,7 @@ enum Continue {
 }
 
 async fn handle_data<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin, H: LmtpHandler>(
+    protocol: Protocol,
     session: &mut Session,
     handler: &mut H,
     reader: &mut R,
@@ -547,7 +555,7 @@ async fn handle_data<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin, H: LmtpHand
     };
     match outcome {
         DataOutcome::TooLarge => {
-            for _ in 0..session.recipients.len() {
+            for _ in 0..protocol.data_replies(session.recipients.len()) {
                 reply(writer, timeout, 552, &["message exceeds size limit"]).await?;
             }
         }
@@ -558,6 +566,12 @@ async fn handle_data<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin, H: LmtpHand
             )
             .await
             {
+                Ok(results) if protocol == Protocol::Smtp => {
+                    // SMTP answers the message once: the transaction's
+                    // outcome, summarised over its recipients.
+                    let (code, detail) = summarize(&results, session.recipients.len());
+                    reply(writer, timeout, code, &[&detail]).await?;
+                }
                 Ok(results) => {
                     // Exactly one reply per accepted RCPT, in order: never
                     // fewer (pad with an accounting-error reply) and never
@@ -589,7 +603,7 @@ async fn handle_data<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin, H: LmtpHand
                 // guarantee exactly-once delivery under this kind of
                 // ambiguity.
                 Err(_elapsed) => {
-                    for _ in 0..session.recipients.len() {
+                    for _ in 0..protocol.data_replies(session.recipients.len()) {
                         reply(
                             writer,
                             timeout,
@@ -607,11 +621,145 @@ async fn handle_data<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin, H: LmtpHand
     Ok(Continue::Yes)
 }
 
+/// The greeting verbs. RFC 2033 §4.1: an LMTP server MUST NOT implement
+/// EHLO/HELO, only LHLO; an SMTP server the reverse.
+async fn handle_greeting<W: AsyncWrite + Unpin>(
+    protocol: Protocol,
+    verb: &str,
+    session: &mut Session,
+    hostname: &str,
+    max_message_bytes: usize,
+    writer: &mut W,
+    timeout: Duration,
+) -> IoResult<()> {
+    let verb = verb.to_ascii_uppercase();
+    match (protocol, verb.as_str()) {
+        (Protocol::Lmtp, "LHLO") | (Protocol::Smtp, "EHLO") => {
+            session.state = State::Greeted;
+            session.reset_transaction();
+            reply_raw(
+                writer,
+                timeout,
+                250,
+                &[
+                    hostname,
+                    "PIPELINING",
+                    &format!("SIZE {max_message_bytes}"),
+                    "8BITMIME",
+                    "ENHANCEDSTATUSCODES",
+                ],
+            )
+            .await
+        }
+        (Protocol::Smtp, "HELO") => {
+            session.state = State::Greeted;
+            session.reset_transaction();
+            reply(writer, timeout, 250, &[hostname]).await
+        }
+        (Protocol::Lmtp, _) => {
+            reply(
+                writer,
+                timeout,
+                500,
+                &["this is LMTP; use LHLO, not EHLO/HELO (RFC 2033 4.1)"],
+            )
+            .await
+        }
+        (Protocol::Smtp, _) => {
+            reply(
+                writer,
+                timeout,
+                500,
+                &["this is SMTP; use EHLO or HELO, not LHLO"],
+            )
+            .await
+        }
+    }
+}
+
+/// The one SMTP reply for a transaction: every recipient taken → the
+/// first outcome's `250`; none taken → the first refusal as it stands;
+/// some taken → `250` naming how many, since the taken ones are already
+/// durable and the peer must not resend them (the refused ones are the
+/// handler's to report, as with any SMTP server that accepts a message
+/// for part of its recipients).
+fn summarize(results: &[RecipientOutcome], expected: usize) -> (u16, String) {
+    if results.len() < expected {
+        return (451, "internal delivery accounting error".into());
+    }
+    let taken = results
+        .iter()
+        .take(expected)
+        .filter(|outcome| (200..300).contains(&outcome.code))
+        .count();
+    match results.first() {
+        Some(first) if taken == expected => (250, first.detail.clone()),
+        Some(_) if taken > 0 => (
+            250,
+            format!("2.1.5 accepted for {taken} of {expected} recipients"),
+        ),
+        Some(first) => (first.code, first.detail.clone()),
+        None => (451, "internal delivery accounting error".into()),
+    }
+}
+
 /// Drive one LMTP session to completion (`QUIT` or peer disconnect).
 /// # Errors
 /// Returns an I/O error for transport failures; protocol violations (bad
 /// commands, oversize lines) are reported to the peer, not returned here.
 pub async fn serve_session<S, H>(stream: S, handler: &mut H) -> IoResult<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+    H: LmtpHandler,
+{
+    serve_session_as(Protocol::Lmtp, stream, handler).await
+}
+
+/// The wire protocol a session speaks.
+///
+/// LMTP behind an MTA (RFC 2033), or SMTP straight from the network (RFC
+/// 5321) for the experimental inbound listener. They differ in the
+/// greeting verb — `LHLO` against `EHLO`/`HELO` — and in how `DATA` is
+/// answered: LMTP once per accepted recipient, SMTP once for the message.
+/// Everything else, the recipient check included, is the same handler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    Lmtp,
+    Smtp,
+}
+
+impl Protocol {
+    /// What the greeting banner and the logs call it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Lmtp => "LMTP",
+            Self::Smtp => "ESMTP",
+        }
+    }
+
+    const fn greeting_verb(self) -> &'static str {
+        match self {
+            Self::Lmtp => "LHLO",
+            Self::Smtp => "EHLO",
+        }
+    }
+
+    /// How many replies `DATA` gets for `recipients` accepted recipients.
+    const fn data_replies(self, recipients: usize) -> usize {
+        match self {
+            Self::Lmtp => recipients,
+            Self::Smtp => 1,
+        }
+    }
+}
+
+/// Drive one session in `protocol` to completion (`QUIT` or peer
+/// disconnect).
+/// # Errors
+/// Returns an I/O error for transport failures; protocol violations are
+/// answered on the wire, not returned.
+pub async fn serve_session_as<S, H>(protocol: Protocol, stream: S, handler: &mut H) -> IoResult<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
     H: LmtpHandler,
@@ -623,7 +771,11 @@ where
         &mut writer,
         timeout,
         220,
-        &[&format!("{} listmngr LMTP ready", handler.local_hostname())],
+        &[&format!(
+            "{} listmngr {} ready",
+            handler.local_hostname(),
+            protocol.name()
+        )],
     )
     .await?;
 
@@ -647,30 +799,15 @@ where
         let text = String::from_utf8_lossy(trim_line(&line)).into_owned();
         let (verb, rest) = text.split_once(' ').unwrap_or((text.as_str(), ""));
         match verb.to_ascii_uppercase().as_str() {
-            // RFC 2033 §4.1: an LMTP server MUST NOT implement EHLO/HELO; only LHLO.
-            "LHLO" => {
-                session.state = State::Greeted;
-                session.reset_transaction();
-                reply_raw(
+            "LHLO" | "EHLO" | "HELO" => {
+                handle_greeting(
+                    protocol,
+                    verb,
+                    &mut session,
+                    handler.local_hostname(),
+                    handler.max_message_bytes(),
                     &mut writer,
                     timeout,
-                    250,
-                    &[
-                        handler.local_hostname(),
-                        "PIPELINING",
-                        &format!("SIZE {}", handler.max_message_bytes()),
-                        "8BITMIME",
-                        "ENHANCEDSTATUSCODES",
-                    ],
-                )
-                .await?;
-            }
-            "EHLO" | "HELO" => {
-                reply(
-                    &mut writer,
-                    timeout,
-                    500,
-                    &["this is LMTP; use LHLO, not EHLO/HELO (RFC 2033 4.1)"],
                 )
                 .await?;
             }
@@ -682,6 +819,7 @@ where
             }
             "MAIL" => {
                 handle_mail(
+                    protocol,
                     &mut session,
                     handler.max_message_bytes(),
                     &mut writer,
@@ -692,7 +830,15 @@ where
             }
             "RCPT" => handle_rcpt(&mut session, handler, &mut writer, timeout, rest).await?,
             "DATA" => {
-                if handle_data(&mut session, handler, &mut reader, &mut writer, timeout).await?
+                if handle_data(
+                    protocol,
+                    &mut session,
+                    handler,
+                    &mut reader,
+                    &mut writer,
+                    timeout,
+                )
+                .await?
                     == Continue::No
                 {
                     return Ok(());
