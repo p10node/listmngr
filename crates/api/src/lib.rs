@@ -12,6 +12,7 @@ mod header_matches;
 pub mod oidc;
 mod queues;
 mod requests;
+mod webhooks;
 
 use axum::{
     Json, Router,
@@ -136,6 +137,8 @@ macro_rules! page_response {
 page_response!(StringPageResponse, String);
 page_response!(BanPageResponse, bans::BanResponse);
 page_response!(HeaderMatchPageResponse, header_matches::HeaderMatchResponse);
+page_response!(WebhookPageResponse, webhooks::WebhookResponse);
+page_response!(DeliveryPageResponse, webhooks::DeliveryResponse);
 page_response!(QueuePageResponse, queues::QueueResponse);
 page_response!(RequestPageResponse, requests::RequestResponse);
 page_response!(BouncePageResponse, listmngr_db::bounces::BounceEvent);
@@ -548,6 +551,14 @@ impl utoipa::Modify for SecurityAddon {
         bans::site_delete,
         digest::get,
         digest::post,
+        webhooks::list,
+        webhooks::create,
+        webhooks::get,
+        webhooks::patch,
+        webhooks::delete,
+        webhooks::rotate,
+        webhooks::ping,
+        webhooks::deliveries,
         header_matches::list,
         header_matches::create,
         header_matches::find,
@@ -674,6 +685,7 @@ impl utoipa::Modify for SecurityAddon {
         digest::DigestResponse, digest::DigestActionInput, digest::DigestActionResponse,
         QueuePageResponse, queues::QueueResponse, queues::JobResponse, queues::InjectInput,
         HeaderMatchPageResponse, header_matches::HeaderMatchResponse, header_matches::HeaderMatchInput, header_matches::HeaderMatchFindInput, header_matches::HeaderMatchPatchInput,
+        WebhookPageResponse, DeliveryPageResponse, webhooks::WebhookResponse, webhooks::WebhookInput, webhooks::WebhookPatchInput, webhooks::DeliveryResponse,
         DomainPageResponse, MailingListPageResponse,
         UserPageResponse, ArchiverPageResponse, TemplatePageResponse, MemberPageResponse,
         AddressPageResponse, SystemVersionsResponse, ConfigurationResponse, UriResponse,
@@ -1083,6 +1095,7 @@ fn phase_one_routes() -> Router<AppState> {
             get(list_archivers).patch(list_archivers_set),
         )
         .merge(bans::routes())
+        .merge(webhooks::routes())
         .route("/lists/{id}/bounces", get(bounces::list))
         .route("/lists/{id}/templates", get(list_templates))
         .route(

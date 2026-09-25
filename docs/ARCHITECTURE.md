@@ -1,5 +1,28 @@
 # Architecture
 
+## Webhooks: the API and the command line — bounded local acceptance verified
+
+`crates/api/src/webhooks.rs` mounts `/webhooks`, `/webhooks/{id}`,
+`/webhooks/{id}/rotate`, `/webhooks/{id}/ping` and
+`/webhooks/{id}/deliveries` under both prefixes through
+`phase_one_routes`, each operation documented with `#[utoipa::path]`
+(`WebhookInput`, `WebhookPatchInput`, `WebhookResponse` with `secret`
+present only on creation and rotation, `DeliveryResponse`, the
+`page_response!` pages `WebhookPageResponse` and `DeliveryPageResponse`;
+`rotate` and `ping` take the `EmptyMutationInput` body the validator
+expects of a `POST`). `authorize` asks `authenticate_for_authorization`
+for the `webhooks` scope, refuses a domain-bound token, and hands back
+the list a list-bound token is confined to; `fetch` answers `NotFound`
+for another list's webhook, so a bound token cannot tell it exists;
+`create` takes the bound list when `list_id` is omitted and refuses
+another. The scope is in `web_tokens::{ALL_SCOPES, LIST_SCOPES}` and the
+token repository's allowed list, so it can be minted from the account
+page, the CLI and the API like the others. `crates/cli/src/webhooks.rs`
+is `listmngr webhooks ls|add|set|rm|rotate|ping|deliveries` over the same
+repository, printing `serde_json` lines and the secret once. The
+OpenAPI test's module lists (`live_v1_routes`, `expected_request_media`)
+name `webhooks` so its routes are checked like the others.
+
 ## Webhooks: delivery — bounded local acceptance verified
 
 `listmngr_db::webhooks::WebhookRepo::claim_due(now, lease)` takes the
