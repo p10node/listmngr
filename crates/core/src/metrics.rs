@@ -161,6 +161,8 @@ pub struct Metrics {
     /// Bounce reports by what the runner made of them; `scored` counts
     /// members, the others count reports.
     pub bounces: LabeledCounter<4>,
+    /// Webhook deliveries by what one attempt made of them.
+    pub webhook_deliveries: LabeledCounter<3>,
 }
 
 impl Default for Metrics {
@@ -226,6 +228,12 @@ impl Metrics {
                 "result",
                 ["recognized", "unrecognized", "failed", "scored"],
             ),
+            webhook_deliveries: LabeledCounter::new(
+                "listmngr_webhook_deliveries_total",
+                "Webhook delivery attempts: delivered, retried or failed.",
+                "result",
+                ["delivered", "retried", "failed"],
+            ),
         }
     }
 
@@ -240,6 +248,7 @@ impl Metrics {
         self.smtp_transaction_seconds.render(&mut out);
         self.delivery_latency_seconds.render(&mut out);
         self.bounces.render(&mut out);
+        self.webhook_deliveries.render(&mut out);
         out
     }
 }

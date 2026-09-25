@@ -1,5 +1,41 @@
 # Architecture
 
+## Webhooks: delivery — bounded local acceptance verified
+
+`listmngr_db::webhooks::WebhookRepo::claim_due(now, lease)` takes the
+next delivery that is `pending`, past `next_attempt_at`, unleased (or
+its lease expired) and whose webhook is `enabled` — `BEGIN IMMEDIATE`
+on `SQLite`, `FOR UPDATE OF d SKIP LOCKED` on `PostgreSQL` — sets
+`leased_until` and counts the attempt, returning the delivery with its
+webhook; `record(id, Outcome, now)` releases the lease and writes
+`Delivered { status }` (`finished_at`), `Retry { status, error,
+next_attempt_at }` or `Failed { status, error }` (`finished_at`), and
+is `NotFound` for a delivery no longer pending.
+
+`listmngr_runners::webhooks` (`crates/runners/src/webhooks.rs`): `run`
+loops `deliver_due` until shutdown, pausing half a second when nothing
+is due, spawned by `serve_database` beside the HTTP server whenever
+`[webhooks] enabled`. `deliver_due` claims under a sixty-second lease,
+derives the secret (`WebhookRepo::secret`), calls `post`, and turns the
+`Attempt` into the `Outcome`: accepted → `Delivered`; refused
+permanently, or at `max_attempts` → `Failed`; else `Retry` at now plus
+`delivery_policy::Backoff { 10 s, 1 h }.delay_ms(attempts)`. `post`
+parses the URL (`reqwest::Url`), checks the scheme against
+`allow_http`, resolves the host (`tokio::net::lookup_host`; an IP
+literal is itself), refuses any address `is_private` unless
+`allow_private_targets` (loopback, private, link-local, shared
+`100.64/10`, `0/8`, `192.0.0/24`, benchmark `198.18/15`,
+documentation, broadcast, multicast, unspecified, ULA `fc00::/7`,
+`fe80::/10`, and an IPv4 mapped into IPv6 by what it maps), builds a
+client with no redirects, the configured timeout, `User-Agent:
+listmngr` and `resolve_to_addrs(host, found)` so the connection goes
+to what was checked, and posts the payload with the `X-Listmngr-*`
+headers and `signature(secret, timestamp, body)` = `sha256=` HMAC of
+`timestamp.body`. A resolution failure and a transport error are
+transient; the error text is reqwest's, which names the URL and never
+a header or the body. `listmngr_core::metrics::Metrics` gained
+`webhook_deliveries` (`delivered`/`retried`/`failed`).
+
 ## Webhooks: the store — bounded local acceptance verified
 
 Migration `0054_webhooks.sql`: `webhooks` (`id`, `url`, `description`,
