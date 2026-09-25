@@ -10,6 +10,7 @@
 
 pub mod chain;
 pub mod handlers;
+pub mod plugins;
 pub mod policy;
 pub mod rules;
 pub mod topics;

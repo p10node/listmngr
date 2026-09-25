@@ -8,6 +8,10 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Link the example plugin into the binary, to see the wiring work.
+plugin-example = ["listmngr-plugins/example"]
+
 [dependencies]
 hickory-resolver = "=0.26.2"
 flate2.workspace = true
@@ -22,6 +26,8 @@ listmngr-db = { path = "../db", version = "0.1.0" }
 listmngr-import = { path = "../import", version = "0.1.0" }
 listmngr-mail = { path = "../mail", version = "0.1.0" }
 listmngr-runners = { path = "../runners", version = "0.1.0" }
+listmngr-plugins = { path = "../plugins", version = "0.1.0" }
+listmngr-pipeline = { path = "../pipeline", version = "0.1.0" }
 serde_json.workspace = true
 rpassword.workspace = true
 reqwest.workspace = true
