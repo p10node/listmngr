@@ -40,6 +40,8 @@ mod subject_prefix;
 mod subscribe;
 #[path = "rest/template_uris.rs"]
 mod template_uris;
+#[path = "rest/webhooks.rs"]
+mod webhooks;
 #[path = "rest/welcome.rs"]
 mod welcome;
 

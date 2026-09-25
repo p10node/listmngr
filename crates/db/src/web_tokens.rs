@@ -17,6 +17,7 @@ pub const LIST_SCOPES: &[&str] = &[
     "members:read",
     "members:write",
     "moderation",
+    "webhooks",
 ];
 
 /// Every scope, for a server owner.
@@ -29,6 +30,7 @@ pub const ALL_SCOPES: &[&str] = &[
     "moderation",
     "users:write",
     "archive:write",
+    "webhooks",
     "admin",
 ];
 

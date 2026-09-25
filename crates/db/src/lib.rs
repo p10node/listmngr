@@ -3934,6 +3934,7 @@ impl TokenRepo<'_> {
             "moderation",
             "users:write",
             "archive:write",
+            "webhooks",
             "admin",
         ];
         if input.scopes.contains(&"admin") && (input.list_id.is_some() || input.domain_id.is_some())

@@ -14,6 +14,7 @@ mod queue;
 mod requests;
 mod status;
 mod tasks;
+mod webhooks;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
@@ -103,6 +104,11 @@ enum Command {
     Nntp {
         #[command(subcommand)]
         command: nntp::Command,
+    },
+    /// The site's webhooks: where its audit events are posted.
+    Webhooks {
+        #[command(subcommand)]
+        command: webhooks::Command,
     },
     /// Import a Mailman 3 site over its REST API: its domains, lists and
     /// their settings, rosters with each member's own preferences, bans
@@ -399,6 +405,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Aliases { command } => aliases::run(&db, &config, command).await?,
         Command::Archive { command } => archive::run(&db, &config, command).await?,
         Command::Nntp { command } => nntp::run(&db, &config, command).await?,
+        Command::Webhooks { command } => webhooks::run(&db, command).await?,
         Command::Import3(options) => import3::run(&db, options).await?,
         Command::Import21 {
             list_id,
