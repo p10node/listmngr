@@ -15,6 +15,7 @@ mod queue;
 mod requests;
 mod status;
 mod tasks;
+mod tls;
 mod webhooks;
 
 use anyhow::{Context, Result, bail};
@@ -430,6 +431,52 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
     }
     Ok(())
 }
+/// The mail role, opt-in (`mta.enabled`, fail-closed-validated at config
+/// load): its listeners are bound here, synchronously, so a bind failure
+/// aborts startup instead of dying silently in the background after the
+/// HTTP server already reports healthy.
+async fn spawn_mail_role(
+    db: &Database,
+    config: &Config,
+    shutdown: &tokio::sync::watch::Receiver<bool>,
+) -> Result<Option<tokio::task::JoinHandle<std::io::Result<()>>>> {
+    if !config.mta.enabled {
+        return Ok(None);
+    }
+    let role = listmngr_runners::MailRoleConfig::from_core(config)?;
+    let lmtp_listener = listmngr_runners::bind_lmtp(&role).await?;
+    let smtp_listener = listmngr_runners::bind_inbound_smtp(&role).await?;
+    let (mail_db, mail_config, mail_shutdown) = (db.clone(), config.clone(), shutdown.clone());
+    Ok(Some(tokio::spawn(async move {
+        listmngr_runners::serve_mail_role(
+            mail_db,
+            mail_config,
+            role,
+            lmtp_listener,
+            smtp_listener,
+            mail_shutdown,
+        )
+        .await
+    })))
+}
+
+/// Webhooks post from wherever `serve` runs, with or without the mail
+/// role: the events come from the API and the web as much as from mail.
+fn spawn_webhook_runner(
+    db: &Database,
+    config: &Config,
+    shutdown: &tokio::sync::watch::Receiver<bool>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !config.webhooks.enabled {
+        return None;
+    }
+    let (hook_db, hook_config, hook_shutdown) =
+        (db.clone(), config.webhooks.clone(), shutdown.clone());
+    Some(tokio::spawn(async move {
+        listmngr_runners::webhooks::run(hook_db, hook_config, hook_shutdown).await;
+    }))
+}
+
 async fn serve_database(db: Database, config: Config) -> Result<()> {
     db.migrate().await.context(errors::MigrationFailure)?;
     let address: std::net::SocketAddr = config
@@ -441,47 +488,22 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
     tracing::info!(%address,"HTTP server listening");
     aliases::publish_at_startup(&db, &config).await?;
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    // The mail role is opt-in (`mta.enabled`, fail-closed-validated at
-    // config load) and binds its LMTP socket synchronously here, so a
-    // bind failure aborts startup instead of dying silently in the
-    // background after the HTTP server already reports healthy.
-    let mail_role = if config.mta.enabled {
-        let role = listmngr_runners::MailRoleConfig::from_core(&config)?;
-        let lmtp_listener = listmngr_runners::bind_lmtp(&role).await?;
-        let smtp_listener = listmngr_runners::bind_inbound_smtp(&role).await?;
-        let mail_db = db.clone();
-        let mail_config = config.clone();
-        let mail_shutdown = shutdown_rx.clone();
-        Some(tokio::spawn(async move {
-            listmngr_runners::serve_mail_role(
-                mail_db,
-                mail_config,
-                role,
-                lmtp_listener,
-                smtp_listener,
-                mail_shutdown,
-            )
-            .await
-        }))
-    } else {
-        None
-    };
-    // Webhooks post from wherever `serve` runs, with or without the mail
-    // role: the events come from the API and the web as much as from mail.
-    let webhook_role = if config.webhooks.enabled {
-        let (hook_db, hook_config, hook_shutdown) =
-            (db.clone(), config.webhooks.clone(), shutdown_rx.clone());
-        Some(tokio::spawn(async move {
-            listmngr_runners::webhooks::run(hook_db, hook_config, hook_shutdown).await;
-        }))
-    } else {
-        None
-    };
+    let mail_role = spawn_mail_role(&db, &config, &shutdown_rx).await?;
+    let webhook_role = spawn_webhook_runner(&db, &config, &shutdown_rx);
+    let tls_role = tls::prepare(&config.web.tls).await?;
+    let router = listmngr_api::router(db, config);
+    let tls_role = tls_role.map(|(tls_listener, acceptor)| {
+        tokio::spawn(tls::serve(
+            tls_listener,
+            acceptor,
+            router.clone(),
+            shutdown_rx.clone(),
+        ))
+    });
     let http = std::future::IntoFuture::into_future(
         axum::serve(
             listener,
-            listmngr_api::router(db, config)
-                .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .with_graceful_shutdown(shutdown_signal(shutdown_tx.clone())),
     );
@@ -504,6 +526,9 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
     let _ = shutdown_tx.send(true);
     if let Some(task) = webhook_role {
         task.await.context("webhook runner panicked")?;
+    }
+    if let Some(task) = tls_role {
+        task.await.context("TLS listener panicked")??;
     }
     Ok(())
 }
