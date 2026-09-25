@@ -609,34 +609,47 @@ pub fn builtin() -> &'static Registry {
         for rule in crate::rules::builtin_rules() {
             registry.register_rule(rule);
         }
-        registry.register_chain(Chain::links(
-            "default-posting-chain",
-            vec![
-                Link::new("dmarc-mitigation", LinkAction::Jump("dmarc-mitigation")),
-                Link::new("no-senders", LinkAction::Jump("discard")),
-                Link::new("approved", LinkAction::Jump("accept")),
-                Link::new("emergency", LinkAction::Jump("hold")),
-                Link::new("loop", LinkAction::Jump("discard")),
-                Link::new("banned-address", LinkAction::Jump("reject")),
-                // Determine whether the member or nonmember has an action to take.
-                Link::new("member-moderation", LinkAction::Jump("moderation")),
-                Link::new("nonmember-moderation", LinkAction::Jump("moderation")),
-                // Do all of the following before deciding on a moderation action.
-                Link::new("administrivia", LinkAction::Defer),
-                Link::new("implicit-dest", LinkAction::Defer),
-                Link::new("max-recipients", LinkAction::Defer),
-                Link::new("max-size", LinkAction::Defer),
-                Link::new("news-moderation", LinkAction::Defer),
-                Link::new("no-subject", LinkAction::Defer),
-                Link::new("suspicious-header", LinkAction::Defer),
-                // Now if any of the above hit, jump to the moderation chain.
-                Link::new("any", LinkAction::Jump("moderation")),
-                // Take a detour through the list's own header-match rows.
-                Link::new("truth", LinkAction::Detour("header-match")),
-                // Finally, the message must be accepted.
-                Link::new("truth", LinkAction::Jump("accept")),
-            ],
-        ));
+        // The build's plugins: their rules, and their links as a detour
+        // the posting chain takes once a ban is ruled out and before
+        // moderation — only when there is one, so a build without
+        // plugins traces exactly the chain Mailman does.
+        let mut plugin_links = Vec::new();
+        for plugin in crate::plugins::installed() {
+            for rule in plugin.rules() {
+                registry.register_rule(rule);
+            }
+            plugin_links.extend(plugin.links());
+        }
+        let mut posting = vec![
+            Link::new("dmarc-mitigation", LinkAction::Jump("dmarc-mitigation")),
+            Link::new("no-senders", LinkAction::Jump("discard")),
+            Link::new("approved", LinkAction::Jump("accept")),
+            Link::new("emergency", LinkAction::Jump("hold")),
+            Link::new("loop", LinkAction::Jump("discard")),
+            Link::new("banned-address", LinkAction::Jump("reject")),
+            // Determine whether the member or nonmember has an action to take.
+            Link::new("member-moderation", LinkAction::Jump("moderation")),
+            Link::new("nonmember-moderation", LinkAction::Jump("moderation")),
+            // Do all of the following before deciding on a moderation action.
+            Link::new("administrivia", LinkAction::Defer),
+            Link::new("implicit-dest", LinkAction::Defer),
+            Link::new("max-recipients", LinkAction::Defer),
+            Link::new("max-size", LinkAction::Defer),
+            Link::new("news-moderation", LinkAction::Defer),
+            Link::new("no-subject", LinkAction::Defer),
+            Link::new("suspicious-header", LinkAction::Defer),
+            // Now if any of the above hit, jump to the moderation chain.
+            Link::new("any", LinkAction::Jump("moderation")),
+            // Take a detour through the list's own header-match rows.
+            Link::new("truth", LinkAction::Detour("header-match")),
+            // Finally, the message must be accepted.
+            Link::new("truth", LinkAction::Jump("accept")),
+        ];
+        if !plugin_links.is_empty() {
+            posting.insert(6, Link::new("truth", LinkAction::Detour("plugins")));
+            registry.register_chain(Chain::links("plugins", plugin_links));
+        }
+        registry.register_chain(Chain::links("default-posting-chain", posting));
         registry.register_chain(Chain::links(
             "default-owner-chain",
             vec![Link::new("truth", LinkAction::Jump("accept"))],

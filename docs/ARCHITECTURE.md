@@ -1,5 +1,40 @@
 # Architecture
 
+## Plugins — bounded local acceptance verified
+
+`listmngr_pipeline::plugins` (`crates/pipeline/src/plugins.rs`): the
+`Plugin` trait (`name`, `version`, and optional `rules`, `links`,
+`handlers`, `pipelines`, `archivers`), the `Archiver` trait (`name`,
+`archive(list_id, hash, raw) -> Result<(), String>`), `install(Vec<Box<dyn
+Plugin>>)` into a `OnceLock` — once, and `AlreadyInstalled` after that
+or after a registry sealed the set — `installed()`, which seals the set
+as empty when asked first, and `describe()` → `Description` per plugin
+naming what it adds. `chain::builtin()` registers each plugin's rules
+after the built-ins (a rule named like a built-in replaces it) and, only
+when some plugin has links, inserts `Link::new("truth",
+Detour("plugins"))` into the default posting chain after `banned-address`
+and registers the `plugins` chain of those links, so a build without
+plugins traces exactly the chain the characterisation test holds.
+`listmngr_mail::handlers::builtin_registry()` registers each plugin's
+handlers and pipelines after the built-ins, which is how
+`patch_posting_pipeline` comes to accept a plugin's pipeline.
+`listmngr_archive::archivers::run` collects the plugins' archivers,
+counts them among the reasons to read the archived copy, and runs each
+one that is on for the list in `spawn_blocking`, its failure logged;
+the API's `archiver_names()` adds their names to the built-in three for
+`GET`/`PATCH /lists/{id}/archivers`. `crates/plugins`
+(`listmngr-plugins`): `all()` — the build's plugins, the `example` under
+its feature — and `install()`; `crates/plugins/src/example.rs` is the
+example plugin (`KeywordHold` rule, its `Jump("hold")` link,
+`ExampleHeader` handler, `example-posting-pipeline` built from the
+default pipeline with the handler before `to-outgoing`, `ExampleArchiver`
+appending to the file `LISTMNGR_PLUGIN_EXAMPLE_ARCHIVE` names or the
+path it is given). The CLI (`plugin-example = ["listmngr-plugins/example"]`)
+calls `listmngr_plugins::install()` first thing in `run`, before any
+command touches a registry, and `listmngr plugins` prints `describe()`;
+`GET /plugins` (`system:read`, both prefixes, `PluginPageResponse`) pages
+the same.
+
 ## Webhooks: the API and the command line — bounded local acceptance verified
 
 `crates/api/src/webhooks.rs` mounts `/webhooks`, `/webhooks/{id}`,

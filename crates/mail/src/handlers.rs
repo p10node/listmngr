@@ -373,6 +373,16 @@ pub fn builtin_registry() -> &'static HandlerRegistry {
         for pipeline in builtin_pipelines() {
             registry.register_pipeline(pipeline);
         }
+        // The build's plugins: their handlers and the pipelines that
+        // place them, which a list may choose as its `posting_pipeline`.
+        for plugin in listmngr_pipeline::plugins::installed() {
+            for handler in plugin.handlers() {
+                registry.register_handler(handler);
+            }
+            for pipeline in plugin.pipelines() {
+                registry.register_pipeline(pipeline);
+            }
+        }
         registry
     })
 }

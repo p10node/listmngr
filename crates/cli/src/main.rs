@@ -10,6 +10,7 @@ mod import21;
 mod import3;
 mod nntp;
 mod notify;
+mod plugins;
 mod queue;
 mod requests;
 mod status;
@@ -105,6 +106,9 @@ enum Command {
         #[command(subcommand)]
         command: nntp::Command,
     },
+    /// What this build's plugins add: rules, links, handlers, pipelines,
+    /// archivers.
+    Plugins,
     /// The site's webhooks: where its audit events are posted.
     Webhooks {
         #[command(subcommand)]
@@ -296,6 +300,8 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
+    // The build's plugins, before any registry is built from them.
+    let _ = listmngr_plugins::install();
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) if error.use_stderr() => {
@@ -319,6 +325,7 @@ async fn run() -> Result<()> {
             config.api.listen
         ),
         Command::Status => status::check(&config).await?,
+        Command::Plugins => plugins::run(),
         Command::Doctor(options) => doctor::run(&config, options).await?,
         command => Box::pin(run_database(command, config)).await?,
     }
@@ -416,6 +423,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         | Command::Conf { .. }
         | Command::Info
         | Command::Status
+        | Command::Plugins
         | Command::Doctor(_) => {
             bail!("command does not use database")
         }

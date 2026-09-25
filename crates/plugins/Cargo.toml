@@ -1,0 +1,23 @@
+[package]
+name = "listmngr-plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# The example plugin — a rule, a link, a handler, a pipeline and an
+# archiver, each as small as it can be — proves the wiring; no site
+# needs it.
+example = []
+
+[dependencies]
+listmngr-pipeline = { path = "../pipeline", version = "0.1.0" }
+
+[dev-dependencies]
+listmngr-core = { path = "../core", version = "0.1.0" }
+listmngr-mail = { path = "../mail", version = "0.1.0" }
+tempfile = "3.23.0"
