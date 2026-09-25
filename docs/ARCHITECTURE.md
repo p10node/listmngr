@@ -1,5 +1,25 @@
 # Architecture
 
+## HyperKitty archiver — bounded local acceptance verified
+
+`ArchiversConfig` gained `hyperkitty_url`, `hyperkitty_api_key` and
+`hyperkitty_api_key_file` (`resolve` in `Config::load`: the file read
+like the other secret files, the two exclusive, an `http://` or
+`https://` URL, and a key whenever there is a URL; the file path dropped
+from `redacted_json`). `listmngr_archive::archivers::Settings` carries
+`hyperkitty_url` and `hyperkitty_key` from `serve_mail_role`, `is_empty`
+counts them, and `run` — for a list with the `hyperkitty` toggle — calls
+`hyperkitty`, which posts the archived copy to `<url>/api/mailman/archive`
+as `mailman-hyperkitty` 1.2 does: `Authorization: Token <key>`, a
+`multipart/form-data` body built by hand (the boundary a digest of the
+message, so it cannot occur inside it) with `mlist` = the list's posting
+address and `message` as a `message/rfc822` file named by the hash, over
+a `reqwest` client with no redirects and a thirty-second timeout; a 2xx
+answer's `url` is logged and the name counted, anything else logged as a
+failure, the local archive being the record either way. `hyperkitty` is
+the fourth name in the API's `ARCHIVER_NAMES` and the settings page's
+archiver list.
+
 ## Webhooks on the web — bounded local acceptance verified
 
 `crates/db/src/web_webhooks.rs`: `WebhookScope::{List(&ListId), Site}`;

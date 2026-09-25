@@ -537,6 +537,7 @@ web-ls-pipeline-virgin = Virgin (chỉ header)
 web-ls-archiver-mail-archive = mail-archive.com (từ xa)
 web-ls-archiver-mhonarc = MHonArc (từ xa)
 web-ls-archiver-prototype = Maildir mẫu (từ xa)
+web-ls-archiver-hyperkitty = HyperKitty (từ xa)
 web-rules-title = Quy tắc header
 web-rules-intro = Mỗi quy tắc so một header với một biểu thức chính quy, theo thứ tự; quy tắc khớp đầu tiên quyết định. Quy tắc không có hành động sẽ giữ bài.
 web-rules-test-result = Kết quả thử

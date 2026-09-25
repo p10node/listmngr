@@ -212,6 +212,7 @@ const ARCHIVERS: Options = &[
     ("mail-archive", "web-ls-archiver-mail-archive"),
     ("mhonarc", "web-ls-archiver-mhonarc"),
     ("prototype", "web-ls-archiver-prototype"),
+    ("hyperkitty", "web-ls-archiver-hyperkitty"),
 ];
 
 /// How a control is rendered and how its text becomes a patch value.

@@ -673,7 +673,7 @@ SQLite in the dev profile on one machine.
 
 ## Remote archivers (`P5-REMOTE-ARCHIVERS`) — bounded local acceptance verified
 
-The three archivers a list can switch on in its settings now do something.
+The archivers a list can switch on in its settings now do something.
 Each needs both the list's toggle and the server's configuration under
 `[archive] archivers`; either one missing leaves the archiver off, and a
 list whose `archive_policy` is `never` forwards nothing at all.
@@ -694,6 +694,15 @@ list whose `archive_policy` is `never` forwards nothing at all.
   `archivers.prototype_path`, at `<path>/<list id>/new/<hash>`, written
   into `tmp/` first and renamed, so a reader never sees half a message and
   a replay overwrites rather than duplicates.
+- **`hyperkitty`** (`P6-ARCHIVER-HYPERKITTY`) posts the archived copy to
+  a HyperKitty at `archivers.hyperkitty_url` the way `mailman-hyperkitty`
+  1.2 does — `POST <url>/api/mailman/archive` with `Authorization: Token
+  <archivers.hyperkitty_api_key>` (or `hyperkitty_api_key_file`) and a
+  multipart form of `mlist` (the posting address) and the message as a
+  file — and logs the permalink HyperKitty answers with. On the HyperKitty
+  side, `MAILMAN_ARCHIVER_KEY` must equal the key and
+  `MAILMAN_ARCHIVER_FROM` must list this server's address. A refusal is
+  logged and the post stays archived here.
 
 `mhonarc` and `prototype` run after the post is stored, so a crash between
 the two loses a forward and never the archived post; neither failure fails
