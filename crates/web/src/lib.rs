@@ -43,9 +43,10 @@ impl askama::filters::Escaper for HtmlEscaper {
 
 pub use pages::{
     Account, AdminIndex, AdminRow, Archive, ArchiveAttachment, ArchiveMessage, CheckEmail,
-    ConfirmForm, Confirmed, Directory, DirectoryEntry, ErrorPage, Held, HeldItem, Leave, ListPage,
-    Login, MemberRow, Members, Moderation, ModerationRow, NumberField, Password, PasswordChanged,
-    Preferences, Recover, SelectField, Settings, Subscription, Unsubscribe, Unsubscribed,
+    ConfirmForm, Confirmed, DeliveryRow, Directory, DirectoryEntry, ErrorPage, Held, HeldItem,
+    Leave, ListPage, Login, MemberRow, Members, Moderation, ModerationRow, NumberField, Password,
+    PasswordChanged, Preferences, Recover, SelectField, Settings, ShownSecret, Subscription,
+    Unsubscribe, Unsubscribed, WebhookDeliveries, WebhookRow, Webhooks,
 };
 pub use pages::{
     AccountDeleted, AddressRow, Addresses, ApiDocs, ArchiveCompat, ArchiveCompatEntry,

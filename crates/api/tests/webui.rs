@@ -68,6 +68,8 @@ mod system;
 mod tokens;
 #[path = "webui/totp.rs"]
 mod totp;
+#[path = "webui/webhooks.rs"]
+mod webhooks;
 
 use axum::{
     body::{Body, to_bytes},
@@ -2059,6 +2061,8 @@ async fn chromium_browser_acceptance() {
     let public = format!("http://localhost:{}", address.port());
     let mut config = Config::default();
     config.site.base_url = public.clone();
+    // The journey adds a webhook, which needs the site's signing key.
+    config.webhooks.signing_key = Some("0123456789abcdef0123456789abcdef".into());
     let app = listmngr_api::router(db.clone(), config);
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();

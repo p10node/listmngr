@@ -1520,6 +1520,77 @@ pub struct HeaderRules {
 }
 
 /// Bans of one list or of the site.
+/// One webhook on the page.
+#[derive(Debug, Clone)]
+pub struct WebhookRow {
+    /// The webhook's own page (its deliveries).
+    pub href: String,
+    /// Where its actions post: `<base>/<id>`.
+    pub actions: String,
+    pub url: String,
+    /// The events subscribed to, comma-separated.
+    pub events: String,
+    /// The list it is bound to, or none for a site-wide webhook.
+    pub list_id: Option<String>,
+    pub enabled: bool,
+    pub fingerprint: String,
+    pub description: String,
+}
+
+/// A secret shown once, on creation or rotation.
+#[derive(Debug, Clone)]
+pub struct ShownSecret {
+    pub secret: String,
+}
+
+/// One delivery on a webhook's page.
+#[derive(Debug, Clone)]
+pub struct DeliveryRow {
+    pub event: String,
+    pub state: String,
+    pub attempts: i64,
+    pub status: String,
+    pub error: String,
+    pub created: String,
+    pub next: String,
+}
+
+/// A list's, or the site's, webhooks.
+#[derive(Debug, Template)]
+#[template(path = "webhooks.html")]
+pub struct Webhooks {
+    pub shell: Shell,
+    /// Group navigation (empty on the site page).
+    pub groups: Vec<GroupLink>,
+    pub intro: String,
+    /// Base path of the page: the add form posts to `<base>/add`.
+    pub base: String,
+    pub csrf: String,
+    pub rows: Vec<WebhookRow>,
+    /// The add form's values (kept after a refusal).
+    pub draft_url: String,
+    pub draft_events: String,
+    pub draft_description: String,
+    pub error: Option<String>,
+    pub notice: Option<String>,
+    /// The secret just made, shown this once.
+    pub secret: Option<ShownSecret>,
+}
+
+/// One webhook and what it was owed.
+#[derive(Debug, Template)]
+#[template(path = "webhook.html")]
+pub struct WebhookDeliveries {
+    pub shell: Shell,
+    pub groups: Vec<GroupLink>,
+    /// Back to the collection.
+    pub back: String,
+    pub csrf: String,
+    pub row: WebhookRow,
+    pub deliveries: Vec<DeliveryRow>,
+    pub notice: Option<String>,
+}
+
 #[derive(Debug, Template)]
 #[template(path = "bans.html")]
 pub struct Bans {

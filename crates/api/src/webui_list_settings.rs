@@ -7,7 +7,9 @@ use super::{
     html, inline_refusal, load, privileged, reader_language, write_session,
 };
 use axum::extract::Query;
+use listmngr_core::WebhookId;
 use listmngr_core::{Error, ListId, MailingList};
+use listmngr_db::WebhookScope;
 use listmngr_db::header_matches::HeaderMatchRow;
 use listmngr_db::{HeaderMatchChange, header_match_outcomes};
 use listmngr_web::{
@@ -54,6 +56,50 @@ pub(super) fn routes() -> axum::Router<AppState> {
         .route("/web/admin/bans", get(site_bans))
         .route("/web/admin/bans/add", post(site_ban_add))
         .route("/web/admin/bans/remove", post(site_ban_remove))
+        .route("/web/lists/{id}/settings/webhooks", get(list_webhooks))
+        .route(
+            "/web/lists/{id}/settings/webhooks/add",
+            post(list_webhook_add),
+        )
+        .route(
+            "/web/lists/{id}/settings/webhooks/{webhook}",
+            get(list_webhook),
+        )
+        .route(
+            "/web/lists/{id}/settings/webhooks/{webhook}/enable",
+            post(list_webhook_enable),
+        )
+        .route(
+            "/web/lists/{id}/settings/webhooks/{webhook}/ping",
+            post(list_webhook_ping),
+        )
+        .route(
+            "/web/lists/{id}/settings/webhooks/{webhook}/rotate",
+            post(list_webhook_rotate),
+        )
+        .route(
+            "/web/lists/{id}/settings/webhooks/{webhook}/remove",
+            post(list_webhook_remove),
+        )
+        .route("/web/admin/webhooks", get(site_webhooks))
+        .route("/web/admin/webhooks/add", post(site_webhook_add))
+        .route("/web/admin/webhooks/{webhook}", get(site_webhook))
+        .route(
+            "/web/admin/webhooks/{webhook}/enable",
+            post(site_webhook_enable),
+        )
+        .route(
+            "/web/admin/webhooks/{webhook}/ping",
+            post(site_webhook_ping),
+        )
+        .route(
+            "/web/admin/webhooks/{webhook}/rotate",
+            post(site_webhook_rotate),
+        )
+        .route(
+            "/web/admin/webhooks/{webhook}/remove",
+            post(site_webhook_remove),
+        )
         .route("/web/lists/{id}/settings/templates", get(templates))
         .route(
             "/web/lists/{id}/settings/templates/{name}",
@@ -334,7 +380,7 @@ const GROUPS: &[Group] = &[
 ];
 
 /// The other pages under settings, after the nine groups.
-const EXTRA_PAGES: &[&str] = &["header-matches", "bans", "templates", "delete"];
+const EXTRA_PAGES: &[&str] = &["header-matches", "bans", "templates", "webhooks", "delete"];
 
 fn group(slug: &str) -> ApiResult<&'static Group> {
     GROUPS
@@ -1693,4 +1739,476 @@ pub(super) async fn delete(
     }
     s.db.browser_delete_list(&session, &id).await?;
     Ok(Redirect::to("/web/admin").into_response())
+}
+
+// ---- Webhooks: a list's for its owner, every one for a server owner ----
+
+/// The webhook pages of a list, or of the site.
+struct WebhookPages<'a> {
+    scope: WebhookScope<'a>,
+    /// Base path: the collection page, `<base>/add`, `<base>/<id>/…`.
+    base: String,
+}
+
+impl WebhookPages<'_> {
+    fn list(id: &ListId) -> WebhookPages<'_> {
+        WebhookPages {
+            scope: WebhookScope::List(id),
+            base: format!("{}/webhooks", base(id)),
+        }
+    }
+
+    const fn site() -> WebhookPages<'static> {
+        WebhookPages {
+            scope: WebhookScope::Site,
+            base: String::new(),
+        }
+    }
+
+    fn path(&self) -> &str {
+        if self.base.is_empty() {
+            "/web/admin/webhooks"
+        } else {
+            &self.base
+        }
+    }
+
+    fn row(&self, webhook: &listmngr_db::Webhook) -> listmngr_web::WebhookRow {
+        let actions = format!("{}/{}", self.path(), webhook.id);
+        listmngr_web::WebhookRow {
+            href: actions.clone(),
+            actions,
+            url: webhook.url.clone(),
+            events: webhook.events.join(", "),
+            list_id: webhook.list_id.as_ref().map(ToString::to_string),
+            enabled: webhook.enabled,
+            fingerprint: webhook.secret_fingerprint.clone(),
+            description: webhook.description.clone(),
+        }
+    }
+
+    fn groups(&self, language: &str) -> Vec<listmngr_web::GroupLink> {
+        match self.scope {
+            WebhookScope::List(id) => groups(language, id, "webhooks"),
+            WebhookScope::Site => Vec::new(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WebhookForm {
+    #[serde(default)]
+    csrf: String,
+    url: String,
+    events: String,
+    #[serde(default)]
+    description: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct EnableForm {
+    #[serde(default)]
+    csrf: String,
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CsrfForm {
+    #[serde(default)]
+    csrf: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WebhookNotice {
+    #[serde(default)]
+    saved: String,
+    #[serde(default)]
+    pinged: String,
+}
+
+fn stamp(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_default()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_webhooks(
+    language: &str,
+    csrf: &str,
+    pages: &WebhookPages<'_>,
+    webhooks: &[listmngr_db::Webhook],
+    draft: (String, String, String),
+    error: Option<String>,
+    notice: Option<String>,
+    secret: Option<(WebhookId, String)>,
+) -> Response {
+    html(&listmngr_web::Webhooks {
+        shell: Shell::new(
+            language,
+            if pages.base.is_empty() {
+                "web-title-webhooks"
+            } else {
+                "web-title-settings"
+            },
+            Nav::Account,
+        ),
+        groups: pages.groups(language),
+        intro: listmngr_i18n::message(
+            language,
+            match pages.scope {
+                WebhookScope::List(_) => "web-webhooks-intro-list",
+                WebhookScope::Site => "web-webhooks-intro-site",
+            },
+            &[],
+        ),
+        base: pages.path().to_owned(),
+        csrf: csrf.to_owned(),
+        rows: webhooks.iter().map(|webhook| pages.row(webhook)).collect(),
+        draft_url: draft.0,
+        draft_events: draft.1,
+        draft_description: draft.2,
+        error,
+        notice,
+        secret: secret.map(|(_, secret)| listmngr_web::ShownSecret { secret }),
+    })
+}
+
+fn split_events(events: &str) -> Vec<String> {
+    events
+        .split(',')
+        .map(str::trim)
+        .filter(|event| !event.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+async fn webhooks_page(
+    s: &AppState,
+    headers: &HeaderMap,
+    pages: &WebhookPages<'_>,
+    q: &WebhookNotice,
+) -> ApiResult<Response> {
+    let session = load(s, headers).await?;
+    privileged(s, &session).await?;
+    let language = reader_language(s, headers, &session).await?;
+    let webhooks = s.db.browser_webhooks(&session, pages.scope).await?;
+    let notice = if q.saved == "1" {
+        Some(listmngr_i18n::message(language, "web-ls-saved", &[]))
+    } else if q.pinged == "1" {
+        Some(listmngr_i18n::message(language, "web-webhooks-pinged", &[]))
+    } else {
+        None
+    };
+    Ok(render_webhooks(
+        language,
+        &session.csrf,
+        pages,
+        &webhooks,
+        (String::new(), "*".into(), String::new()),
+        None,
+        notice,
+        None,
+    ))
+}
+
+async fn webhook_add(
+    s: &AppState,
+    headers: &HeaderMap,
+    pages: &WebhookPages<'_>,
+    form: WebhookForm,
+) -> ApiResult<Response> {
+    let session = write_session(s, headers, &form.csrf).await?;
+    privileged(s, &session).await?;
+    let language = reader_language(s, headers, &session).await?;
+    match s
+        .db
+        .browser_webhook_create(
+            &session,
+            pages.scope,
+            &form.url,
+            split_events(&form.events),
+            &form.description,
+        )
+        .await
+    {
+        Ok((webhook, secret)) => {
+            // The secret is shown on this response and never again, so
+            // the page is rendered here rather than redirected to.
+            let webhooks = s.db.browser_webhooks(&session, pages.scope).await?;
+            Ok(render_webhooks(
+                language,
+                &session.csrf,
+                pages,
+                &webhooks,
+                (String::new(), "*".into(), String::new()),
+                None,
+                Some(listmngr_i18n::message(language, "web-ls-saved", &[])),
+                Some((webhook.id, secret)),
+            ))
+        }
+        Err(Error::Validation(_) | Error::Conflict(_)) => {
+            let webhooks = s.db.browser_webhooks(&session, pages.scope).await?;
+            Ok(inline_refusal(render_webhooks(
+                language,
+                &session.csrf,
+                pages,
+                &webhooks,
+                (form.url, form.events, form.description),
+                Some(listmngr_i18n::message(language, "web-webhooks-error", &[])),
+                None,
+                None,
+            )))
+        }
+        Err(other) => Err(other.into()),
+    }
+}
+
+async fn webhook_page(
+    s: &AppState,
+    headers: &HeaderMap,
+    pages: &WebhookPages<'_>,
+    id: WebhookId,
+    q: &WebhookNotice,
+) -> ApiResult<Response> {
+    let session = load(s, headers).await?;
+    privileged(s, &session).await?;
+    let language = reader_language(s, headers, &session).await?;
+    let (webhook, deliveries) =
+        s.db.browser_webhook_deliveries(&session, pages.scope, id)
+            .await?;
+    let notice =
+        (q.pinged == "1").then(|| listmngr_i18n::message(language, "web-webhooks-pinged", &[]));
+    Ok(html(&listmngr_web::WebhookDeliveries {
+        shell: Shell::new(
+            language,
+            if pages.base.is_empty() {
+                "web-title-webhooks"
+            } else {
+                "web-title-settings"
+            },
+            Nav::Account,
+        ),
+        groups: pages.groups(language),
+        back: pages.path().to_owned(),
+        csrf: session.csrf.clone(),
+        row: pages.row(&webhook),
+        deliveries: deliveries
+            .iter()
+            .map(|delivery| listmngr_web::DeliveryRow {
+                event: delivery.event.clone(),
+                state: serde_json::to_value(delivery.state)
+                    .ok()
+                    .and_then(|state| state.as_str().map(ToOwned::to_owned))
+                    .unwrap_or_default(),
+                attempts: delivery.attempts,
+                status: delivery
+                    .last_status
+                    .map(|status| status.to_string())
+                    .unwrap_or_default(),
+                error: delivery.last_error.clone().unwrap_or_default(),
+                created: stamp(delivery.created_at),
+                next: match delivery.state {
+                    listmngr_db::DeliveryState::Pending => stamp(delivery.next_attempt_at),
+                    _ => String::new(),
+                },
+            })
+            .collect(),
+        notice,
+    }))
+}
+
+async fn webhook_enable(
+    s: &AppState,
+    headers: &HeaderMap,
+    pages: &WebhookPages<'_>,
+    id: WebhookId,
+    form: EnableForm,
+) -> ApiResult<Response> {
+    let session = write_session(s, headers, &form.csrf).await?;
+    privileged(s, &session).await?;
+    s.db.browser_webhook_set_enabled(&session, pages.scope, id, form.enabled)
+        .await?;
+    Ok(Redirect::to(&format!("{}?saved=1", pages.path())).into_response())
+}
+
+async fn webhook_ping(
+    s: &AppState,
+    headers: &HeaderMap,
+    pages: &WebhookPages<'_>,
+    id: WebhookId,
+    form: CsrfForm,
+) -> ApiResult<Response> {
+    let session = write_session(s, headers, &form.csrf).await?;
+    privileged(s, &session).await?;
+    s.db.browser_webhook_ping(&session, pages.scope, id).await?;
+    Ok(Redirect::to(&format!("{}/{id}?pinged=1", pages.path())).into_response())
+}
+
+async fn webhook_rotate(
+    s: &AppState,
+    headers: &HeaderMap,
+    pages: &WebhookPages<'_>,
+    id: WebhookId,
+    form: CsrfForm,
+) -> ApiResult<Response> {
+    let session = write_session(s, headers, &form.csrf).await?;
+    privileged(s, &session).await?;
+    let language = reader_language(s, headers, &session).await?;
+    let (webhook, secret) =
+        s.db.browser_webhook_rotate(&session, pages.scope, id)
+            .await?;
+    let webhooks = s.db.browser_webhooks(&session, pages.scope).await?;
+    Ok(render_webhooks(
+        language,
+        &session.csrf,
+        pages,
+        &webhooks,
+        (String::new(), "*".into(), String::new()),
+        None,
+        Some(listmngr_i18n::message(language, "web-ls-saved", &[])),
+        Some((webhook.id, secret)),
+    ))
+}
+
+async fn webhook_remove(
+    s: &AppState,
+    headers: &HeaderMap,
+    pages: &WebhookPages<'_>,
+    id: WebhookId,
+    form: CsrfForm,
+) -> ApiResult<Response> {
+    let session = write_session(s, headers, &form.csrf).await?;
+    privileged(s, &session).await?;
+    s.db.browser_webhook_remove(&session, pages.scope, id)
+        .await?;
+    Ok(Redirect::to(&format!("{}?saved=1", pages.path())).into_response())
+}
+
+pub(super) async fn list_webhooks(
+    State(s): State<AppState>,
+    Path(id): Path<ListId>,
+    Query(q): Query<WebhookNotice>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    webhooks_page(&s, &headers, &WebhookPages::list(&id), &q).await
+}
+
+pub(super) async fn list_webhook_add(
+    State(s): State<AppState>,
+    Path(id): Path<ListId>,
+    headers: HeaderMap,
+    Form(form): Form<WebhookForm>,
+) -> ApiResult<Response> {
+    webhook_add(&s, &headers, &WebhookPages::list(&id), form).await
+}
+
+pub(super) async fn list_webhook(
+    State(s): State<AppState>,
+    Path((id, webhook)): Path<(ListId, WebhookId)>,
+    Query(q): Query<WebhookNotice>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    webhook_page(&s, &headers, &WebhookPages::list(&id), webhook, &q).await
+}
+
+pub(super) async fn list_webhook_enable(
+    State(s): State<AppState>,
+    Path((id, webhook)): Path<(ListId, WebhookId)>,
+    headers: HeaderMap,
+    Form(form): Form<EnableForm>,
+) -> ApiResult<Response> {
+    webhook_enable(&s, &headers, &WebhookPages::list(&id), webhook, form).await
+}
+
+pub(super) async fn list_webhook_ping(
+    State(s): State<AppState>,
+    Path((id, webhook)): Path<(ListId, WebhookId)>,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> ApiResult<Response> {
+    webhook_ping(&s, &headers, &WebhookPages::list(&id), webhook, form).await
+}
+
+pub(super) async fn list_webhook_rotate(
+    State(s): State<AppState>,
+    Path((id, webhook)): Path<(ListId, WebhookId)>,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> ApiResult<Response> {
+    webhook_rotate(&s, &headers, &WebhookPages::list(&id), webhook, form).await
+}
+
+pub(super) async fn list_webhook_remove(
+    State(s): State<AppState>,
+    Path((id, webhook)): Path<(ListId, WebhookId)>,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> ApiResult<Response> {
+    webhook_remove(&s, &headers, &WebhookPages::list(&id), webhook, form).await
+}
+
+pub(super) async fn site_webhooks(
+    State(s): State<AppState>,
+    Query(q): Query<WebhookNotice>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    webhooks_page(&s, &headers, &WebhookPages::site(), &q).await
+}
+
+pub(super) async fn site_webhook_add(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<WebhookForm>,
+) -> ApiResult<Response> {
+    webhook_add(&s, &headers, &WebhookPages::site(), form).await
+}
+
+pub(super) async fn site_webhook(
+    State(s): State<AppState>,
+    Path(webhook): Path<WebhookId>,
+    Query(q): Query<WebhookNotice>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    webhook_page(&s, &headers, &WebhookPages::site(), webhook, &q).await
+}
+
+pub(super) async fn site_webhook_enable(
+    State(s): State<AppState>,
+    Path(webhook): Path<WebhookId>,
+    headers: HeaderMap,
+    Form(form): Form<EnableForm>,
+) -> ApiResult<Response> {
+    webhook_enable(&s, &headers, &WebhookPages::site(), webhook, form).await
+}
+
+pub(super) async fn site_webhook_ping(
+    State(s): State<AppState>,
+    Path(webhook): Path<WebhookId>,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> ApiResult<Response> {
+    webhook_ping(&s, &headers, &WebhookPages::site(), webhook, form).await
+}
+
+pub(super) async fn site_webhook_rotate(
+    State(s): State<AppState>,
+    Path(webhook): Path<WebhookId>,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> ApiResult<Response> {
+    webhook_rotate(&s, &headers, &WebhookPages::site(), webhook, form).await
+}
+
+pub(super) async fn site_webhook_remove(
+    State(s): State<AppState>,
+    Path(webhook): Path<WebhookId>,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> ApiResult<Response> {
+    webhook_remove(&s, &headers, &WebhookPages::site(), webhook, form).await
 }
