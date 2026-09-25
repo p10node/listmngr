@@ -1,5 +1,31 @@
 # Architecture
 
+## Webhooks on the web — bounded local acceptance verified
+
+`crates/db/src/web_webhooks.rs`: `WebhookScope::{List(&ListId), Site}`;
+`webhook_authority` checks and releases the session's authority — the
+list's owner through `browser_owner_tx`, a server owner through
+`server_owner_tx` — and returns the user for the audit context;
+`webhook_in_scope` answers `NotFound` for a webhook outside a list scope;
+`browser_webhooks`, `browser_webhook_create` (bound to the list, or
+site-wide), `browser_webhook_set_enabled`, `browser_webhook_remove`,
+`browser_webhook_rotate`, `browser_webhook_ping` and
+`browser_webhook_deliveries` are the repository's own writes and reads
+under that authority. `crates/api/src/webui_list_settings.rs` mounts
+`/web/lists/{id}/settings/webhooks` (`add`, `{webhook}`,
+`{webhook}/enable|ping|rotate|remove`) and the same under
+`/web/admin/webhooks`, one set of handlers over a `WebhookPages` (scope
+and base path): the collection page (`Webhooks` in
+`crates/web/templates/webhooks.html`, with the settings navigation on a
+list's — `webhooks` joined `EXTRA_PAGES` — and none on the site's), the
+add and rotate responses rendering that page with `ShownSecret` once,
+the refusal inline (`400`, the draft kept), enable/remove redirecting
+to `?saved=1`, ping to the webhook's page `?pinged=1`, and the webhook's
+page (`WebhookDeliveries`, `webhook.html`) tabling `DeliveryRow`s with
+RFC 3339 stamps. The admin index links `/web/admin/webhooks`; the
+strings are `web-webhooks-*`, `web-ls-group-webhooks` and
+`web-title-webhooks` in both catalogs.
+
 ## Plugins — bounded local acceptance verified
 
 `listmngr_pipeline::plugins` (`crates/pipeline/src/plugins.rs`): the
