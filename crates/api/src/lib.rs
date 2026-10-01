@@ -7,6 +7,7 @@ mod archive;
 mod bans;
 mod bounce_config;
 mod bounces;
+mod compat;
 mod digest;
 mod header_matches;
 pub mod oidc;
@@ -1022,6 +1023,7 @@ pub fn router(db: Database, config: Config) -> Router {
         )
         .merge(webui::routes())
         .merge(unsubscribe::routes())
+        .merge(compat::routes())
         .layer(middleware::from_fn(trace_request))
         .with_state(state)
 }

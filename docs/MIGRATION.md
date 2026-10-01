@@ -267,3 +267,24 @@ archives that is not a list here is a warning.
 Passwords (see above); HyperKitty's Django profiles, social logins,
 per-reader "last read" markers, thread `starting_email` overrides and
 category colours.
+
+## URLs after the move
+
+HyperKitty's and Postorius's URLs redirect (`308`) to the pages here, so
+links in old mail, bookmarks and search engines keep working; nothing
+needs rewriting in a proxy unless HyperKitty was served under a prefix
+other than `/archives/` or `/hyperkitty/`.
+
+| Mailman 3 URL | Here |
+| --- | --- |
+| `/archives/list/<list>@<domain>/message/<hash>/` (and `/hyperkitty/…`) | `/web/lists/<list>.<domain>/archive?message=<hash>` |
+| `/archives/list/<address>/thread/<hash>/` | `/web/lists/<id>/archive/thread/<hash>` |
+| `/archives/list/<address>/<year>/<month>/` | `/web/lists/<id>/archive/threads/<year>/<month>` |
+| `/archives/list/<address>/`, `…/latest` | `/web/lists/<id>/archive` |
+| `/archives/`, `/hyperkitty/`, `/postorius/`, `/postorius/lists/` | `/web` |
+| `/postorius/lists/<id>/` | `/web/lists/<id>` |
+
+The hashes are HyperKitty's `Message-ID-Hash`, which this archive
+computes the same way (`P5-ACCEPTANCE`), so a permalink HyperKitty minted
+finds the same post. Postorius's other pages (settings, members) are not
+mapped.
