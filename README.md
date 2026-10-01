@@ -1,6 +1,38 @@
 # listmngr
 
-## Security review (`P7-SECURITY-REVIEW`) — bounded local acceptance verified
+## Chaos (`P7-CHAOS`) — bounded local acceptance verified
+
+`crates/cli/tests/chaos.rs` drives the real binary into three failures
+around a delivery and holds it to one rule: no post is lost, and no
+recipient gets a second copy unless an operator says so.
+
+- **The process dies mid-transaction.** The relay of the test answers
+  `354`, takes the message and never answers; the server is killed
+  (`SIGKILL`) while its out runner waits. Before the first SMTP command
+  the runner had already marked the recipient's attempt `ambiguous`
+  under its lease token, so after the restart the next claim finds
+  nothing it may send, the job ends `done`, the relay has received no
+  accepted copy, and `listmngr queue recipients <job>` shows the
+  recipient as `ambiguous`. Only `listmngr queue resolve <job> <email>
+  --outcome retry --reason … --acknowledge-duplicate-risk` puts the job
+  back, and then the relay accepts exactly one copy.
+- **The relay is down when the post arrives.** The out job's first
+  attempt fails to connect; it is rescheduled with the configured
+  backoff (`mta.retry_initial_secs`), nothing is lost, and when the
+  relay comes up the member gets one copy and the job ends `done`.
+- **Every database connection is cut under the runners** (PostgreSQL,
+  `pg_terminate_backend` on all of the server's sessions, as the
+  `postgres_connections_cut_under_the_runners_are_recovered` contract
+  on a disposable schema): the server is ready again on its own, and
+  the next post is delivered once.
+
+Limits: the kill is `SIGKILL` of the whole process, not a crash of one
+runner task; the relay faults are a stall and a closed port, not a
+half-written TCP stream; the out lease is the runners' fixed twenty
+seconds, so the first scenario waits for it; the PostgreSQL cut is of
+sessions, not of the server process; no clock skew, disk-full or
+partial-write faults are induced.
+
 
 `docs/SECURITY_REVIEW.md` walks every item of the security design
 (`docs/PLAN.md` §5: auth and session, email, web, data and operations)

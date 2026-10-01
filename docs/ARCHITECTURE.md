@@ -1,6 +1,30 @@
 # Architecture
 
-## Security review — bounded local acceptance verified
+## Chaos — bounded local acceptance verified
+
+`crates/cli/tests/chaos.rs` has a harness of its own, smaller than the
+mail path's: a loopback SMTP relay (`Sink`) with a `stall` fault that
+answers `354`, reads the message and then parks the connection on a
+pending future (signalling a semaphore so the test knows the runner is
+mid-transaction) and no listener at all for the down relay; an LMTP
+client that posts one message; `cli` (the binary, JSON out), `spawn`
+(`serve` with its logs in the fixture directory), `wait_ready`
+(`/readyz`), `until` and `eventually` (sync and async polling). `Site`
+migrates, creates a domain, a list and two members through the binary,
+starts `serve` with `mta.retry_initial_secs = 1` and `retry_max_secs =
+2` so a refused relay is retried within seconds, and reads
+`queue_jobs` and `delivery_recipients` through `sqlx` for the
+assertions. The three scenarios are documented in the README; what
+they rely on in the code: `MailQueueRepo::begin_delivery_with_dsn`
+marks every recipient `ambiguous` with the attempt token before the
+first SMTP command, `outbound::run` claims with the twenty-second
+`out_lease_ms` and `deliver_one` sends only recipients still `pending`,
+`QueueOperations::resolve` (`queue resolve`) returns an inactive job to
+`out`/`ready` for `--outcome retry` only with
+`--acknowledge-duplicate-risk`, the `Backoff` from `mta.retry_*`
+reschedules a connection failure, and the `sqlx` pool reconnects after
+`pg_terminate_backend`.
+
 
 `docs/SECURITY_REVIEW.md` is the artefact: one table per section of
 `docs/PLAN.md` §5 with status, evidence and the review's note, a table of
