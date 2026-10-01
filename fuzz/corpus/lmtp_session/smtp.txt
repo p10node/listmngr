@@ -1,0 +1,9 @@
+EHLO mta.example.invalid
+MAIL FROM:<>
+RCPT TO:<dev@example.invalid>
+DATA
+
+.
+RSET
+NOOP
+QUIT

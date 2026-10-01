@@ -1,0 +1,18 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Undelivered Mail Returned to Sender
+Content-Type: text/plain
+
+This is the mail system at host mx.example.net.
+
+I'm sorry to have to inform you that your message could not
+be delivered to one or more recipients. It's attached below.
+
+                   The mail system
+
+<alice@example.net>: host mail.example.net[192.0.2.1] said: 550 5.1.1
+    <alice@example.net>: Recipient address rejected: User unknown (in reply to
+    RCPT TO command)
+
+<bob@example.org>: unknown user: "bob"

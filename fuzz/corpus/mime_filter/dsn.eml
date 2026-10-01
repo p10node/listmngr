@@ -1,0 +1,21 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Undelivered Mail Returned to Sender
+Content-Type: multipart/report; report-type=delivery-status; boundary=r
+
+--r
+Content-Type: text/plain
+
+This is the mail system at host mx.example.net.
+
+<nina@example.net>: host mail.example.net said: 550 User unknown
+--r
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mx.example.net
+
+Final-Recipient: rfc822; nina@example.net
+Action: failed
+Status: 5.1.1
+--r--
