@@ -187,6 +187,12 @@ async fn the_site_is_served_over_tls_on_its_own_address() {
     let _ = stream.read_to_end(&mut answer).await;
     let answer = String::from_utf8_lossy(&answer);
     assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+    assert!(
+        answer
+            .to_ascii_lowercase()
+            .contains("strict-transport-security: max-age=31536000; includesubdomains"),
+        "HSTS over TLS: {answer}"
+    );
     // HTTP/2 is on offer.
     let tcp = tokio::net::TcpStream::connect(("127.0.0.1", tls))
         .await
@@ -211,10 +217,30 @@ async fn the_site_is_served_over_tls_on_its_own_address() {
         "{}",
         String::from_utf8_lossy(&answer)
     );
-    // The plain listener still answers.
-    tokio::task::spawn_blocking(move || wait_for_plain(plain))
-        .await
-        .unwrap();
+    // The plain listener still answers, and never asks for TLS: it is the
+    // probe and proxy listener.
+    let plain_answer = tokio::task::spawn_blocking(move || {
+        wait_for_plain(plain);
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", plain)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream
+            .write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut answer = String::new();
+        let _ = stream.read_to_string(&mut answer);
+        answer
+    })
+    .await
+    .unwrap();
+    assert!(plain_answer.starts_with("HTTP/1.1 200"), "{plain_answer}");
+    assert!(
+        !plain_answer
+            .to_ascii_lowercase()
+            .contains("strict-transport-security"),
+        "no HSTS on the plain listener: {plain_answer}"
+    );
     child.kill().unwrap();
     child.wait().unwrap();
     let log = std::fs::read_to_string(dir.path().join("serve.log")).unwrap_or_default();
