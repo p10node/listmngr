@@ -1,5 +1,49 @@
 # listmngr
 
+## Phase 6 acceptance (`P6-ACCEPTANCE`) — bounded local acceptance verified
+
+The Phase 6 gate of `docs/PLAN.md` §7: one test drives the real binary
+through a whole migration from the fixtures in the tree and serves the
+result. `listmngr import3 --db` reads Mailman 3.3.10's own database and
+message store (`crates/import/tests/fixtures/mailman3`: two domains, two
+lists, nine users, four members, a held message, a pending request);
+`listmngr archive import` loads the list's archive as HyperKitty exports
+it; `listmngr import3 --hyperkitty` places the votes, tags, category and
+favourite of HyperKitty's own database on those posts; `listmngr import21`
+lays the same list's Mailman 2.1 `config.pck` on top (its settings and
+header matches come; the bans and most of the roster the core already
+held are recognised and not doubled); then `listmngr serve` answers
+HyperKitty's and Postorius's own URLs.
+
+Those URLs now redirect (`308`) to the pages here, so links in old mail,
+bookmarks and search engines keep working after a migration:
+
+| Mailman 3 URL | Here |
+| --- | --- |
+| `/archives/list/<list>@<domain>/message/<hash>/` (and `/hyperkitty/…`) | `/web/lists/<list>.<domain>/archive?message=<hash>` |
+| `/archives/list/<address>/thread/<hash>/` | `/web/lists/<id>/archive/thread/<hash>` |
+| `/archives/list/<address>/<year>/<month>/` | `/web/lists/<id>/archive/threads/<year>/<month>` |
+| `/archives/list/<address>/`, `…/latest` | `/web/lists/<id>/archive` |
+| `/archives/`, `/hyperkitty/`, `/postorius/`, `/postorius/lists/` | `/web` |
+| `/postorius/lists/<id>/` | `/web/lists/<id>` |
+
+A list is named either way (`dev@example.com` or `dev.example.com`); a
+name that is not a list is `404`, and a hash the archive lacks is `404`
+on the page redirected to. The hashes are HyperKitty's own
+(`Message-ID-Hash`), so a permalink HyperKitty minted finds the same
+post here.
+
+Limits: the fixtures are a small site of this repository's making, read
+from a real Mailman 3.3.10 core and a real HyperKitty 1.3.12 — the live
+runs against disposable cores on SQLite and PostgreSQL and a HyperKitty
+on PostgreSQL are recorded on `P6-IMPORT3-REST`, `P6-IMPORT3-DB` and
+`P6-IMPORT3-HYPERKITTY`, and Mailman's own `testing/` pickles on
+`P6-IMPORT21`; the redirects are a fixed map, not a configurable rewrite
+(a site that served HyperKitty under another prefix maps that prefix in
+its proxy); Postorius's other pages (settings, members) are not mapped;
+the list the fixture core kept private is opened for the anonymous
+permalink check.
+
 ## Backup and restore (`P6-BACKUP`) — bounded local acceptance verified
 
 `listmngr backup <dir>` writes every table of the database as JSON lines
