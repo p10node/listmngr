@@ -231,6 +231,7 @@ async fn enqueue_reply(
     )?;
     crate::workflows::enqueue_notice(
         tx,
+        db,
         reply.list,
         &reply.writer.original_email,
         &id,
