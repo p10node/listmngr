@@ -457,7 +457,7 @@ impl<'a> ModerationRepo<'a> {
             decode_held(&row)?
         };
         if let ReviewAction::Accept { max_attempts } = action {
-            let recipients = held_recipients_tx(tx, &held).await?;
+            let recipients = held_recipients_tx(tx, db, &held).await?;
             let job = insert_child_job(
                 tx,
                 held.message_id,
@@ -562,8 +562,11 @@ async fn rejection_notice(
     reason: &str,
     now_ms: i64,
 ) -> Result<()> {
-    let row = sqlx::query("SELECT m.context,b.raw FROM messages m JOIN message_blobs b ON b.store_key=m.store_key WHERE m.id=$1")
-        .bind(held.message_id.0.to_string()).fetch_one(&mut **tx).await.map_err(db_error)?;
+    let row = sqlx::query("SELECT m.context,m.store_key FROM messages m WHERE m.id=$1")
+        .bind(held.message_id.0.to_string())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_error)?;
     let context: String = row.try_get("context").map_err(db_error)?;
     let Ok(context) = serde_json::from_str::<serde_json::Value>(&context) else {
         return Ok(());
@@ -577,7 +580,8 @@ async fn rejection_notice(
     {
         return Ok(());
     }
-    let original: Vec<u8> = row.try_get("raw").map_err(db_error)?;
+    let store_key: String = row.try_get("store_key").map_err(db_error)?;
+    let original = db.blobs().get(&mut **tx, &store_key).await?;
     if !listmngr_mail::owner::allows_forward(&original, Some(sender), &held.list_id) {
         return Ok(());
     }
@@ -719,9 +723,14 @@ pub(crate) fn decode_held(row: &AnyRow) -> Result<HeldMessage> {
 /// normalized email is policy identity, `original_email` is the SMTP mailbox.
 async fn held_recipients_tx(
     tx: &mut Transaction<'_, Any>,
+    db: &Database,
     held: &HeldMessage,
 ) -> Result<crate::mail_queue::RecipientPlan> {
-    let raw: Vec<u8> = sqlx::query_scalar("SELECT b.raw FROM messages m JOIN message_blobs b ON b.store_key=m.store_key WHERE m.id=$1")
-        .bind(held.message_id.0.to_string()).fetch_one(&mut **tx).await.map_err(db_error)?;
+    let store_key: String = sqlx::query_scalar("SELECT store_key FROM messages WHERE id=$1")
+        .bind(held.message_id.0.to_string())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    let raw = db.blobs().get(&mut **tx, &store_key).await?;
     crate::mail_queue::plan::select(tx, &held.list_id, &held.sender, &raw).await
 }

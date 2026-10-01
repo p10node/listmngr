@@ -70,7 +70,7 @@ impl UsenetRepo<'_> {
         }
         let queued = gated.is_some();
         if let Some(message) = gated {
-            crate::mail_queue::enqueue_tx(&mut tx, &message, now_ms).await?;
+            crate::mail_queue::enqueue_tx(self.db.blobs(), &mut tx, &message, now_ms).await?;
         }
         Database::record_tx_with_context(
             &mut tx,

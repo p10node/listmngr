@@ -1096,6 +1096,7 @@ impl Config {
         config.webhooks.resolve()?;
         config.archive.archivers.resolve()?;
         config.web.tls.validate(&config.web.listen)?;
+        config.message_store.resolve()?;
         Ok(config)
     }
 
@@ -1124,6 +1125,13 @@ impl Config {
             .and_then(serde_json::Value::as_object_mut)
         {
             archivers.remove("hyperkitty_api_key_file");
+        }
+        if let Some(store) = value
+            .get_mut("message_store")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            store.remove("s3_secret_access_key");
+            store.remove("s3_secret_access_key_file");
         }
         value
     }
@@ -1189,9 +1197,117 @@ config_struct!(DatabaseConfig {
     max_connections: u32 = 20
 });
 config_struct!(MessageStoreConfig {
-    backend: String = "fs".into(),
-    path: String = "data/messages".into()
+    // Where the bytes behind `message_blobs.store_key` live: `db` (the
+    // row), `fs` (`path/<aa>/<bb>/<key>`) or `s3` (`<s3_prefix><key>`).
+    backend: String = "db".into(),
+    path: String = "data/messages".into(),
+    s3_bucket: Option<String> = None,
+    s3_region: String = "us-east-1".into(),
+    // `http(s)://host[:port]` of an S3-compatible service; path-style
+    // addressing. None: `https://<bucket>.s3.<region>.amazonaws.com`.
+    s3_endpoint: Option<String> = None,
+    s3_prefix: String = String::new(),
+    s3_access_key_id: Option<String> = None,
+    s3_secret_access_key: Option<SmtpAuthSecret> = None,
+    s3_secret_access_key_file: Option<PathBuf> = None
 });
+
+impl MessageStoreConfig {
+    /// `Config::load`'s checks: a known backend; a path for `fs`; for
+    /// `s3` a lowercase bucket name, a region, an `http(s)://host[:port]`
+    /// endpoint when one is given, and a credential pair with the secret
+    /// inline or read from an owner-only file.
+    fn resolve(&mut self) -> Result<()> {
+        match self.backend.as_str() {
+            "db" => Ok(()),
+            "fs" => {
+                if self.path.trim().is_empty() {
+                    return Err(Error::Validation(
+                        "message_store.path is needed for the fs backend".into(),
+                    ));
+                }
+                Ok(())
+            }
+            "s3" => self.resolve_s3(),
+            other => Err(Error::Validation(format!(
+                "message_store.backend must be db, fs or s3, not {other:?}"
+            ))),
+        }
+    }
+
+    fn resolve_s3(&mut self) -> Result<()> {
+        let bucket = self.s3_bucket.as_deref().unwrap_or_default();
+        let bucket_name = (3..=63).contains(&bucket.len())
+            && bucket
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
+            && !bucket.starts_with(['-', '.'])
+            && !bucket.ends_with(['-', '.']);
+        if !bucket_name {
+            return Err(Error::Validation(
+                "message_store.s3_bucket must be a lowercase bucket name".into(),
+            ));
+        }
+        if self.s3_region.is_empty()
+            || !self
+                .s3_region
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return Err(Error::Validation(
+                "message_store.s3_region must be a region name".into(),
+            ));
+        }
+        if let Some(endpoint) = &self.s3_endpoint {
+            let authority = endpoint
+                .strip_prefix("https://")
+                .or_else(|| endpoint.strip_prefix("http://"))
+                .map(|rest| rest.trim_end_matches('/'));
+            let plain = authority.is_some_and(|authority| {
+                !authority.is_empty()
+                    && !authority.contains(['/', '?', '#', '@'])
+                    && !authority.chars().any(char::is_whitespace)
+            });
+            if !plain {
+                return Err(Error::Validation(
+                    "message_store.s3_endpoint must be http(s)://host[:port], nothing more".into(),
+                ));
+            }
+        }
+        if self.s3_prefix.starts_with('/') {
+            return Err(Error::Validation(
+                "message_store.s3_prefix must not start with a slash".into(),
+            ));
+        }
+        if self
+            .s3_access_key_id
+            .as_deref()
+            .is_none_or(|id| id.trim().is_empty())
+        {
+            return Err(Error::Validation(
+                "message_store.s3_access_key_id is needed for the s3 backend".into(),
+            ));
+        }
+        if let Some(file) = &self.s3_secret_access_key_file {
+            let secret = read_secret_file(file, "message_store.s3_secret_access_key_file")?;
+            self.s3_secret_access_key = Some(SmtpAuthSecret(secret));
+        }
+        if self.s3_secret_access_key().is_none_or(str::is_empty) {
+            return Err(Error::Validation(
+                "message_store.s3_secret_access_key or s3_secret_access_key_file is needed for the s3 backend".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The S3 secret, inline or read from its file, when one is configured.
+    #[must_use]
+    pub fn s3_secret_access_key(&self) -> Option<&str> {
+        self.s3_secret_access_key
+            .as_ref()
+            .map(SmtpAuthSecret::expose)
+    }
+}
 // `enabled` is the opt-in switch for LMTP + processing + outbound (default off).
 // Enabled roles admit only explicit trusted plaintext or verified required STARTTLS.
 // CA file and server identity are validated when constructing the runtime mail role;

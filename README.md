@@ -1,5 +1,58 @@
 # listmngr
 
+## The message store (`P6-MESSAGE-STORE`) — bounded local acceptance verified
+
+Every message the server keeps — a post in a queue, a held message, a
+digest issue, a notice it generated, a message an import brought — is
+stored once under the SHA-256 of its bytes, and `[message_store]` says
+where those bytes live:
+
+```toml
+[message_store]
+backend = "db"               # the default: in the message_blobs row, as before
+# backend = "fs"             # under path/<aa>/<bb>/<key>, owner-only files
+# path = "data/messages"
+# backend = "s3"             # <s3_prefix><key> in a bucket, requests signed with SigV4
+# s3_bucket = "lists-mail"
+# s3_region = "eu-west-1"
+# s3_endpoint = "https://s3.example.com"   # an S3-compatible service, path-style; AWS when unset
+# s3_prefix = "messages/"
+# s3_access_key_id = "AKIAIOSFODNN7EXAMPLE"
+# s3_secret_access_key_file = "/etc/listmngr/s3.secret"   # owner-only; or s3_secret_access_key inline
+```
+
+With `fs` and `s3` the row stays as the reference, its bytes column
+empty, so every foreign key, count and sweep is as it was. The object is
+written before the row, inside the same request, so a committed row never
+lacks its bytes, and a transaction that rolls back after the write leaves
+an orphan the task sweep collects once it is an hour old
+(`collected_blobs` in the sweep's summary, audited as `task.sweep` on
+`blobs`); only objects that look like keys, in their `aa/bb` directory or
+under the prefix, are ever touched, so a shared directory or bucket keeps
+everything else. Reads take the row's bytes when it still holds them, so
+the store can be switched on a running database:
+`listmngr message-store migrate` then moves the bytes out row by row
+(object first, row emptied after), and `listmngr message-store check`
+counts the rows and names every one whose bytes are nowhere (exit `1`
+when there are any). `listmngr info` names the backend.
+
+S3 requests are signed with Signature Version 4 by the binary itself
+(`host`, `x-amz-content-sha256` of the whole body, `x-amz-date`),
+path-style against `s3_endpoint` (MinIO, Garage, Ceph RGW and the like)
+and virtual-host style against AWS; `PUT`, `GET`, `HEAD`, `DELETE` and
+`ListObjectsV2` with its continuation tokens are all it uses, over
+rustls with the Web PKI roots. The secret comes from an owner-only file
+or inline and never appears in `listmngr conf`, logs or errors; a refused
+signature is the caller's error and nothing is queued.
+
+Limits: a message is one `PUT` (no multipart), no server-side encryption
+headers, no bucket versioning awareness; `fs` is one host's directory,
+not shared storage; the orphan sweep lists the whole prefix each time;
+moving back to `db` is not a migration — a row emptied for a store keeps
+pointing at it, and `check` names such rows; the acceptance runs against
+a fake S3 on loopback that verifies every signature with the known
+secret, not against AWS.
+
 ## Automatic certificates (`P6-WEB-ACME`) — bounded local acceptance verified
 
 Instead of `cert_file` and `key_file`, `[web] tls` can order its

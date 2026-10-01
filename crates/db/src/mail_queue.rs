@@ -2,7 +2,6 @@
 use crate::{Database, db_error};
 use listmngr_core::{Error, ListId, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use uuid::Uuid;
 
@@ -795,7 +794,7 @@ impl<'a> MailQueueRepo<'a> {
         let mut tx = self.db.write_tx().await?;
         let mut jobs = Vec::with_capacity(inputs.len());
         for input in inputs {
-            jobs.push(enqueue_tx(&mut tx, input, now_ms).await?);
+            jobs.push(enqueue_tx(self.db.blobs(), &mut tx, input, now_ms).await?);
         }
         tx.commit().await.map_err(db_error)?;
         Ok(jobs)
@@ -837,16 +836,21 @@ impl<'a> MailQueueRepo<'a> {
     /// # Errors
     /// Returns not-found or database errors.
     pub async fn message(&self, id: MessageId) -> Result<StoredMessage> {
-        let row = sqlx::query("SELECT m.*, b.raw FROM messages m JOIN message_blobs b ON b.store_key=m.store_key WHERE m.id=$1")
-            .bind(id.0.to_string()).fetch_optional(self.db.pool()).await.map_err(db_error)?
+        let row = sqlx::query("SELECT m.* FROM messages m WHERE m.id=$1")
+            .bind(id.0.to_string())
+            .fetch_optional(self.db.pool())
+            .await
+            .map_err(db_error)?
             .ok_or_else(|| Error::NotFound("message".into()))?;
+        let store_key: String = row.try_get("store_key").map_err(db_error)?;
+        let bytes = self.db.blobs().get(self.db.pool(), &store_key).await?;
         Ok(StoredMessage {
             id,
-            store_key: row.try_get("store_key").map_err(db_error)?,
+            store_key,
             external_id: row.try_get("external_id").map_err(db_error)?,
             context: row.try_get("context").map_err(db_error)?,
             created_at: row.try_get("created_at").map_err(db_error)?,
-            raw: row.try_get("raw").map_err(db_error)?,
+            raw: bytes,
         })
     }
     /// Ids of the jobs still waiting in `queue` (ready or leased), oldest
@@ -1060,6 +1064,7 @@ pub(crate) async fn audit(
 /// # Errors
 /// Validation for a non-positive `max_attempts`, and database errors.
 pub(crate) async fn enqueue_tx(
+    store: &crate::blobs::BlobStore,
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     input: &NewMessage,
     now_ms: i64,
@@ -1067,17 +1072,9 @@ pub(crate) async fn enqueue_tx(
     if input.max_attempts <= 0 {
         return Err(Error::Validation("max_attempts must be positive".into()));
     }
-    let key = format!("{:x}", Sha256::digest(&input.raw));
+    let key = store.put_tx(tx, &input.raw).await?;
     let message_id = MessageId(Uuid::now_v7());
     let id = JobId(Uuid::now_v7());
-    sqlx::query(
-        "INSERT INTO message_blobs(store_key,raw) VALUES($1,$2) ON CONFLICT(store_key) DO NOTHING",
-    )
-    .bind(&key)
-    .bind(&input.raw)
-    .execute(&mut **tx)
-    .await
-    .map_err(db_error)?;
     sqlx::query(
         "INSERT INTO messages(id,store_key,external_id,context,created_at) VALUES($1,$2,$3,$4,$5)",
     )
