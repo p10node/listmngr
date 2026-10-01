@@ -1,0 +1,54 @@
+From alice@example.org Mon Jan  1 10:00:00 2024
+Message-ID: <a@example.org>
+From: Alice <alice@example.org>
+Date: Mon, 01 Jan 2024 10:00:00 +0000
+Subject: Kickoff
+
+Let us begin.
+
+From bob@example.org Mon Jan  1 11:00:00 2024
+Message-ID: <b@example.org>
+In-Reply-To: <a@example.org>
+References: <a@example.org>
+From: Bob <bob@example.org>
+Date: Mon, 01 Jan 2024 11:00:00 +0000
+Subject: Re: Kickoff
+
+> Let us begin.
+Agreed.
+
+From carol@example.org Mon Jan  1 12:00:00 2024
+Message-ID: <c@example.org>
+References: <a@example.org> <b@example.org>
+From: Carol <carol@example.org>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Subject: Re: Kickoff
+
+References only, no In-Reply-To: the last reference is the parent.
+
+From dave@example.org Mon Jan  1 09:30:00 2024
+Message-ID: <d@example.org>
+In-Reply-To: <a@example.org>
+From: Dave <dave@example.org>
+Date: Mon, 01 Jan 2024 09:30:00 +0000
+Subject: Re: Kickoff
+
+Dated before Bob's reply, so it sorts first among Alice's replies.
+
+From erin@example.org Mon Jan  1 13:00:00 2024
+Message-ID: <e@example.org>
+In-Reply-To: <missing@example.org>
+References: <missing@example.org>
+From: Erin <erin@example.org>
+Date: Mon, 01 Jan 2024 13:00:00 +0000
+Subject: Re: Something the archive never saw
+
+An orphan reply stands as a root.
+
+From frank@example.org Mon Jan  1 08:00:00 2024
+Message-ID: <f@example.org>
+From: Frank <frank@example.org>
+Date: Mon, 01 Jan 2024 08:00:00 +0000
+Subject: Earlier and unrelated
+
+A second root, dated before Alice's.

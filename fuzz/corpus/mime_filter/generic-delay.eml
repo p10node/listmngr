@@ -1,0 +1,13 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Warning: could not send message for past 4 hours
+Content-Type: text/plain
+
+    **      THIS IS A WARNING MESSAGE ONLY      **
+    **  YOU DO NOT NEED TO RESEND YOUR MESSAGE  **
+
+The original message was received at Mon, 1 Sep 2026 10:00:00 +0000
+
+Your message to <pat@example.net> has not yet been delivered; it will be retried
+for up to 5 days.

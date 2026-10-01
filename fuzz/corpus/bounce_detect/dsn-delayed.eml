@@ -1,0 +1,19 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Delayed
+Content-Type: multipart/report; report-type=delivery-status; boundary=r
+
+--r
+Content-Type: text/plain
+
+Warning only.
+--r
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mx.example.net
+
+Final-Recipient: rfc822; oscar@example.net
+Action: delayed
+Status: 4.4.1
+--r--

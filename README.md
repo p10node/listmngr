@@ -1,5 +1,44 @@
 # listmngr
 
+## Fuzzing (`P7-FUZZ`) — bounded local acceptance verified
+
+`fuzz/` holds eight `cargo-fuzz` targets over the parsers that take bytes
+from the network or from another system, each a pure function or an
+in-memory session with no I/O:
+
+| Target | What it drives |
+| --- | --- |
+| `lmtp_session` | one LMTP or SMTP session over an in-memory pipe, against a handler that takes `@example.invalid` and stores nothing |
+| `bounce_detect` | Mailman's bounce detectors and the RFC 3464 DSN parser |
+| `mail_commands` | the email command parser, the confirmation token, the auto-reply guard |
+| `verp` | VERP format validation, encoding for a list and a recipient, decoding a local part |
+| `template_render` | `$name` / `${name}` / `$$` expansion with arbitrary templates and values |
+| `mime_filter` | content filtering (`mime-delete`) with the default and an aggressive setting, HTML to text, entity decoding |
+| `pickle_read` | the Python 2 pickle reader behind `import21` |
+| `mbox_read` | the mbox reader and the importer's per-message preparation |
+
+Each has a seed corpus in `fuzz/corpus/<target>/` from the fixtures in the
+tree. The crate is its own workspace on a pinned nightly
+(`fuzz/rust-toolchain.toml`), excluded from the root so the stable
+gates never see it. `scripts/fuzz.sh [seconds]` runs every target for
+that long (sixty seconds by default; `scripts/fuzz.sh 86400` is the
+day-per-target campaign the plan asks for, on a machine of its own); a
+crash fails the run and its input lands in `fuzz/artifacts/<target>/`.
+CI's `fuzz` job runs the sixty-second pass on every push.
+
+```sh
+rustup toolchain install nightly-2026-09-30 --profile minimal
+cargo install cargo-fuzz --locked      # 0.13.2
+scripts/fuzz.sh 600                    # ten minutes per target
+```
+
+Limits: libFuzzer with AddressSanitizer on one core per target, no
+coverage-guided dictionary beyond the seeds; the targets exercise
+parsers, not the database or the runners; a session target speaks to a
+fake handler, so storage failures are not fuzzed; the day-long campaign
+is a schedule, not something a gate runs — the ledger records what ran
+here and in CI.
+
 ## Phase 6 acceptance (`P6-ACCEPTANCE`) — bounded local acceptance verified
 
 The Phase 6 gate of `docs/PLAN.md` §7: one test drives the real binary
