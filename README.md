@@ -1,6 +1,33 @@
 # listmngr
 
-## Fuzzing (`P7-FUZZ`) — bounded local acceptance verified
+## Security review (`P7-SECURITY-REVIEW`) — bounded local acceptance verified
+
+`docs/SECURITY_REVIEW.md` walks every item of the security design
+(`docs/PLAN.md` §5: auth and session, email, web, data and operations)
+and says, for each, whether it is done as designed, done another way on
+purpose, or open — with the test, ledger row or file that is the
+evidence — and then looks beyond the checklist at SSRF, open redirects,
+path traversal, dynamic SQL, timing and logging. Four findings were
+closed with it:
+
+- the TLS listener now sends `Strict-Transport-Security: max-age=31536000;
+  includeSubDomains` on every response, and the plain listener never does
+  (it is the probe and proxy listener);
+- every web page carries `Permissions-Policy: camera=(), microphone=(),
+  geolocation=(), payment=(), usb=()` beside its CSP, `nosniff`,
+  `X-Frame-Options` and `Referrer-Policy`;
+- release builds keep integer overflow checks (`[profile.release]
+  overflow-checks = true`);
+- Dependabot proposes weekly updates for Cargo (the workspace and the fuzz
+  package) and the pinned GitHub Actions, each going through the same
+  `--locked` gates.
+
+What stays open for a later release is listed at the end of the review:
+at-rest encryption of TOTP secrets under a master key, Ed25519 DKIM and
+selector rotation, a per-sender posting rate and a hop cap, explicit MIME
+depth and part ceilings beyond the parser's own, and an external review,
+which has not taken place.
+
 
 `fuzz/` holds eight `cargo-fuzz` targets over the parsers that take bytes
 from the network or from another system, each a pure function or an

@@ -315,7 +315,17 @@ where
 {
     let service = service_fn(move |mut request: Request<Incoming>| {
         request.extensions_mut().insert(ConnectInfo(peer));
-        app.clone().oneshot(request)
+        let app = app.clone();
+        async move {
+            let mut response = app.oneshot(request).await?;
+            // Only this listener speaks TLS, so only its answers may ask the
+            // browser to insist on it; the plain listener stays plain.
+            response.headers_mut().insert(
+                hyper::header::STRICT_TRANSPORT_SECURITY,
+                hyper::header::HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+            );
+            Ok::<_, std::convert::Infallible>(response)
+        }
     });
     if let Err(error) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
         .serve_connection_with_upgrades(TokioIo::new(stream), service)

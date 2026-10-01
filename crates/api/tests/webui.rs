@@ -160,6 +160,10 @@ async fn directory_is_usable_public_only_and_escaped() {
     assert_eq!(r.status(), StatusCode::OK);
     assert_eq!(r.headers()["cache-control"], "no-store");
     assert_eq!(r.headers()["referrer-policy"], "strict-origin");
+    assert_eq!(
+        r.headers()["permissions-policy"],
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    );
     let html = text(r).await;
     assert!(html.contains("public.example.com"));
     assert!(!html.contains("private.example.com"));

@@ -485,6 +485,11 @@ async fn security_headers(request: Request, next: Next) -> Response {
         ("referrer-policy", "strict-origin"),
         ("x-content-type-options", "nosniff"),
         ("x-frame-options", "DENY"),
+        // No page uses a sensor, a camera or a payment handler.
+        (
+            "permissions-policy",
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        ),
     ] {
         r.headers_mut()
             .insert(axum::http::HeaderName::from_static(k), v.parse().unwrap());
