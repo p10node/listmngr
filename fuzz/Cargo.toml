@@ -1,0 +1,82 @@
+[package]
+name = "listmngr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "AGPL-3.0-or-later"
+description = "cargo-fuzz targets for listmngr's parsers; not part of the workspace"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "io-util", "time", "macros"] }
+listmngr-core = { path = "../crates/core" }
+listmngr-mail = { path = "../crates/mail" }
+listmngr-import = { path = "../crates/import" }
+listmngr-archive = { path = "../crates/archive" }
+
+[[bin]]
+name = "bounce_detect"
+path = "fuzz_targets/bounce_detect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mail_commands"
+path = "fuzz_targets/mail_commands.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lmtp_session"
+path = "fuzz_targets/lmtp_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "verp"
+path = "fuzz_targets/verp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "template_render"
+path = "fuzz_targets/template_render.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mime_filter"
+path = "fuzz_targets/mime_filter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pickle_read"
+path = "fuzz_targets/pickle_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mbox_read"
+path = "fuzz_targets/mbox_read.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1
+
+# Its own workspace: the root excludes `fuzz`, so the nightly-only build
+# never touches the workspace lock.
+[workspace]

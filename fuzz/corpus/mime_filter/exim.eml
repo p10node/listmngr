@@ -1,0 +1,20 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Mail delivery failed: returning message to sender
+Content-Type: text/plain
+
+This message was created automatically by mail delivery software.
+
+A message that you sent could not be delivered to one or more of its
+recipients. This is a permanent error. The following address(es) failed:
+
+  dave@example.net
+    (generated from list@example.invalid)
+    Unrouteable address
+  erin@example.org
+    mailbox is full
+
+------ This is a copy of the message, including all the headers. ------
+
+To: quoted@example.net

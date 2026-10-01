@@ -1,0 +1,17 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Returned mail: User unknown
+Content-Type: text/plain
+
+The original message was received at Mon, 1 Sep 2026 10:00:00 +0000
+from mx.example.invalid [192.0.2.25]
+
+   ----- The following addresses had permanent fatal errors -----
+<frank@example.net>
+    (reason: 550 5.1.1 User unknown)
+
+   ----- Transcript of session follows -----
+... while talking to mail.example.net.:
+>>> RCPT To:<frank@example.net>
+<<< 550 5.1.1 User unknown

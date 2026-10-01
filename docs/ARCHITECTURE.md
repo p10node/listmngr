@@ -1,5 +1,38 @@
 # Architecture
 
+## Fuzzing — bounded local acceptance verified
+
+`fuzz/` is a `cargo-fuzz` package (`listmngr-fuzz`, `publish = false`,
+its own `[workspace]`; the root `Cargo.toml` has `exclude = ["fuzz"]`)
+pinned to `nightly-2026-09-30` by `fuzz/rust-toolchain.toml`, depending
+on `listmngr-core`, `listmngr-mail`, `listmngr-import` and
+`listmngr-archive` by path, `libfuzzer-sys`, `arbitrary` (derive) and
+`tokio` (`rt`, `io-util`, `time`). Targets in `fuzz/fuzz_targets/`:
+`bounce_detect` (`bounce::detect`, `dsn::parse`, `dsn::parse_report`),
+`mail_commands` (`commands::parse`, `confirmation_token`,
+`allows_reply`), `lmtp_session` (a current-thread runtime in a
+`OnceLock`; `tokio::io::duplex`; the first byte picks `Protocol::Lmtp`
+or `Smtp`, the rest is written by a peer task that also drains the
+replies; `serve_session_as` under a five-second timeout against a
+`Handler` with a 64 KiB message limit, eight recipients, a 500 ms
+command timeout, `@example.invalid` recipients and `250` outcomes),
+`verp` (an `Arbitrary` struct of format, delimiter, list, recipient and
+local part through `validate`, `decode`, `encode` and a decode of the
+encoding), `template_render` (an `Arbitrary` template and up to 32
+values through `templates::expand`, with an upper bound on the output
+asserted), `mime_filter` (`mime_delete::apply` with
+`AlterMessages::default()` and an aggressive setting, `html_to_text`,
+`decode_entities`), `pickle_read` (`pickle::read`), `mbox_read`
+(`mbox::Reader` over a cursor, at most 64 messages, each through
+`prepare`). `fuzz/corpus/<target>/` seeds come from
+`crates/mail/tests/fixtures/bounces`, the threading mbox, the two 2.1
+pickles and hand-written session scripts. `scripts/fuzz.sh [seconds]`
+runs `cargo fuzz run <target> -- -max_total_time=<seconds>
+-rss_limit_mb=2048 -timeout=20` for every `cargo fuzz list` entry; CI's
+`fuzz` job (nightly via `dtolnay/rust-toolchain`, `cargo-fuzz@0.13.2`
+via `taiki-e/install-action`, the cache keyed on the `fuzz` workspace)
+runs it with sixty seconds.
+
 ## Phase 6 acceptance — bounded local acceptance verified
 
 `crates/api/src/compat.rs`: `routes()` registers, under `/archives` and

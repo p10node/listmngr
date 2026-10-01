@@ -1,0 +1,14 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: failure delivery
+Content-Type: text/plain
+
+Sorry, we were unable to deliver your message to the following address.
+
+<grace@yahoo.example>:
+554 delivery error: dd This user doesn't have a yahoo.example account
+
+--- Original message follows.
+
+To: unrelated@example.net
