@@ -4,6 +4,7 @@
 
 pub mod archive;
 pub mod autoresponse;
+pub mod backup;
 pub mod bans;
 pub mod blobs;
 pub mod bounce_maintenance;
@@ -277,6 +278,11 @@ impl Database {
     #[must_use]
     pub const fn blobs(&self) -> &blobs::BlobStore {
         &self.blobs
+    }
+    /// Whether the pool is `SQLite` rather than `PostgreSQL`.
+    #[must_use]
+    pub const fn is_sqlite(&self) -> bool {
+        self.sqlite
     }
     /// Carry `site.base_url` so cooked posts can advertise the archive.
     #[must_use]

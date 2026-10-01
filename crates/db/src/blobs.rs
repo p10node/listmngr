@@ -197,7 +197,7 @@ impl BlobStore {
     }
 
     /// The store's own copy, `None` when it has none (always for `db`).
-    async fn object(&self, key: &str) -> Result<Option<Vec<u8>>> {
+    pub(crate) async fn object(&self, key: &str) -> Result<Option<Vec<u8>>> {
         if !is_key(key) {
             return Ok(None);
         }
