@@ -125,6 +125,23 @@ jobs:
           TEST_PEBBLE_CHALLTESTSRV_BIN="$RUNNER_TEMP/pebble-challtestsrv-linux-amd64/linux/amd64/pebble-challtestsrv" \
             cargo test --locked -p listmngr --test web_acme -- --ignored --nocapture
 
+  fuzz:
+    # P7-FUZZ: every cargo-fuzz target for sixty seconds on the pinned
+    # nightly; a crash fails the job and lands in fuzz/artifacts.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, pinned 2026-09-04
+        with:
+          toolchain: nightly-2026-09-30
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+        with:
+          tool: cargo-fuzz@0.13.2
+      - run: scripts/fuzz.sh 60
+
   container:
     runs-on: ubuntu-24.04
     steps:

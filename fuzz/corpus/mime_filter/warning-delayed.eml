@@ -1,0 +1,16 @@
+From: MAILER-DAEMON@mx.example.net
+To: dev-bounces@example.invalid
+Message-ID: <b@mx.example.net>
+Subject: Delayed Mail (still being retried)
+Content-Type: text/plain
+
+This is the mail system at host mx.example.net.
+
+####################################################################
+# THIS IS A WARNING ONLY.  YOU DO NOT NEED TO RESEND YOUR MESSAGE. #
+####################################################################
+
+Your message could not be delivered for more than 4 hour(s).
+It will be retried until it is 5 day(s) old.
+
+<kate@example.net>: connect to mail.example.net[192.0.2.9]:25: Connection timed out

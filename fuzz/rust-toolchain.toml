@@ -1,0 +1,5 @@
+# cargo-fuzz needs a nightly for the sanitizer build; pinned, like the
+# stable toolchain of the workspace.
+[toolchain]
+channel = "nightly-2026-09-30"
+profile = "minimal"
