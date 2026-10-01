@@ -1,5 +1,59 @@
 # listmngr
 
+## Backup and restore (`P6-BACKUP`) — bounded local acceptance verified
+
+`listmngr backup <dir>` writes every table of the database as JSON lines
+with a manifest, and `listmngr restore <dir>` reads such a directory
+into an empty database migrated to the same schema — on either backend,
+in either direction:
+
+```sh
+listmngr --config /etc/listmngr/listmngr.toml backup /var/backups/listmngr/2026-10-01
+# … a new server, SQLite or PostgreSQL, `listmngr migrate` run and nothing else:
+listmngr --config /etc/listmngr/listmngr.toml migrate
+listmngr --config /etc/listmngr/listmngr.toml restore /var/backups/listmngr/2026-10-01
+```
+
+The backup is one read transaction (`REPEATABLE READ` on PostgreSQL) over
+every table the binary's migrations know; `manifest.json` records the
+format, the version, when, the database and message-store backends, the
+migration ledger (each version with its checksum) and each table's
+columns and row count, and `tables/<name>.jsonl` holds the rows, one
+JSON array per row in column order — `null`, booleans, integers, floats
+and strings as themselves, bytes as `{"b64": "…"}`. The manifest is
+written last, so an interrupted backup leaves no manifest and is
+refused. The bytes of every message are in the backup whatever
+`[message_store]` says: a row the `fs` or `s3` store keeps outside is
+read back through the store, and a missing object fails the backup
+rather than leave a hole. A directory that already holds a backup is
+refused.
+
+A restore refuses a backup of another format or of migrations this
+binary does not carry, a database not migrated to exactly that ledger,
+and a table with rows in it (the rows a migration seeds, the list styles
+and the subscription-rate counter, are replaced). It inserts the tables
+in the order the backup computed from the source's foreign keys, parents
+first, binding every value by the target column's type — a SQLite backup
+loads into PostgreSQL and the other way round — with every foreign key
+deferred to the commit (SQLite's `defer_foreign_keys`; on PostgreSQL the
+constraints are made deferrable for the transaction and put back before
+it ends), which is what Mailman's `users` ↔ `addresses` cycle needs.
+`message_blobs` rows go through the target's own store, so a backup from
+a site that kept bytes in the database restores into one that keeps
+them in a bucket, and vice versa. Everything is one transaction: a
+refused or failed restore leaves the database as it was.
+
+Limits: a backup is the database and the message bytes, not the
+configuration, secrets, the search index (`listmngr archive reindex`
+rebuilds it) or the Postfix maps (`listmngr aliases` regenerates them);
+it needs the same binary version on both sides (the ledger must match
+exactly); a restore wants an empty database, not a merge; rows are
+loaded a hundred per statement over one connection, fine for a site,
+slow for a very large archive; the acceptance is the test's own site
+(a domain, a list with settings, members, a queued and a held post, and
+the audit rows) round-tripped SQLite → PostgreSQL → SQLite, not a
+production-sized one.
+
 ## The message store (`P6-MESSAGE-STORE`) — bounded local acceptance verified
 
 Every message the server keeps — a post in a queue, a held message, a

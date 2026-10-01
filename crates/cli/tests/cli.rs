@@ -329,3 +329,69 @@ async fn members_sync_is_atomic_role_scoped_and_dry_run_has_zero_writes() {
         listmngr_core::MemberRole::Owner
     );
 }
+
+#[test]
+fn backup_and_restore_carry_a_site_between_two_sqlite_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let on = |name: &str| {
+        let url = format!("sqlite://{}?mode=rwc", dir.path().join(name).display());
+        move |args: &[&str]| {
+            let mut command = Command::cargo_bin("listmngr").unwrap();
+            command.env("LISTMNGR__DATABASE__URL", &url).args(args);
+            command
+        }
+    };
+    let source = on("source.db");
+    source(&["migrate"]).assert().success();
+    source(&["domains", "add", "example.com"])
+        .assert()
+        .success();
+    source(&[
+        "lists",
+        "create",
+        "dev.example.com",
+        "--display-name",
+        "Developers",
+    ])
+    .assert()
+    .success();
+    let backup = dir.path().join("backup");
+    source(&["backup", backup.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"database\":\"sqlite\""))
+        .stdout(predicate::str::contains("\"message_store\":\"db\""));
+    assert!(backup.join("manifest.json").is_file());
+    assert!(backup.join("tables").join("mailing_lists.jsonl").is_file());
+    // Into the same directory again: refused as invalid input (the
+    // detail is in the log, never on stderr).
+    source(&["backup", backup.to_str().unwrap()])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("error[CLI-VALIDATION]"));
+    let target = on("target.db");
+    // Not migrated yet: refused, and nothing is written.
+    target(&["restore", backup.to_str().unwrap()])
+        .assert()
+        .failure();
+    target(&["migrate"]).assert().success();
+    target(&["restore", backup.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"from\":\"sqlite\""));
+    target(&["domains", "ls"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("example.com"));
+    target(&["lists", "ls"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dev.example.com"));
+    // Once more into the same database: not empty, so invalid input.
+    target(&["restore", backup.to_str().unwrap()])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("error[CLI-VALIDATION]"));
+}

@@ -1,5 +1,47 @@
 # Architecture
 
+## Backup and restore — bounded local acceptance verified
+
+`crates/db/src/backup.rs`: `Manifest { format, listmngr, created_at,
+database, message_store, migrations: Vec<Migration { version,
+description, checksum (hex) }>, tables: Vec<TableEntry { name, columns:
+Vec<ColumnEntry { name, kind }>, rows, file }> }`. `backup(db, dir)`
+refuses a directory with a manifest, begins a transaction (`SET
+TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY` on PostgreSQL),
+reads the ledger (`SELECT version, description, checksum FROM
+_sqlx_migrations WHERE success`) and refuses one that is not the
+embedded `MIGRATOR`'s, lists the base tables (`sqlite_master`, or
+`pg_class` joined to `pg_namespace` for `current_schema()`, the
+migrator's and SQLite's own left out), reads the foreign keys
+(`pragma_foreign_key_list`, or `pg_constraint` with `contype = 'f'`),
+orders the tables parents first (Kahn's algorithm; the tables of a cycle
+follow in name order), and streams each `SELECT * FROM t` with `fetch`
+into `tables/<t>.jsonl`, typing every value by the value itself
+(`try_get_raw`, `AnyValueRef::type_info().kind()` — a `BYTEA` column has
+no type SQLite's driver knows) and recording the columns (from the first
+row, or `describe` for an empty table); `message_blobs` rows whose `raw`
+is empty are filled from `BlobStore::object`. The manifest is written
+last. `restore(db, dir)` reads and checks the manifest (`format`, the
+embedded ledger), begins a write transaction, checks the target's ledger
+and tables, counts every table (a seeded one — `list_styles`,
+`subscription_rate` — is emptied, any other with rows refuses), defers
+the foreign keys (`PRAGMA defer_foreign_keys = ON`; on PostgreSQL every
+non-deferrable foreign key is `ALTER CONSTRAINT … DEFERRABLE INITIALLY
+DEFERRED` and `SET CONSTRAINTS ALL DEFERRED`), loads each table with
+`describe` for the target column kinds and `INSERT … VALUES (…),(…)` in
+batches of at most 100 rows or 2000 binds, each value bound by the
+target kind (`bind`: a `null` as the typed `None`, a number as `i64` or
+`f64` or a `bool` for a boolean column, a string as text, `{"b64"}` as
+bytes; an untyped target takes the value as it is), `message_blobs`
+rows through `BlobStore::put_tx` when the key is the bytes' hash, then
+`SET CONSTRAINTS ALL IMMEDIATE` and the constraints put back `NOT
+DEFERRABLE`, and commits; a row count that disagrees with the manifest
+is an error and the transaction is lost. `Database::is_sqlite()` and
+`BlobStore::object` (now `pub(crate)`) serve it; `futures` became a
+dependency of `listmngr-db`. `crates/cli/src/backup.rs` runs the two
+and prints a JSON summary; `listmngr backup <dir>` and `listmngr restore
+<dir>` are top-level commands.
+
 ## The message store — bounded local acceptance verified
 
 `MessageStoreConfig` (`[message_store]`: `backend` = `db` | `fs` | `s3`,

@@ -2,6 +2,7 @@
 
 mod aliases;
 mod archive;
+mod backup;
 mod bounce;
 mod digests;
 mod doctor;
@@ -120,6 +121,16 @@ enum Command {
     MessageStore {
         #[command(subcommand)]
         command: message_store::Command,
+    },
+    /// Write every table as JSON lines, with a manifest, into a directory
+    /// that holds no backup yet.
+    Backup {
+        dir: std::path::PathBuf,
+    },
+    /// Read a backup into this database, which must be migrated to the
+    /// backup's schema and empty.
+    Restore {
+        dir: std::path::PathBuf,
     },
     /// Import a Mailman 3 site over its REST API: its domains, lists and
     /// their settings, rosters with each member's own preferences, bans
@@ -425,6 +436,8 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Nntp { command } => nntp::run(&db, &config, command).await?,
         Command::Webhooks { command } => webhooks::run(&db, command).await?,
         Command::MessageStore { command } => message_store::run(&db, command).await?,
+        Command::Backup { dir } => backup::backup(&db, &dir).await?,
+        Command::Restore { dir } => backup::restore(&db, &dir).await?,
         Command::Import3(options) => import3::run(&db, options).await?,
         Command::Import21 {
             list_id,
