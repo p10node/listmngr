@@ -1489,7 +1489,12 @@ impl MtaConfig {
 config_struct!(WebTlsConfig {
     listen: Option<String> = None,
     cert_file: Option<PathBuf> = None,
-    key_file: Option<PathBuf> = None
+    key_file: Option<PathBuf> = None,
+    acme_domains: Vec<String> = Vec::new(),
+    acme_contact: Option<String> = None,
+    acme_directory_url: String = "https://acme-v02.api.letsencrypt.org/directory".into(),
+    acme_cache_dir: Option<PathBuf> = None,
+    acme_ca_file: Option<PathBuf> = None
 });
 
 impl WebTlsConfig {
@@ -1499,25 +1504,30 @@ impl WebTlsConfig {
         self.listen.is_some()
     }
 
-    /// The `[web] tls` invariants `Config::load` enforces.
+    /// Whether the certificate is ordered from an ACME directory rather
+    /// than read from `cert_file`.
+    #[must_use]
+    pub const fn acme(&self) -> bool {
+        !self.acme_domains.is_empty()
+    }
+
+    /// The `[web] tls` invariants `Config::load` enforces: `listen` with
+    /// either the two files or `acme_domains`, never both.
     fn validate(&self, plain_listen: &str) -> Result<()> {
-        let set = [
-            self.listen.is_some(),
-            self.cert_file.is_some(),
-            self.key_file.is_some(),
-        ];
-        if set.iter().all(|value| !value) {
+        let own = self.cert_file.is_some() || self.key_file.is_some();
+        let acme = self.acme()
+            || self.acme_contact.is_some()
+            || self.acme_cache_dir.is_some()
+            || self.acme_ca_file.is_some();
+        let Some(listen) = self.listen.as_deref() else {
+            if own || acme {
+                return Err(Error::Validation(
+                    "web.tls.listen is needed with cert_file, key_file or acme_domains".into(),
+                ));
+            }
             return Ok(());
-        }
-        if !set.iter().all(|value| *value) {
-            return Err(Error::Validation(
-                "web.tls needs listen, cert_file and key_file together".into(),
-            ));
-        }
-        let listen: std::net::SocketAddr = self
-            .listen
-            .as_deref()
-            .unwrap_or_default()
+        };
+        let listen: std::net::SocketAddr = listen
             .parse()
             .map_err(|_| Error::Validation("web.tls.listen must be an address:port".into()))?;
         if plain_listen.parse::<std::net::SocketAddr>().ok() == Some(listen) {
@@ -1525,16 +1535,34 @@ impl WebTlsConfig {
                 "web.tls.listen must differ from web.listen".into(),
             ));
         }
+        match (own, self.acme()) {
+            (true, true) => Err(Error::Validation(
+                "web.tls.cert_file/key_file and web.tls.acme_domains are exclusive".into(),
+            )),
+            (false, false) => Err(Error::Validation(
+                "web.tls.listen needs cert_file and key_file, or acme_domains".into(),
+            )),
+            (true, false) if acme => Err(Error::Validation(
+                "web.tls.acme_* settings need web.tls.acme_domains".into(),
+            )),
+            (true, false) => self.validate_own_files(),
+            (false, true) => self.validate_acme(),
+        }
+    }
+
+    /// `cert_file` and `key_file` together, present, regular, the key
+    /// owner-only.
+    fn validate_own_files(&self) -> Result<()> {
+        if self.cert_file.is_none() || self.key_file.is_none() {
+            return Err(Error::Validation(
+                "web.tls needs cert_file and key_file together".into(),
+            ));
+        }
         for (setting, path) in [
             ("web.tls.cert_file", &self.cert_file),
             ("web.tls.key_file", &self.key_file),
         ] {
-            let path = path.as_deref().unwrap_or_else(|| Path::new(""));
-            let metadata = std::fs::metadata(path)
-                .map_err(|_| Error::Validation(format!("cannot read {setting}")))?;
-            if !metadata.is_file() {
-                return Err(Error::Validation(format!("{setting} is not a file")));
-            }
+            regular_file(setting, path.as_deref())?;
         }
         #[cfg(unix)]
         {
@@ -1551,6 +1579,70 @@ impl WebTlsConfig {
         }
         Ok(())
     }
+
+    /// Lowercase host names without wildcards (TLS-ALPN-01 cannot
+    /// validate one), an `https` directory, a cache directory, a contact
+    /// that is a bare address, a CA file that exists.
+    fn validate_acme(&self) -> Result<()> {
+        for domain in &self.acme_domains {
+            let plain = !domain.is_empty()
+                && domain.len() <= 253
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+                && domain.bytes().all(|b| {
+                    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.'
+                });
+            if !plain {
+                return Err(Error::Validation(format!(
+                    "web.tls.acme_domains: {domain:?} is not a lowercase host name (no wildcards)"
+                )));
+            }
+        }
+        if !self.acme_directory_url.starts_with("https://") {
+            return Err(Error::Validation(
+                "web.tls.acme_directory_url must be an https URL".into(),
+            ));
+        }
+        match &self.acme_cache_dir {
+            None => {
+                return Err(Error::Validation(
+                    "web.tls.acme_domains needs web.tls.acme_cache_dir".into(),
+                ));
+            }
+            Some(dir) => {
+                if let Ok(metadata) = std::fs::metadata(dir)
+                    && !metadata.is_dir()
+                {
+                    return Err(Error::Validation(
+                        "web.tls.acme_cache_dir is not a directory".into(),
+                    ));
+                }
+            }
+        }
+        if let Some(contact) = &self.acme_contact
+            && (!contact.contains('@')
+                || contact.contains(':')
+                || contact.chars().any(char::is_whitespace))
+        {
+            return Err(Error::Validation(
+                "web.tls.acme_contact must be a bare mail address (no mailto:)".into(),
+            ));
+        }
+        if self.acme_ca_file.is_some() {
+            regular_file("web.tls.acme_ca_file", self.acme_ca_file.as_deref())?;
+        }
+        Ok(())
+    }
+}
+
+/// `setting` names an existing regular file.
+fn regular_file(setting: &str, path: Option<&Path>) -> Result<()> {
+    let metadata = std::fs::metadata(path.unwrap_or_else(|| Path::new("")))
+        .map_err(|_| Error::Validation(format!("cannot read {setting}")))?;
+    if !metadata.is_file() {
+        return Err(Error::Validation(format!("{setting} is not a file")));
+    }
+    Ok(())
 }
 
 config_struct!(WebConfig { listen: String = "127.0.0.1:8000".into(), trusted_proxies: Vec<IpNet> = vec!["127.0.0.1/32".parse().expect("valid network")], session_idle: String = "12h".into(), session_absolute: String = "7d".into(), signup: bool = true, oidc: Vec<OidcProviderConfig> = Vec::new(), tls: WebTlsConfig = WebTlsConfig::default() });

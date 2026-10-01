@@ -12,6 +12,7 @@
 - News gateway (`P6-NNTP-GATENEWS-FIX`): a poll whose session broke while reading an article — the server hung up or timed out — used to pass the article and lose it; it now stops with the watermark where it was, and the next poll reads the article again. Two pollers on one list used to queue the same article twice; the watermark now moves by compare-and-set in the same transaction as the queued article, so the second poller stops. An article whose header block cannot be read no longer blocks the list.
 
 ### Added
+- Automatic certificates (`P6-WEB-ACME`): `[web] tls.acme_domains`, `acme_contact`, `acme_directory_url`, `acme_cache_dir` and `acme_ca_file` order the TLS listener's certificate from an ACME directory over TLS-ALPN-01 on the listener itself, cache it owner-only, deploy the cached one at start and renew it in the background without a restart.
 - TLS for the web (`P6-WEB-TLS`): `[web] tls.listen`, `cert_file` and `key_file` add a rustls listener offering HTTP/2 and HTTP/1.1 beside the plain one, checked at load and bound before the server starts.
 - Inbound SMTP, experimental (`P6-INBOUND-SMTP`): `[mta] inbound_smtp_listen` adds a listener that takes mail for the lists' addresses over plain SMTP — `EHLO`, one `DATA` reply — with the same handler and limits as LMTP and nothing relayed; no `STARTTLS` or `AUTH`.
 - HyperKitty archiver (`P6-ARCHIVER-HYPERKITTY`): a list can switch on `hyperkitty`, and the server posts each archived copy to `[archive] archivers.hyperkitty_url` with `hyperkitty_api_key` as `mailman-hyperkitty` does.
