@@ -98,6 +98,33 @@ jobs:
           WEBUI_LIGHTHOUSE="$RUNNER_TEMP/lighthouse/node_modules/.bin/lighthouse" \
             cargo test --locked -p listmngr-api --test webui chromium_acceptance_journey -- --ignored --nocapture
 
+  acme:
+    # P6-WEB-ACME: a certificate ordered from Pebble (Let's Encrypt's ACME
+    # test server, resolving through its challenge DNS) over TLS-ALPN-01 on
+    # the TLS listener itself, cached owner-only and reused at the next start.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, pinned 2026-09-04
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Pinned Pebble and pebble-challtestsrv
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/pebble.tar.gz" https://github.com/letsencrypt/pebble/releases/download/v2.10.1/pebble-linux-amd64.tar.gz
+          curl -sSfLo "$RUNNER_TEMP/challtestsrv.tar.gz" https://github.com/letsencrypt/pebble/releases/download/v2.10.1/pebble-challtestsrv-linux-amd64.tar.gz
+          printf '%s\n' \
+            "4f2fcb5bca8c85c9cf73ad140fccfc0d2be40bd81ab99879c79b7b8a0b4f70ed  $RUNNER_TEMP/pebble.tar.gz" \
+            "e93a5aa25ecdf3af2f9fbb2de32b0173e64a2eae81002a4ccfe35fa6f4f60b92  $RUNNER_TEMP/challtestsrv.tar.gz" \
+            | sha256sum -c
+          tar -xzf "$RUNNER_TEMP/pebble.tar.gz" -C "$RUNNER_TEMP"
+          tar -xzf "$RUNNER_TEMP/challtestsrv.tar.gz" -C "$RUNNER_TEMP"
+      - name: Certificate ordered over TLS-ALPN-01, cached and reused
+        run: |
+          TEST_PEBBLE_BIN="$RUNNER_TEMP/pebble-linux-amd64/linux/amd64/pebble" \
+          TEST_PEBBLE_CHALLTESTSRV_BIN="$RUNNER_TEMP/pebble-challtestsrv-linux-amd64/linux/amd64/pebble-challtestsrv" \
+            cargo test --locked -p listmngr --test web_acme -- --ignored --nocapture
+
   container:
     runs-on: ubuntu-24.04
     steps:

@@ -7,7 +7,7 @@
 # only needs to be disposable, never empty. The ignored tests that
 # need other fixtures (a browser, `postmap`, a benchmark, Mailman's own
 # `testing/` directory, a running Mailman 3 core, a live HyperKitty
-# database) are skipped by name.
+# database, a Pebble release) are skipped by name.
 set -eu
 
 : "${TEST_POSTGRES_URL:?TEST_POSTGRES_URL must point to a disposable PostgreSQL server}"
@@ -33,4 +33,5 @@ exec cargo test --locked --workspace --all-targets -- --ignored \
   --skip import21_reads_mailman3s_own_fixture \
   --skip import3_reads_a_real_mailman3_core \
   --skip import3_reads_a_real_cores_database \
-  --skip hyperkitty_reads_a_real_database
+  --skip hyperkitty_reads_a_real_database \
+  --skip the_certificate_is_ordered_from_pebble_and_the_cached_one_reused

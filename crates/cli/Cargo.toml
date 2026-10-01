@@ -17,6 +17,9 @@ hickory-resolver = "=0.26.2"
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["server", "server-auto", "tokio", "http1", "http2", "service"] }
 tokio-rustls = { version = "=0.26.5", default-features = false, features = ["ring", "tls12"] }
+rustls-acme = { version = "=0.15.4", default-features = false, features = ["ring", "tls12", "webpki-roots"] }
+webpki-roots = "=1.0.9"
+futures.workspace = true
 tower.workspace = true
 flate2.workspace = true
 anyhow.workspace = true
