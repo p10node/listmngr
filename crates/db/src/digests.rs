@@ -5,7 +5,6 @@ use crate::mail_queue::{
 use crate::{AuditContext, Database, db_error};
 use listmngr_core::{Error, ListId, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -412,9 +411,8 @@ impl<'a> DigestRepo<'a> {
         .await
         .map_err(db_error)?;
         for output in outputs {
-            let key = format!("{:x}", Sha256::digest(&output.raw));
+            let key = self.db.blobs().put_tx(&mut tx, &output.raw).await?;
             let message = MessageId(Uuid::now_v7());
-            sqlx::query("INSERT INTO message_blobs(store_key,raw) VALUES($1,$2) ON CONFLICT(store_key) DO NOTHING").bind(&key).bind(&output.raw).execute(&mut *tx).await.map_err(db_error)?;
             sqlx::query("INSERT INTO messages(id,store_key,external_id,context,created_at) VALUES($1,$2,$3,$4,$5)").bind(message.0.to_string()).bind(key).bind(&issue_id).bind(serde_json::json!({"list_id":list,"kind":"digest"}).to_string()).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
             let job = insert_child_job(
                 &mut tx,

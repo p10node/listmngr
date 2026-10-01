@@ -131,6 +131,7 @@ impl SiteNoticeRepo<'_> {
         let context = serde_json::json!({"site": true, "site_mail_host": host}).to_string();
         crate::workflows::enqueue_raw_notice(
             tx,
+            self.db,
             &context,
             &recipient.original_email,
             &id,

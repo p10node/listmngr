@@ -8,6 +8,7 @@ mod doctor;
 mod errors;
 mod import21;
 mod import3;
+mod message_store;
 mod nntp;
 mod notify;
 mod plugins;
@@ -114,6 +115,11 @@ enum Command {
     Webhooks {
         #[command(subcommand)]
         command: webhooks::Command,
+    },
+    /// The message store behind `message_blobs`: migrate and check.
+    MessageStore {
+        #[command(subcommand)]
+        command: message_store::Command,
     },
     /// Import a Mailman 3 site over its REST API: its domains, lists and
     /// their settings, rosters with each member's own preferences, bans
@@ -319,9 +325,10 @@ async fn run() -> Result<()> {
         Command::Version => println!("listmngr {}", env!("CARGO_PKG_VERSION")),
         Command::Conf { key } => print_config(&config, key.as_deref())?,
         Command::Info => println!(
-            "listmngr {}\ndatabase: {}\nweb: {}\napi: {}",
+            "listmngr {}\ndatabase: {}\nmessage store: {}\nweb: {}\napi: {}",
             env!("CARGO_PKG_VERSION"),
             config.database_backend(),
+            config.message_store.backend,
             config.web.listen,
             config.api.listen
         ),
@@ -385,6 +392,9 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
     .with_default_language(&config.site.default_language)
     .with_base_url(&config.site.base_url)
     .with_webhooks(config.webhooks.signing_key(), config.webhooks.allow_http)
+    .with_message_store(listmngr_db::blobs::BlobStore::from_config(
+        &config.message_store,
+    )?)
     .with_mail_archive_address(&config.archive.archivers.mail_archive_address)
     .with_site(&config.site.name, &config.site.site_owner)
     .with_bounce_probes(
@@ -414,6 +424,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Archive { command } => archive::run(&db, &config, command).await?,
         Command::Nntp { command } => nntp::run(&db, &config, command).await?,
         Command::Webhooks { command } => webhooks::run(&db, command).await?,
+        Command::MessageStore { command } => message_store::run(&db, command).await?,
         Command::Import3(options) => import3::run(&db, options).await?,
         Command::Import21 {
             list_id,

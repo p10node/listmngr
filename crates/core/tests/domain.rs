@@ -540,3 +540,105 @@ fn web_tls_acme_settings_are_checked_and_exclude_own_files() {
     );
     assert!(!Config::default().web.tls.acme());
 }
+
+#[test]
+fn message_store_settings_are_checked_and_the_s3_secret_stays_private() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    let secret = dir.path().join("s3.secret");
+    std::fs::write(&secret, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let load = |body: String| {
+        std::fs::write(&path, body).unwrap();
+        Config::load(Some(&path))
+    };
+    let config = load(String::new()).unwrap();
+    assert_eq!(
+        config.message_store.backend, "db",
+        "the row holds the bytes by default"
+    );
+    assert!(config.message_store.s3_secret_access_key().is_none());
+    assert!(load("[message_store]\nbackend = \"tape\"\n".into()).is_err());
+    assert!(load("[message_store]\nbackend = \"fs\"\npath = \" \"\n".into()).is_err());
+    assert!(
+        load("[message_store]\nbackend = \"fs\"\n".into()).is_ok(),
+        "fs with the default path"
+    );
+    let s3 = |extra: &str| {
+        format!(
+            "[message_store]\nbackend = \"s3\"\ns3_access_key_id = \"AKIAIOSFODNN7EXAMPLE\"\ns3_secret_access_key_file = {secret:?}\n{extra}"
+        )
+    };
+    assert!(load(s3("")).is_err(), "a bucket is needed");
+    assert!(
+        load(s3("s3_bucket = \"Mail\"\n")).is_err(),
+        "a bucket name is lowercase"
+    );
+    assert!(load(s3("s3_bucket = \"mail\"\ns3_region = \"\"\n")).is_err());
+    assert!(
+        load(s3(
+            "s3_bucket = \"mail\"\ns3_endpoint = \"s3.example.invalid\"\n"
+        ))
+        .is_err(),
+        "an endpoint has a scheme"
+    );
+    assert!(
+        load(s3(
+            "s3_bucket = \"mail\"\ns3_endpoint = \"https://s3.example.invalid/x\"\n"
+        ))
+        .is_err(),
+        "an endpoint has no path"
+    );
+    assert!(
+        load("[message_store]\nbackend = \"s3\"\ns3_bucket = \"mail\"\n".into()).is_err(),
+        "credentials are needed"
+    );
+    assert!(
+        load(format!(
+            "[message_store]\nbackend = \"s3\"\ns3_bucket = \"mail\"\ns3_secret_access_key_file = {secret:?}\n"
+        ))
+        .is_err(),
+        "the access key id too"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(
+            load(s3("s3_bucket = \"mail\"\n")).is_err(),
+            "a secret file is owner-only"
+        );
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let config = load(s3(
+        "s3_bucket = \"mail\"\ns3_region = \"eu-west-1\"\ns3_endpoint = \"https://s3.example.invalid:9000\"\ns3_prefix = \"messages/\"\n",
+    ))
+    .unwrap();
+    assert_eq!(
+        config.message_store.s3_secret_access_key(),
+        Some("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+    );
+    assert_eq!(config.message_store.s3_prefix, "messages/");
+    let json = config.redacted_json();
+    assert!(json["message_store"].get("s3_secret_access_key").is_none());
+    assert!(
+        json["message_store"]
+            .get("s3_secret_access_key_file")
+            .is_none()
+    );
+    assert!(!json.to_string().contains("wJalr"), "{json}");
+    assert_eq!(json["message_store"]["s3_bucket"], "mail");
+    let config = load(
+        "[message_store]\nbackend = \"s3\"\ns3_bucket = \"mail\"\ns3_access_key_id = \"AKIAIOSFODNN7EXAMPLE\"\ns3_secret_access_key = \"inline-secret\"\n".into(),
+    )
+    .unwrap();
+    assert_eq!(
+        config.message_store.s3_secret_access_key(),
+        Some("inline-secret")
+    );
+    assert!(!config.redacted_json().to_string().contains("inline-secret"));
+}

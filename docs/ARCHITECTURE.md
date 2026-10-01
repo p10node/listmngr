@@ -1,5 +1,54 @@
 # Architecture
 
+## The message store — bounded local acceptance verified
+
+`MessageStoreConfig` (`[message_store]`: `backend` = `db` | `fs` | `s3`,
+`path`, `s3_bucket`, `s3_region`, `s3_endpoint`, `s3_prefix`,
+`s3_access_key_id`, `s3_secret_access_key` or `_file`; the default is
+`db`, which is what every version so far did — the old `fs` default was
+never honoured), `resolve()` in `Config::load` (a known backend; a path
+for `fs`; for `s3` a lowercase bucket name, a region, an
+`http(s)://host[:port]` endpoint, a prefix without a leading slash, an
+access key id and the secret inline or from an owner-only file through
+`read_secret_file`), the secret removed from `redacted_json`.
+`crates/db/src/blobs.rs`: `BlobStore` (`Db`, `Fs(root)`, `S3(Arc<S3>)`),
+`key(raw)` = SHA-256 hex, `put_tx(tx, raw)` — the object first (an
+owner-only temporary file renamed into place, or an S3 `PUT`), then
+`INSERT … ON CONFLICT DO NOTHING` with an empty `raw`; the `db` store's
+conflict clause refills a row found emptied — `get(executor, key)` (the
+row's bytes when it holds any, else the store's object, else
+`Error::Database`), `sweep_orphans(db, now_ms)` (fs: files named by a
+key in their `aa/bb` directory with an mtime older than
+`ORPHAN_GRACE_MS`; s3: `ListObjectsV2` entries under the prefix whose
+`LastModified` is; keys looked up in chunks of 100 with `IN (…)`, the
+unreferenced removed), `migrate_rows(db)` (batches of rows with
+`length(raw) > 0`: object written, then `raw` set empty) and `check(db)`
+→ `CheckReport { rows, in_rows, in_store, missing }`. `blobs::sigv4`:
+`canonical_uri` (segments encoded once), `canonical_query` (sorted,
+encoded), `sign(credentials, region, method, path, query, headers,
+payload_hash, at)` → `Signed { authorization, canonical_request,
+string_to_sign }`, checked against the four worked examples of AWS's
+"Signature Calculations for the Authorization Header". `blobs::s3`: `S3`
+over `reqwest` (30 s timeout, no redirects, webpki roots), `send` signing
+`host`, `x-amz-content-sha256` and `x-amz-date`; `put`, `get`, `exists`
+(`HEAD`), `delete`, `list` (paged by `continuation-token`; the XML read
+by a small element scanner with entity unescaping); a refusal is
+`Error::Database("message store: s3 <op> answered <status> <Code>")`.
+`Database` carries the store (`with_message_store`, `blobs()`; `db` by
+default) and every former `message_blobs` reader and writer goes through
+it: `mail_queue::enqueue_tx(store, …)`, `MailQueueRepo::message`,
+`moderation::rejection_notice` and `held_recipients_tx(tx, db, …)`,
+`browser_held_queue` (the bytes fetched and truncated to 64 KiB in Rust
+rather than `substr(raw)`), `workflows::original_bytes` for the two
+forwards, `enqueue_notice`/`enqueue_notice_from`/`enqueue_raw_notice`
+(now taking `db`), `hold_imported_with_context`, the digest publisher
+and the usenet gateway. `TaskRepo::sweep` ends with `sweep_orphans`,
+reported as `collected_blobs` and audited as `task.sweep` on `blobs`.
+The CLI wires `BlobStore::from_config` into `run_database`, prints the
+backend in `info`, and `listmngr message-store migrate|check` call
+`migrate_rows` and `check`. `reqwest` became a dependency of
+`listmngr-db`, `axum` a dev-dependency of it for the fake S3.
+
 ## Automatic certificates — bounded local acceptance verified
 
 `WebTlsConfig` gained `acme_domains: Vec<String>`, `acme_contact`,

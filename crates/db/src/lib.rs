@@ -5,6 +5,7 @@
 pub mod archive;
 pub mod autoresponse;
 pub mod bans;
+pub mod blobs;
 pub mod bounce_maintenance;
 pub mod bounce_processing;
 pub mod bounces;
@@ -133,6 +134,8 @@ where
 #[derive(Debug, Clone)]
 pub struct Database {
     pool: AnyPool,
+    /// `[message_store]`: where the bytes behind `message_blobs` live.
+    blobs: blobs::BlobStore,
     argon2: Argon2Config,
     password_min_score: u8,
     /// `site.default_language`: the last resort when neither a recipient nor
@@ -214,6 +217,7 @@ impl Database {
         let pool = options.connect(url).await.map_err(db_error)?;
         Ok(Self {
             pool,
+            blobs: blobs::BlobStore::db(),
             sqlite,
             argon2: security.argon2.clone(),
             password_min_score: security.password_min_score,
@@ -262,6 +266,17 @@ impl Database {
     #[must_use]
     pub fn default_language(&self) -> &str {
         &self.default_language
+    }
+    /// Carry `[message_store]`: where message bytes are kept.
+    #[must_use]
+    pub fn with_message_store(mut self, store: blobs::BlobStore) -> Self {
+        self.blobs = store;
+        self
+    }
+    /// The message store.
+    #[must_use]
+    pub const fn blobs(&self) -> &blobs::BlobStore {
+        &self.blobs
     }
     /// Carry `site.base_url` so cooked posts can advertise the archive.
     #[must_use]
