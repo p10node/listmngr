@@ -994,12 +994,24 @@ P5-SEARCH đã thêm index tantivy, P5-UI các trang overview/threads/sender/fee
 
 ### Phase 7 — Hardening & 1.0 (M)
 
-- [ ] Security review theo checklist §5 + external review nếu có; fuzz (LMTP parser, bounce detectors, VERP, template placeholders, mime-delete) `cargo-fuzz` 24h/target
-- [ ] Load test: 10k members list, 1k posts/h; đo queue latency; tune `max_recipients`, pool
-- [ ] Chaos: kill runner giữa job, DB restart, MTA down → không mất mail, không double-deliver (idempotency key per job)
-- [ ] Docs site (mdBook): install, migrate, admin guide, API, ops runbook
-- [ ] Release: cross-compile (linux amd64/arm64, macOS), deb/rpm, Docker multi-arch, Helm chart, SBOM + cosign, upgrade path & DB migration policy (backward-compatible N-1)
-- [ ] 1.0 tag
+Mục tiêu gốc (giữ để đối chiếu):
+
+- Security review theo checklist §5 + external review nếu có; fuzz (LMTP parser, bounce detectors, VERP, template placeholders, mime-delete) `cargo-fuzz` 24h/target
+- Load test: 10k members list, 1k posts/h; đo queue latency; tune `max_recipients`, pool
+- Chaos: kill runner giữa job, DB restart, MTA down → không mất mail, không double-deliver (idempotency key per job)
+- Docs site (mdBook): install, migrate, admin guide, API, ops runbook
+- Release: cross-compile (linux amd64/arm64, macOS), deb/rpm, Docker multi-arch, Helm chart, SBOM + cosign, upgrade path & DB migration policy (backward-compatible N-1)
+- 1.0 tag
+
+Tách thành work package (kế hoạch 2026-10-01, một ID một nhánh, làm theo thứ tự này; mỗi ID có ledger row với lệnh và số liệu thật, và ghi rõ phần "mục tiêu vận hành" không chạy được trọn trong một phiên):
+
+- [ ] **P7-FUZZ** (M): thư mục `fuzz/` (cargo-fuzz, nightly pin trong `fuzz/rust-toolchain.toml`) với target trên API thuần không I/O: `lmtp_session` (phiên LMTP/SMTP trên `tokio::io::duplex`, handler giả), `bounce_detect` (bộ phát hiện bounce trên message bytes), `verp_decode`, `template_render` (placeholders + catalog), `mime_filter` (content filtering / mime-delete), `pickle_read` (reader pickle của `import21`), `mbox_read`; corpus seed từ fixture trong repo; `scripts/fuzz.sh <giây/target>`; CI job `fuzz` chạy mỗi target `-max_total_time=60`; local mỗi target chạy ≥ 10 phút, ghi số exec/s và crash; crash nào tìm thấy → sửa + regression test trong cùng ID. Deviation ghi sẵn: 24h/target là lịch vận hành (`scripts/fuzz.sh 86400`), không chạy trong phiên.
+- [ ] **P7-SECURITY-REVIEW** (M): rà từng mục §5.1–§5.4 → `docs/SECURITY_REVIEW.md`: bảng mục / trạng thái / bằng chứng (test, ID ledger) / lỗ hổng tìm thấy; mọi finding sửa trong cùng ID với test; rà thêm: SSRF (webhooks, archiver HyperKitty, ACME directory), path traversal và symlink ở `fs` store/backup dir, SQL động (backup/blobs `IN (...)`, tên bảng từ catalog), giới hạn kích thước (LMTP, mbox import, backup line), timing (so sánh token/secret), header bảo mật web (CSP/HSTS/`Referrer-Policy`), redirect mở (compat/login `next`), rate limit, log không lộ secret. External review: ghi là chưa có.
+- [ ] **P7-CHAOS** (M): `crates/cli/tests/chaos.rs` trên binary thật + SMTP sink: (1) kill runner giữa job (sau claim, trước ack) → lease hết hạn, runner mới claim lại, sink nhận đúng một bản mỗi recipient (idempotency per job/recipient); (2) DB restart giữa chừng (SQLite: file bị khoá/giải khoá; PG contract: `pg_terminate_backend` hoặc restart pool) → job không mất, không nhân đôi; (3) MTA down → retry/backoff, giao khi MTA lên; đối chiếu `queue_recovery.rs` đã có và chỉ bổ sung phần thiếu.
+- [ ] **P7-LOAD** (M): `crates/cli/tests/load.rs` (`#[ignore]` benchmark): list 10k member, bơm post qua LMTP → SMTP sink; đo throughput và queue latency p50/p95 (`created_at` → sink nhận); chạy local bounded (10k member, 100 post) và ghi số thật; `docs/OPERATIONS.md` phần tuning (`max_recipients`, `database.max_connections`, concurrency runner, `finished_job_retention`); mục tiêu 1k post/giờ ghi là chỉ tiêu, có đo được hay không ghi rõ.
+- [ ] **P7-DOCS-SITE** (M): mdBook tại `docs/book/` (`book.toml`, `SUMMARY.md`; chương: Giới thiệu, Cài đặt (binary/Docker/systemd/Helm), Cấu hình (mọi section config), Di chuyển từ Mailman (từ `MIGRATION.md`), Vận hành (backup/restore, doctor, tasks, message store, TLS/ACME), Quản trị (web UI theo vai trò), API (`/api/v1`, `/3.1`, webhooks), Bảo mật (từ `SECURITY.md`/review), Kiến trúc (tóm tắt), Changelog); `mdbook` pin, `mdbook build` + link check trong CI (`docs` job); nội dung lấy từ README/ARCHITECTURE/MIGRATION hiện có, README giữ nguyên vai trò ledger-prose.
+- [ ] **P7-RELEASE** (L): `[profile.release]` (lto = "thin", codegen-units = 1, strip, debug = "line-tables-only"?) đo kích thước/thời gian; `.github/workflows/release.yml` khi tag `v*`: build `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` (cross/zigbuild), `aarch64-apple-darwin`, `x86_64-apple-darwin`; `cargo-deb` + `cargo-generate-rpm` (systemd unit, user `listmngr`, `/etc/listmngr`, `/var/lib/listmngr`); Docker multi-arch buildx từ `deploy/Dockerfile` (tag + digest); Helm chart `deploy/helm/listmngr` (Deployment, Service, Secret/ConfigMap, PVC, probes `/healthz` `/readyz`, PodSecurity read-only/non-root) + `helm lint` + `helm template` test; SBOM CycloneDX (`cargo cyclonedx`) + `cosign sign-blob` keyless + `SHA256SUMS`; `docs/UPGRADE.md`: chính sách migration N-1 (schema thêm, không xoá/đổi nghĩa trong 1 minor; `migrate` trước khi lên binary mới; rollback = `backup` trước, `restore` vào bản cũ), kiểm tra `doctor` trước/sau. Local verify bounded: `cargo build --release` host, `cargo zigbuild --target x86_64-unknown-linux-musl` nếu được, `helm lint`, `docker build` nếu daemon chạy; phần cần GitHub runner (push image, cosign keyless OIDC) ghi là chạy ở CI.
+- [ ] **P7-1.0** (S): bump `1.0.0` toàn workspace (`Cargo.toml`, lock), `CHANGELOG.md` `## [1.0.0] - <ngày>` gom Unreleased, README/`CLAUDE.md`/§10 cập nhật câu "0.1.0 = unreleased", bảng phase trong ledger đóng Phase 7, tag annotated `v1.0.0` tạo local (push là quyết định của người dùng).
 
 ## 8. Testing strategy
 
