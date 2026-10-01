@@ -23,6 +23,7 @@ listmngr-i18n = { path = "../i18n", version = "0.1.0" }
 listmngr-mail = { path = "../mail", version = "0.1.0" }
 listmngr-pipeline = { path = "../pipeline", version = "0.1.0" }
 mail-parser = "=0.11.8"
+reqwest = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 rand.workspace = true
 regex.workspace = true
 serde.workspace = true
@@ -38,3 +39,4 @@ zxcvbn.workspace = true
 
 [dev-dependencies]
 tempfile = "=3.27.0"
+axum.workspace = true

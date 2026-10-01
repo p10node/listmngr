@@ -125,15 +125,15 @@ impl Database {
     ) -> Result<Vec<HeldPreview>> {
         crate::web_admin::valid_offset(offset)?;
         self.moderator_check(session, list).await?;
-        // The byte bound is a literal: PostgreSQL's substr(bytea, int, int)
-        // does not accept a bigint parameter.
-        let rows = sqlx::query("SELECT h.*, substr(b.raw,1,65536) AS source FROM held_messages h JOIN messages m ON m.id=h.message_id JOIN message_blobs b ON b.store_key=m.store_key WHERE h.list_id=$1 AND h.disposition IS NULL ORDER BY h.hold_date,h.id LIMIT 21 OFFSET $2")
+        let rows = sqlx::query("SELECT h.*, m.store_key AS store_key FROM held_messages h JOIN messages m ON m.id=h.message_id WHERE h.list_id=$1 AND h.disposition IS NULL ORDER BY h.hold_date,h.id LIMIT 21 OFFSET $2")
             .bind(list.as_str()).bind(offset)
             .fetch_all(self.pool()).await.map_err(db_error)?;
         let mut previews = Vec::with_capacity(rows.len());
         for row in &rows {
             let held = decode_held(row)?;
-            let source: Vec<u8> = row.try_get("source").map_err(db_error)?;
+            let store_key: String = row.try_get("store_key").map_err(db_error)?;
+            let mut source = self.blobs().get(self.pool(), &store_key).await?;
+            source.truncate(65_536);
             let parsed = mail_parser::MessageParser::default().parse(&source);
             let mailbox = |address: Option<&mail_parser::Address<'_>>| -> String {
                 address

@@ -1135,7 +1135,7 @@ pub(crate) async fn enqueue_probe(
         },
         &body,
     )?;
-    enqueue_notice_from(tx, list, member, &id, raw, now_ms, Some(sender)).await
+    enqueue_notice_from(tx, db, list, member, &id, raw, now_ms, Some(sender)).await
 }
 
 enum BounceNotice {
@@ -1413,7 +1413,21 @@ pub(crate) async fn enqueue_post_acknowledgement(
         },
         &body,
     )?;
-    enqueue_notice(tx, list, sender, &id, raw, now_ms).await
+    enqueue_notice(tx, db, list, sender, &id, raw, now_ms).await
+}
+
+/// The stored bytes of `message_id`, through the message store.
+async fn original_bytes(
+    tx: &mut Transaction<'_, Any>,
+    db: &Database,
+    message_id: crate::mail_queue::MessageId,
+) -> Result<Vec<u8>> {
+    let store_key: String = sqlx::query_scalar("SELECT store_key FROM messages WHERE id=$1")
+        .bind(message_id.0.to_string())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    db.blobs().get(&mut **tx, &store_key).await
 }
 
 /// Mailman's content-filter `forward` notice: the moderators (the owners
@@ -1427,8 +1441,7 @@ pub(crate) async fn enqueue_content_filter_forward(
     now_ms: i64,
 ) -> Result<()> {
     let snapshot = crate::notices::list_snapshot(tx, list).await?;
-    let original: Vec<u8> = sqlx::query_scalar("SELECT b.raw FROM messages m JOIN message_blobs b ON b.store_key=m.store_key WHERE m.id=$1")
-        .bind(message_id.0.to_string()).fetch_one(&mut **tx).await.map_err(db_error)?;
+    let original = original_bytes(tx, db, message_id).await?;
     let mut recipients: Vec<String> = sqlx::query_scalar("SELECT a.original_email FROM addresses a WHERE EXISTS (SELECT 1 FROM members m WHERE m.address_id=a.id AND m.list_id=$1 AND m.role='moderator') ORDER BY a.email")
         .bind(list.as_str()).fetch_all(&mut **tx).await.map_err(db_error)?;
     if recipients.is_empty() {
@@ -1467,7 +1480,7 @@ pub(crate) async fn enqueue_content_filter_forward(
             &body,
             &original,
         )?;
-        enqueue_notice(tx, list, email, &id, raw, now_ms).await?;
+        enqueue_notice(tx, db, list, email, &id, raw, now_ms).await?;
     }
     Ok(())
 }
@@ -1483,8 +1496,7 @@ pub(crate) async fn enqueue_moderated_forward(
     now_ms: i64,
 ) -> Result<()> {
     let snapshot = crate::notices::list_snapshot(tx, list).await?;
-    let original: Vec<u8> = sqlx::query_scalar("SELECT b.raw FROM messages m JOIN message_blobs b ON b.store_key=m.store_key WHERE m.id=$1")
-        .bind(message_id.0.to_string()).fetch_one(&mut **tx).await.map_err(db_error)?;
+    let original = original_bytes(tx, db, message_id).await?;
     let language =
         crate::notices::recipient_language(tx, &snapshot, to, db.default_language()).await?;
     let subject = listmngr_i18n::message(&language, "notice-forward-subject", &[]);
@@ -1513,7 +1525,7 @@ pub(crate) async fn enqueue_moderated_forward(
         &body,
         &original,
     )?;
-    enqueue_notice(tx, list, to, &id, raw, now_ms).await
+    enqueue_notice(tx, db, list, to, &id, raw, now_ms).await
 }
 
 /// One templated notice to enqueue: who receives it, which template renders
@@ -1570,26 +1582,29 @@ pub(crate) async fn enqueue_templated_notice(
         },
         &body,
     )?;
-    enqueue_notice(tx, list, to, &id, raw, now_ms).await
+    enqueue_notice(tx, db, list, to, &id, raw, now_ms).await
 }
 
 // Private raw producer for generated subscription/moderation MIME only.
 // The historical workflow_notices table is deliberately just job_id provenance.
 pub(crate) async fn enqueue_notice(
     tx: &mut Transaction<'_, Any>,
+    db: &Database,
     list: &ListId,
     email: &str,
     id: &str,
     raw: Vec<u8>,
     now_ms: i64,
 ) -> Result<()> {
-    enqueue_notice_from(tx, list, email, id, raw, now_ms, None).await
+    enqueue_notice_from(tx, db, list, email, id, raw, now_ms, None).await
 }
 
 /// [`enqueue_notice`] with an explicit envelope sender (a probe's one-time
 /// bounce address); `None` keeps the null reverse path notices use.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn enqueue_notice_from(
     tx: &mut Transaction<'_, Any>,
+    db: &Database,
     list: &ListId,
     email: &str,
     id: &str,
@@ -1599,15 +1614,17 @@ pub(crate) async fn enqueue_notice_from(
 ) -> Result<()> {
     // Context is routing metadata only; the job-bound row below is authority.
     let context = serde_json::json!({"list_id":list.as_str()}).to_string();
-    enqueue_raw_notice(tx, &context, email, id, raw, now_ms, mail_from).await
+    enqueue_raw_notice(tx, db, &context, email, id, raw, now_ms, mail_from).await
 }
 
 /// The store, message, outgoing job and notice-authority row for one
 /// generated message, whatever it is scoped to. `context` is the routing
 /// metadata the out runner reads; the `workflow_notices` row is what lets the
 /// runner send the bytes as they are.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn enqueue_raw_notice(
     tx: &mut Transaction<'_, Any>,
+    db: &Database,
     context: &str,
     email: &str,
     id: &str,
@@ -1615,14 +1632,8 @@ pub(crate) async fn enqueue_raw_notice(
     now_ms: i64,
     mail_from: Option<&str>,
 ) -> Result<()> {
-    let key = format!("{:x}", Sha256::digest(&raw));
+    let key = db.blobs().put_tx(tx, &raw).await?;
     let message_id = MessageId(Uuid::now_v7());
-    sqlx::query("INSERT INTO message_blobs(store_key,raw) VALUES($1,$2)")
-        .bind(&key)
-        .bind(raw)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_error)?;
     sqlx::query(
         "INSERT INTO messages(id,store_key,external_id,context,created_at) VALUES($1,$2,$3,$4,$5)",
     )

@@ -39,6 +39,9 @@ pub struct TaskSummary {
     pub stale_bounces_reset: u64,
     /// Webhook deliveries posted or given up longer ago than the retention.
     pub collected_webhook_deliveries: u64,
+    /// Objects of the `fs` or `s3` message store no row names any more,
+    /// older than the store's grace period.
+    pub collected_blobs: u64,
 }
 
 impl TaskSummary {
@@ -54,6 +57,7 @@ impl TaskSummary {
             + self.collected_messages
             + self.stale_bounces_reset
             + self.collected_webhook_deliveries
+            + self.collected_blobs
             > 0
     }
 }
@@ -146,6 +150,12 @@ impl TaskRepo<'_> {
                 cutoff,
             )
             .await?;
+        let collected_blobs = self.db.blobs().sweep_orphans(self.db, now_ms).await?;
+        if collected_blobs > 0 {
+            let mut tx = self.db.write_tx().await?;
+            audit(&mut tx, "blobs", collected_blobs).await?;
+            tx.commit().await.map_err(db_error)?;
+        }
         Ok(TaskSummary {
             expired_workflows,
             expired_probes,
@@ -156,6 +166,7 @@ impl TaskRepo<'_> {
             collected_messages,
             stale_bounces_reset,
             collected_webhook_deliveries,
+            collected_blobs,
         })
     }
 

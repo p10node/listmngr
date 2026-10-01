@@ -54,7 +54,7 @@ impl ModerationRepo<'_> {
     ) -> Result<HeldMessage> {
         let db = self.db();
         db.lists().get(imported.list_id).await?;
-        let key = format!("{:x}", Sha256::digest(imported.raw));
+        let key = crate::blobs::BlobStore::key(imported.raw);
         let message_id = MessageId(Uuid::now_v7());
         let id = HeldId(Uuid::now_v7());
         let mut tx = db.write_tx().await?;
@@ -69,14 +69,7 @@ impl ModerationRepo<'_> {
         if held_already.is_some() {
             return Err(Error::Conflict("the message is already held".into()));
         }
-        sqlx::query(
-            "INSERT INTO message_blobs(store_key,raw) VALUES($1,$2) ON CONFLICT(store_key) DO NOTHING",
-        )
-        .bind(&key)
-        .bind(imported.raw)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
+        db.blobs().put_tx(&mut tx, imported.raw).await?;
         sqlx::query("INSERT INTO messages(id,store_key,external_id,context,created_at) VALUES($1,$2,'',$3,$4)")
             .bind(message_id.0.to_string())
             .bind(&key)
