@@ -1,6 +1,22 @@
 # Architecture
 
-## Fuzzing — bounded local acceptance verified
+## Security review — bounded local acceptance verified
+
+`docs/SECURITY_REVIEW.md` is the artefact: one table per section of
+`docs/PLAN.md` §5 with status, evidence and the review's note, a table of
+concerns beyond the checklist, and the open list. The code it changed:
+`crates/cli/src/tls.rs` `connection()` wraps the router's response and
+inserts `Strict-Transport-Security` (`max-age=31536000;
+includeSubDomains`) — the header exists only on the TLS listener's
+service, so the plain listener cannot send it; `crates/api/src/webui.rs`
+`security_headers` adds `permissions-policy` to its fixed header set;
+the root `Cargo.toml` gains `[profile.release] overflow-checks = true`
+(the rest of the release profile is `P7-RELEASE`);
+`.github/dependabot.yml` covers `cargo` at `/` and `/fuzz` and
+`github-actions`, weekly. Tests: `crates/cli/tests/web_tls.rs` asserts
+the header over TLS and its absence on the plain listener's answer;
+`crates/api/tests/webui.rs` asserts the `permissions-policy` value.
+
 
 `fuzz/` is a `cargo-fuzz` package (`listmngr-fuzz`, `publish = false`,
 its own `[workspace]`; the root `Cargo.toml` has `exclude = ["fuzz"]`)
