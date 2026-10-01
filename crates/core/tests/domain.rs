@@ -446,3 +446,97 @@ fn web_tls_settings_are_checked_together_and_the_key_must_be_private() {
     assert!(Config::load(Some(&path)).is_err(), "a missing file");
     assert!(!Config::default().web.tls.enabled());
 }
+
+#[test]
+fn web_tls_acme_settings_are_checked_and_exclude_own_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    let cert = dir.path().join("cert.pem");
+    std::fs::write(&cert, "not a certificate\n").unwrap();
+    let cache = dir.path().join("acme");
+    let load = |body: String| {
+        std::fs::write(&path, body).unwrap();
+        Config::load(Some(&path))
+    };
+    assert!(
+        load(format!(
+            "[web.tls]\nlisten = \"127.0.0.1:8443\"\nacme_domains = [\"lists.example.com\"]\nacme_cache_dir = {cache:?}\ncert_file = {cert:?}\n"
+        ))
+        .is_err(),
+        "own files and ACME are exclusive"
+    );
+    assert!(
+        load(
+            "[web.tls]\nlisten = \"127.0.0.1:8443\"\nacme_domains = [\"lists.example.com\"]\n"
+                .into()
+        )
+        .is_err(),
+        "the cache directory is needed"
+    );
+    assert!(
+        load(format!(
+            "[web.tls]\nacme_domains = [\"lists.example.com\"]\nacme_cache_dir = {cache:?}\n"
+        ))
+        .is_err(),
+        "listen is needed"
+    );
+    assert!(
+        load("[web.tls]\nlisten = \"127.0.0.1:8443\"\n".into()).is_err(),
+        "listen alone is nothing to serve"
+    );
+    for domain in [
+        "Lists.Example.com",
+        "*.example.com",
+        "",
+        "lists.example.com.",
+    ] {
+        assert!(
+            load(format!(
+                "[web.tls]\nlisten = \"127.0.0.1:8443\"\nacme_domains = [{domain:?}]\nacme_cache_dir = {cache:?}\n"
+            ))
+            .is_err(),
+            "{domain:?} is not a plain lowercase host name"
+        );
+    }
+    assert!(
+        load(format!(
+            "[web.tls]\nlisten = \"127.0.0.1:8443\"\nacme_domains = [\"lists.example.com\"]\nacme_cache_dir = {cache:?}\nacme_directory_url = \"http://acme.example.com/directory\"\n"
+        ))
+        .is_err(),
+        "the directory is https"
+    );
+    assert!(
+        load(format!(
+            "[web.tls]\nlisten = \"127.0.0.1:8443\"\nacme_domains = [\"lists.example.com\"]\nacme_cache_dir = {cache:?}\nacme_contact = \"mailto:postmaster@example.com\"\n"
+        ))
+        .is_err(),
+        "the contact is a bare address"
+    );
+    assert!(
+        load(format!(
+            "[web.tls]\nlisten = \"127.0.0.1:8443\"\nacme_domains = [\"lists.example.com\"]\nacme_cache_dir = {cache:?}\nacme_ca_file = \"{}/missing.pem\"\n",
+            dir.path().display()
+        ))
+        .is_err(),
+        "a CA file that exists"
+    );
+    assert!(
+        load(format!(
+            "[web.tls]\nlisten = \"127.0.0.1:8443\"\nacme_domains = [\"lists.example.com\"]\nacme_cache_dir = {cert:?}\n"
+        ))
+        .is_err(),
+        "a cache path that is a file"
+    );
+    let config = load(format!(
+        "[web.tls]\nlisten = \"127.0.0.1:8443\"\nacme_domains = [\"lists.example.com\", \"lists.example.org\"]\nacme_cache_dir = {cache:?}\nacme_contact = \"postmaster@example.com\"\nacme_ca_file = {cert:?}\n"
+    ))
+    .unwrap();
+    assert!(config.web.tls.enabled());
+    assert!(config.web.tls.acme());
+    assert_eq!(config.web.tls.acme_domains.len(), 2);
+    assert_eq!(
+        config.web.tls.acme_directory_url,
+        "https://acme-v02.api.letsencrypt.org/directory"
+    );
+    assert!(!Config::default().web.tls.acme());
+}

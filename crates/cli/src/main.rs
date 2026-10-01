@@ -492,13 +492,14 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
     let webhook_role = spawn_webhook_runner(&db, &config, &shutdown_rx);
     let tls_role = tls::prepare(&config.web.tls).await?;
     let router = listmngr_api::router(db, config);
-    let tls_role = tls_role.map(|(tls_listener, acceptor)| {
-        tokio::spawn(tls::serve(
-            tls_listener,
-            acceptor,
+    let tls_role = tls_role.map(|prepared| {
+        let served = tokio::spawn(tls::serve(
+            prepared.listener,
+            prepared.tls,
             router.clone(),
             shutdown_rx.clone(),
-        ))
+        ));
+        (served, prepared.acme)
     });
     let http = std::future::IntoFuture::into_future(
         axum::serve(
@@ -527,8 +528,11 @@ async fn serve_database(db: Database, config: Config) -> Result<()> {
     if let Some(task) = webhook_role {
         task.await.context("webhook runner panicked")?;
     }
-    if let Some(task) = tls_role {
+    if let Some((task, acme)) = tls_role {
         task.await.context("TLS listener panicked")??;
+        if let Some(acme) = acme {
+            acme.abort();
+        }
     }
     Ok(())
 }

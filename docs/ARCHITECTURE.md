@@ -1,5 +1,44 @@
 # Architecture
 
+## Automatic certificates — bounded local acceptance verified
+
+`WebTlsConfig` gained `acme_domains: Vec<String>`, `acme_contact`,
+`acme_directory_url` (default Let's Encrypt v2), `acme_cache_dir` and
+`acme_ca_file`; `acme()` is `!acme_domains.is_empty()`. `validate` now
+takes `listen` with either the two files or `acme_domains`, never both
+nor neither, and splits into `validate_own_files` (the `P6-WEB-TLS`
+checks) and `validate_acme` (lowercase host names without wildcards or
+dots at either end, an `https` directory, a required cache path that is
+a directory if present, a contact that is a bare address, a CA file that
+is a regular file); `acme_*` set without `acme_domains` is refused.
+`crates/cli/src/tls.rs`: `acceptor` became `own_certificate` returning
+`Tls { config, challenge: None }`, and `acme(web)` builds the other
+`Tls`: it makes `acme_cache_dir` (`0700`, then every file `0600`), a
+rustls `ClientConfig` on `webpki_roots::TLS_SERVER_ROOTS` plus
+`acme_ca_file` for the directory, an `AcmeConfig` with `DirCache`,
+`directory`, and `contact_push("mailto:…")`, an `AcmeState`, and from it
+`challenge_rustls_config_with_provider(ring)` (the TLS-ALPN-01 answer)
+and a `ServerConfig` with `with_cert_resolver(state.resolver())` (the
+site, ALPN `h2`/`http/1.1`), then spawns `drive`, which polls the
+`AcmeState` stream forever — `DeployedCachedCert`, `DeployedNewCert`,
+`CertCacheStore`/`AccountCacheStore` (each followed by `owner_only` on
+the cache) and `Err` are logged as `ACME: …` — and the state machine
+itself deploys a cached certificate, orders when none, waits until two
+thirds of the validity, and backs off exponentially after a failure.
+`rustls-acme` is used without its `tokio` feature: its own `async-io`
+timer and `async-web-client` HTTP run inside the tokio task that polls
+the stream. `prepare` returns `Prepared { listener, tls, acme:
+Option<JoinHandle> }`; `serve` hands each accepted socket to
+`handshake`, which reads the client hello with `LazyConfigAcceptor` and,
+when `is_tls_alpn_challenge` and a challenge config exists, completes
+the handshake with the challenge certificate and closes (logging
+`ACME: answering a TLS-ALPN-01 validation`), otherwise completes it with
+the site's config and runs `connection` as before. `serve_database`
+aborts the ACME task after the TLS listener has drained. New pinned
+direct dependencies of the binary: `rustls-acme` 0.15.4 (`ring`,
+`tls12`, `webpki-roots`), `webpki-roots` 1.0.9 and the workspace
+`futures`.
+
 ## TLS for the web — bounded local acceptance verified
 
 `WebTlsConfig` (`[web] tls`: `listen`, `cert_file`, `key_file`; `validate`

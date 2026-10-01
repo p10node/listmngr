@@ -1,5 +1,60 @@
 # listmngr
 
+## Automatic certificates (`P6-WEB-ACME`) — bounded local acceptance verified
+
+Instead of `cert_file` and `key_file`, `[web] tls` can order its
+certificate from an ACME directory and keep it renewed:
+
+```toml
+[web.tls]
+listen = "0.0.0.0:443"
+acme_domains = ["lists.example.com"]      # every name the certificate is for; no wildcards
+acme_contact = "postmaster@example.com"   # optional; a bare address, the mailto: is added
+acme_cache_dir = "/var/lib/listmngr/acme" # the account key and the certificate with its key
+# acme_directory_url = "https://acme-v02.api.letsencrypt.org/directory"  (the default)
+# acme_ca_file = "/etc/listmngr/private-acme-ca.pem"  (only for a private directory)
+```
+
+The order is validated with TLS-ALPN-01 on the TLS listener itself: the
+directory's validator connects to each name on port 443, offers
+`acme-tls/1`, and gets the challenge certificate and nothing else, so the
+listener must be reachable from the internet on 443 under every name
+(`CAP_NET_BIND_SERVICE` or a port redirect, as for `cert_file`); there is
+no HTTP-01 or DNS-01, and therefore no wildcard. The account key and the
+certificate with its key are cached under `acme_cache_dir` — the
+directory made `0700` and the files `0600` as they land — so a restart
+deploys the cached certificate at once and orders only when there is
+none; the certificate is renewed in the background at two thirds of its
+validity and swapped in without a restart. Until the first certificate is
+issued a handshake on the TLS listener is refused while the plain listener
+answers throughout. Checked when the configuration loads:
+`acme_domains` and `cert_file`/`key_file` are exclusive, `acme_cache_dir`
+is required (and a directory if it exists), `acme_directory_url` is
+`https://`, `acme_contact` is a bare address, every name is a lowercase
+host name, `acme_ca_file` exists. The directory is verified against the
+Web PKI roots built into the binary plus `acme_ca_file`, for a private
+directory such as Pebble or a Step CA. Every step is logged as `ACME: …`;
+a failed order is logged as `ACME: failed` and retried with backoff,
+never fatal to the server.
+
+Verification against Pebble, Let's Encrypt's ACME test server, on
+loopback (both binaries are in one Pebble release; CI's `acme` job pins
+v2.10.1 by digest):
+
+```sh
+# https://github.com/letsencrypt/pebble/releases/tag/v2.10.1
+TEST_PEBBLE_BIN=/path/to/pebble \
+TEST_PEBBLE_CHALLTESTSRV_BIN=/path/to/pebble-challtestsrv \
+  cargo test --locked -p listmngr --test web_acme -- --ignored --nocapture
+```
+
+Limits: TLS-ALPN-01 only, so a public directory needs the listener on
+443 and no wildcard is possible; one certificate for all `acme_domains`
+(a name added or removed is a new order at the next start); no external
+account binding, no OCSP stapling, no HSTS of its own; the acceptance
+runs against Pebble v2.10.1 on loopback with Pebble's challenge DNS
+resolving the name, not against Let's Encrypt or a public resolver.
+
 ## TLS for the web (`P6-WEB-TLS`) — bounded local acceptance verified
 
 `[web] tls` adds a second listener that serves the same site over TLS,
@@ -24,8 +79,8 @@ defaults (TLS 1.2 and 1.3), offering HTTP/2 and HTTP/1.1 through ALPN, and
 every connection carries its peer address as the plain listener's do, so
 rate limits and the audit log see the same thing either way. Set
 `site.base_url` to the `https://` origin. Port 443 needs
-`CAP_NET_BIND_SERVICE` or a port redirect; automatic certificates are
-`P6-WEB-ACME`.
+`CAP_NET_BIND_SERVICE` or a port redirect; a certificate ordered and
+renewed for you is `acme_domains`, above.
 
 ## Inbound SMTP, experimental (`P6-INBOUND-SMTP`) — bounded local acceptance verified
 
