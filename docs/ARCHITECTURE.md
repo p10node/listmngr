@@ -1,5 +1,35 @@
 # Architecture
 
+## Phase 6 acceptance — bounded local acceptance verified
+
+`crates/api/src/compat.rs`: `routes()` registers, under `/archives` and
+`/hyperkitty`, `/list/{list}/` and `/list/{list}/latest` →
+`/web/lists/{id}/archive`; `/list/{list}/message/{hash}/` →
+`/web/lists/{id}/archive?message=…` (through `serde_urlencoded`, as
+`message_link` does); `/list/{list}/thread/{thread}/` →
+`/web/lists/{id}/archive/thread/{thread}` (an alphanumeric thread only);
+`/list/{list}/{year}/{month}/` →
+`/web/lists/{id}/archive/threads/{year}/{month}` (four digits, one or
+two); the prefixes themselves, `/postorius/` and `/postorius/lists/` →
+`/web`; `/postorius/lists/{list}/` → `/web/lists/{id}`. `list_id` takes a
+posting address (the first `@` becomes `.`) or a list id and `ListId`'s
+parser decides, a failure being `404`; every redirect is
+`Redirect::permanent` (`308`); the module touches no state. The router
+merges it after `unsubscribe::routes()`.
+`crates/cli/tests/phase6_acceptance.rs` runs the whole migration on the
+real binary (`scenario`): `migrate`; `import3 --db … --var-dir …`;
+`archive import` of the HyperKitty-shaped mbox; `import3 --hyperkitty …`;
+`import21 … mailman21-full.pck`; then it checks the database (the 2.1
+settings on the list, the thread's category and tags, three archived
+messages, the two bans once), opens the archive the core kept private,
+starts `serve` and, with a client that follows no redirect, walks
+HyperKitty's and Postorius's URLs: each permalink's `308` and its
+`Location`, the page there `200` with the post's subject, the thread
+page with both posts, the month, the index, Postorius's list page, a
+non-list `404`, an unknown hash `404` on the redirected page. The same
+`scenario` runs on an isolated PostgreSQL schema as
+`postgres_phase6_acceptance_contract` (ignored).
+
 ## Backup and restore — bounded local acceptance verified
 
 `crates/db/src/backup.rs`: `Manifest { format, listmngr, created_at,
@@ -3533,8 +3563,9 @@ publication cooking as archive search. Unrelated raw messages are not
 fetched or decoded. Hashes must be nonempty and at most 200 UTF-8 bytes. Combining
 a permalink with a nonempty search/thread filter or page other than 1 is rejected,
 not silently ignored. Missing hashes return 404; links remain subject to current
-private/never policy, and are not a grant of access. These are native browser URLs,
-not a claim of HyperKitty URL compatibility.
+private/never policy, and are not a grant of access. These are native browser URLs;
+HyperKitty's own URLs reach them through the `compat` redirects
+(`P6-ACCEPTANCE`).
 The browser's `format=mbox` projection uses the same authorized selection and
 cooked MIME payloads with the existing mboxrd serializer. It fetches only 20 rows,
 not the HTML paginator's 21st look-ahead row, or exactly one permalink message.
