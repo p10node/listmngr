@@ -28,6 +28,7 @@ pub mod moderation_import;
 pub mod notices;
 pub mod one_click;
 pub mod owner_mail;
+pub mod posting_rate;
 pub mod queue_operations;
 mod smtp_bounces;
 pub mod tasks;

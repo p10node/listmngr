@@ -34,6 +34,8 @@ fn base() -> PostingContext {
         },
         site_header_checks: Vec::new(),
         site_jump_chain: "hold".into(),
+        site_max_received_hops: 0,
+        site_posting_rate: None,
         member_moderation_action: None,
         default_member_action: ModerationAction::Defer,
         default_nonmember_action: ModerationAction::Defer,
@@ -596,5 +598,93 @@ fn a_moderated_newsgroup_gateway_holds_every_post() {
     ] {
         ctx.list.newsgroup_moderation = open;
         assert_eq!(decide_posting(&ctx), Disposition::Accept, "{open:?}");
+    }
+}
+
+/// `max-hops`: more `Received:` headers than `[mta] max_received_hops`
+/// discards the post as a loop; exactly the limit passes; zero turns the
+/// rule off; it sits after `loop` and before `banned-address`.
+#[test]
+fn too_many_received_headers_discard_the_post_as_a_loop() {
+    let mut ctx = base();
+    ctx.site_max_received_hops = 3;
+    for hop in 0..3 {
+        ctx.message
+            .headers
+            .push(("Received".into(), format!("from hop{hop}")));
+    }
+    assert_eq!(decide_posting(&ctx), Disposition::Accept);
+    ctx.message
+        .headers
+        .push(("received".into(), "from hop3".into()));
+    let outcome = decide_posting_traced(&ctx);
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Discard("Too many Received: headers (4, at most 3): a mail loop".into())
+    );
+    assert!(outcome.hits.contains(&"max-hops".to_owned()));
+    ctx.sender.is_banned = true;
+    assert!(
+        matches!(decide_posting(&ctx), Disposition::Discard(_)),
+        "the loop is discarded before the ban rejects"
+    );
+    ctx.sender.is_banned = false;
+    ctx.site_max_received_hops = 0;
+    assert_eq!(decide_posting(&ctx), Disposition::Accept, "zero is off");
+}
+
+/// `posting-rate`: with `[security] rate_limit.post` set, a sender whose
+/// accepted posts in the window already reach the count is held with a
+/// reason naming the numbers; one fewer passes; no limit means no rule;
+/// it is a deferred check, so an explicitly accepted member bypasses it
+/// and several deferred hits share one hold.
+#[test]
+fn a_sender_over_the_posting_rate_is_held_with_the_numbers() {
+    let mut ctx = base();
+    ctx.sender.recent_posts = 100;
+    assert_eq!(
+        decide_posting(&ctx),
+        Disposition::Accept,
+        "no limit, no rule"
+    );
+    ctx.site_posting_rate = Some(listmngr_core::RateLimit::parse("post", "3/hour").unwrap());
+    ctx.sender.recent_posts = 2;
+    assert_eq!(decide_posting(&ctx), Disposition::Accept);
+    ctx.sender.recent_posts = 3;
+    let outcome = decide_posting_traced(&ctx);
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Hold(
+            "Posting rate exceeded: 3 posts accepted in the last hour (at most 3)".into()
+        )
+    );
+    assert!(outcome.hits.contains(&"posting-rate".to_owned()));
+    ctx.list.message_too_large = true;
+    assert_eq!(
+        decide_posting(&ctx),
+        Disposition::Hold(
+            "message exceeds list max_message_size; Posting rate exceeded: 3 posts accepted in the last hour (at most 3)".into()
+        ),
+        "deferred hits share one hold, in chain order"
+    );
+    ctx.list.message_too_large = false;
+    ctx.member_moderation_action = Some(Some(ModerationAction::Accept));
+    assert_eq!(
+        decide_posting(&ctx),
+        Disposition::Accept,
+        "an explicit accept bypasses the deferred checks, as in Mailman"
+    );
+    for (spec, name) in [
+        ("1/s", "second"),
+        ("2/min", "minute"),
+        ("3/h", "hour"),
+        ("4/day", "day"),
+    ] {
+        assert_eq!(
+            listmngr_core::RateLimit::parse("post", spec)
+                .unwrap()
+                .window_name(),
+            name
+        );
     }
 }

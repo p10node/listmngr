@@ -188,6 +188,8 @@ cargo test --locked -p listmngr-api --test webui \
   emergency::postgres_emergency_controls -- --ignored --exact
 cargo test --locked -p listmngr-api --test webui \
   subject_prefix_controls::postgres_subject_prefix_controls -- --ignored --exact
+cargo test --locked -p listmngr-db --test posting_rate \
+  postgres_posting_rate_contract -- --ignored --exact
 run domains add "$domain" --description 'Phase 0 PostgreSQL CI contract'
 run lists create "$list" --display-name 'Phase 0 CI contract'
 run domains ls | grep -F "$domain" >/dev/null

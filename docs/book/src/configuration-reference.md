@@ -71,6 +71,7 @@ the effective values with secrets redacted; `listmngr conf --key section.key` pr
 | `max_header_count` | `u32` | `500` | Ceilings on a message's shape at the intake (LMTP, inbound SMTP, the news gateway), checked before anything is stored: header fields in the outer block (a folded field counts once), MIME parts in all (a nested message's parts included) and nesting depth (the outer body is 1). Over any of them: `554 5.6.0`, nothing queued. |
 | `max_mime_parts` | `u32` | `1000` |  |
 | `max_mime_depth` | `u32` | `20` |  |
+| `max_received_hops` | `u32` | `30` | The `max-hops` rule: a post with more `Received:` headers than this is discarded as a mail loop. 0 turns the rule off. |
 | `command_timeout_secs` | `u32` | `30` |  |
 | `map_directory` | `String` | `"data/mta"` | Mailman's `incoming` MTA: "none", "postfix" or "exim". Lookup maps are published under `map_directory` as `generation-*` directories behind a `current` symlink, at startup and after every list creation/removal. |
 | `lmtp_map_target` | `Option<String>` | `None` | How the MTA reaches the LMTP listener (`host:port`); defaults to `lmtp_listen`, which must then be a concrete address. |
@@ -151,6 +152,7 @@ the effective values with secrets redacted; `listmngr conf --key section.key` pr
 | `subscribe` | `String` | `"10/hour"` |  |
 | `api` | `String` | `"600/min"` |  |
 | `api_pre_auth` | `Option<String>` | `None` |  |
+| `post` | `Option<String>` | `None` | The `posting-rate` rule: posts one sender may have accepted on one list per window before the next is held for a moderator (for example "20/hour"). Unset: no limit. |
 
 ## `[mailman]`
 

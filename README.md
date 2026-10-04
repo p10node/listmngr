@@ -1,5 +1,26 @@
 # listmngr
 
+## Loop and abuse rules (`P8-ABUSE-RULES`) — bounded local acceptance verified
+
+Two rules join `default-posting-chain`. `max-hops`, right after `loop`,
+counts the post's `Received:` headers against `[mta] max_received_hops`
+(30 by default; 0 turns it off) and discards a post over it as a mail
+loop — "Too many Received: headers (N, at most M): a mail loop" in the
+`post.discard` audit event — before a ban could reject it, as `loop`
+does. `posting-rate`, last of the deferred checks, holds a sender's post
+once `[security] rate_limit.post` (unset by default; `COUNT/WINDOW` like
+the other limits, for example `"20/hour"`) posts of theirs were accepted
+on that list inside the window, with "Posting rate exceeded: N posts
+accepted in the last hour (at most M)" as the reason the moderator sees;
+an owner, a moderator or a member whose action is an explicit `accept`
+bypasses it like every deferred check, and so does an `Approved:` key.
+The count comes from the new `posting_rate` table (migration `0055`),
+one row per accepted post written in the transaction that accepts it —
+only while the limit is configured — keyed by the lower-cased envelope
+sender; the task sweep's `posting_rate` step forgets rows older than a
+day, the longest window the setting can name, and a list's rows go with
+the list. Both rules appear in `/api/v1/system/chains`.
+
 ## Structure ceilings at the intake (`P8-MIME-LIMITS`) — bounded local acceptance verified
 
 Three numbers bound what a message may be shaped like before anything is

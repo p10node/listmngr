@@ -122,6 +122,76 @@ pub struct AcceptEffects<'a> {
     /// the site seals its deliveries: the seal's `cv=` and the cue to keep
     /// the chain through the pipeline.
     pub arc_chain: Option<&'a str>,
+    /// The `posting-rate` ledger: the envelope sender to record this
+    /// accepted post for, when the site limits the posting rate.
+    pub posting_rate_sender: Option<&'a str>,
+}
+
+/// The list-side effects of an accepted post, inside its transaction:
+/// the admission facts on the stored context, Mailman's `after-delivery`
+/// bump, the posting-rate ledger row and the poster's acknowledgement.
+async fn apply_accept_effects(
+    db: &Database,
+    tx: &mut Transaction<'_, Any>,
+    message_id: &str,
+    effects: &AcceptEffects<'_>,
+    now_ms: i64,
+) -> Result<()> {
+    if effects.dmarc_mitigate
+        || effects.authentication_results.is_some()
+        || effects.arc_chain.is_some()
+    {
+        let context: String = sqlx::query_scalar("SELECT context FROM messages WHERE id=$1")
+            .bind(message_id.to_owned())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        let mut context: serde_json::Value =
+            serde_json::from_str(&context).unwrap_or(serde_json::Value::Null);
+        if !context.is_object() {
+            context = serde_json::json!({});
+        }
+        if effects.dmarc_mitigate {
+            context["dmarc_mitigate"] = serde_json::json!(true);
+        }
+        if let Some(results) = effects.authentication_results {
+            context["authentication_results"] = serde_json::json!(results);
+        }
+        if let Some(chain) = effects.arc_chain {
+            context["arc_chain"] = serde_json::json!(chain);
+        }
+        sqlx::query("UPDATE messages SET context=$1 WHERE id=$2")
+            .bind(context.to_string())
+            .bind(message_id.to_owned())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+    }
+    if effects.record_post {
+        let at = chrono::DateTime::from_timestamp_millis(now_ms)
+            .ok_or_else(|| Error::Validation("timestamp out of range".into()))?;
+        sqlx::query("UPDATE mailing_lists SET post_id=post_id+1,last_post_at=$1 WHERE list_id=$2")
+            .bind(at.to_rfc3339())
+            .bind(effects.list_id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+    }
+    if let Some(sender) = effects.posting_rate_sender {
+        crate::posting_rate::record_tx(tx, effects.list_id, sender, now_ms).await?;
+    }
+    if let Some(acknowledge) = &effects.acknowledge {
+        crate::workflows::enqueue_post_acknowledgement(
+            tx,
+            db,
+            effects.list_id,
+            acknowledge.sender,
+            acknowledge.subject,
+            now_ms,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Who posted what, for the acknowledgement notice.
@@ -380,60 +450,14 @@ impl<'a> MailQueueRepo<'a> {
             created.push(job);
         }
         if let Some(effects) = effects {
-            if effects.dmarc_mitigate
-                || effects.authentication_results.is_some()
-                || effects.arc_chain.is_some()
-            {
-                let context: String =
-                    sqlx::query_scalar("SELECT context FROM messages WHERE id=$1")
-                        .bind(source.message_id.0.to_string())
-                        .fetch_one(&mut *tx)
-                        .await
-                        .map_err(db_error)?;
-                let mut context: serde_json::Value =
-                    serde_json::from_str(&context).unwrap_or(serde_json::Value::Null);
-                if !context.is_object() {
-                    context = serde_json::json!({});
-                }
-                if effects.dmarc_mitigate {
-                    context["dmarc_mitigate"] = serde_json::json!(true);
-                }
-                if let Some(results) = effects.authentication_results {
-                    context["authentication_results"] = serde_json::json!(results);
-                }
-                if let Some(chain) = effects.arc_chain {
-                    context["arc_chain"] = serde_json::json!(chain);
-                }
-                sqlx::query("UPDATE messages SET context=$1 WHERE id=$2")
-                    .bind(context.to_string())
-                    .bind(source.message_id.0.to_string())
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(db_error)?;
-            }
-            if effects.record_post {
-                let at = chrono::DateTime::from_timestamp_millis(now_ms)
-                    .ok_or_else(|| Error::Validation("timestamp out of range".into()))?;
-                sqlx::query(
-                    "UPDATE mailing_lists SET post_id=post_id+1,last_post_at=$1 WHERE list_id=$2",
-                )
-                .bind(at.to_rfc3339())
-                .bind(effects.list_id.as_str())
-                .execute(&mut *tx)
-                .await
-                .map_err(db_error)?;
-            }
-            if let Some(acknowledge) = &effects.acknowledge {
-                crate::workflows::enqueue_post_acknowledgement(
-                    &mut tx,
-                    self.db,
-                    effects.list_id,
-                    acknowledge.sender,
-                    acknowledge.subject,
-                    now_ms,
-                )
-                .await?;
-            }
+            apply_accept_effects(
+                self.db,
+                &mut tx,
+                &source.message_id.0.to_string(),
+                effects,
+                now_ms,
+            )
+            .await?;
         }
         self.check_final_deadline(Some(deadline), now_ms)?;
         tx.commit().await.map_err(db_error)?;
