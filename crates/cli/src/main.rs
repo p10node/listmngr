@@ -16,6 +16,7 @@ mod notify;
 mod plugins;
 mod queue;
 mod requests;
+mod secrets;
 mod status;
 mod tasks;
 mod tls;
@@ -123,6 +124,11 @@ enum Command {
     Webhooks {
         #[command(subcommand)]
         command: webhooks::Command,
+    },
+    /// The secrets the database keeps under `security.master_key`.
+    Secrets {
+        #[command(subcommand)]
+        command: secrets::Command,
     },
     /// The message store behind `message_blobs`: migrate and check.
     MessageStore {
@@ -443,6 +449,7 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         Command::Archive { command } => archive::run(&db, &config, command).await?,
         Command::Nntp { command } => nntp::run(&db, &config, command).await?,
         Command::Webhooks { command } => webhooks::run(&db, command).await?,
+        Command::Secrets { command } => secrets::run(&db, &config, command).await?,
         Command::MessageStore { command } => message_store::run(&db, command).await?,
         Command::Backup { dir } => backup::backup(&db, &dir).await?,
         Command::Restore { dir } => backup::restore(&db, &dir).await?,

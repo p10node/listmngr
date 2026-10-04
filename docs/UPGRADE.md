@@ -62,3 +62,12 @@ runs `migrate` in an init container before the new pod starts, with
 one replica and `Recreate`, so a rollout is the sequence above; `helm
 rollback` alone does not roll the schema back — restore a backup as
 above. Keep the database's own backups beside `listmngr backup`.
+
+## The master key and restores
+
+A backup carries sealed TOTP secrets as they are. Restore it on a node
+configured with the same `security.master_key` (or `master_key_file`),
+or `listmngr doctor` reports `master_key` as `fail` and no enrolled
+account can complete its second step until the key is configured. The
+key never travels in the backup; keep it where the backups' other
+secrets are kept.

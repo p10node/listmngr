@@ -1,5 +1,34 @@
 # listmngr
 
+## The master key: TOTP secrets sealed at rest (`P8-MASTER-KEY`) — bounded local acceptance verified
+
+`[security] master_key` (64 hexadecimal digits, 32 bytes; or
+`master_key_file`, a file readable by nobody else, which wins) is the
+one secret the database's own secrets are sealed under. With it set, a
+TOTP secret is stored as `v1:<base64(nonce ‖ ciphertext)>` —
+ChaCha20-Poly1305 under a key derived from the master key for that
+purpose (HKDF-SHA256, `listmngr/totp/v1`), with the account id as
+associated data so a row cannot be moved to another account — and
+decrypted only for the moment a code is checked or an enrolment page
+rendered. A site without a key stores them in the clear, as every
+release before 1.1 did; a site that gains a key keeps reading those
+rows and seals them with `listmngr secrets encrypt` (one transaction,
+one `security.encrypt_secrets` audit event). `listmngr secrets status`
+counts sealed and plain rows and says whether a key is configured;
+`listmngr secrets new-key` prints a fresh key and nothing else;
+`listmngr secrets rewrap --previous-key-file FILE` opens every sealed
+row with the previous key and seals it under the current one, refusing
+the whole run if any row does not open. `listmngr doctor` gained the
+`master_key` check: `ok` when every TOTP secret is sealed under the
+configured key, `warn` when no key is configured or rows are still in
+the clear, `fail` (exit 12) when sealed rows exist and no key is
+configured — that site cannot verify a second factor. A backup carries
+the rows as they are; restore it where the same master key is
+configured, or the second step fails for every enrolled account.
+Configuration secrets are zeroed when dropped. Deviations: the DKIM
+and ARC keys, the webhook signing key and the S3 secret stay files
+readable by the service user only, not wrapped under the master key.
+
 ## DKIM with Ed25519, several selectors, and the `dkim` command (`P8-DKIM-ED25519`) — bounded local acceptance verified
 
 A `[[mta.dkim_signing]]` key file may now hold an Ed25519 key (PKCS#8,
