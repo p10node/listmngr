@@ -1,5 +1,10 @@
 # Mailman replacement execution and acceptance
 
+> **Historical — superseded.** This file records the 2026-09 checkpoints of the
+> mail path. The "open scope" it describes was closed row by row in
+> `docs/FEATURE_PARITY.md` (Phases 2–7); `1.0.0` was released on 2026-10-04.
+> It is kept for the record and is not a current obligation list.
+
 ## Current outbound carrier prerequisite (not authenticated DSN completion)
 
 `P2-DSN-PRODUCER-PREREQUISITE` adds a real default-off single-recipient SMTP
