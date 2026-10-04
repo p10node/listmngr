@@ -1013,6 +1013,119 @@ Tách thành work package (kế hoạch 2026-10-01, một ID một nhánh, làm 
 - [x] ~~**P7-RELEASE**~~ (xong) (L): `[profile.release]` (lto = "thin", codegen-units = 1, strip, debug = "line-tables-only"?) đo kích thước/thời gian; `.github/workflows/release.yml` khi tag `v*`: build `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` (cross/zigbuild), `aarch64-apple-darwin`, `x86_64-apple-darwin`; `cargo-deb` + `cargo-generate-rpm` (systemd unit, user `listmngr`, `/etc/listmngr`, `/var/lib/listmngr`); Docker multi-arch buildx từ `deploy/Dockerfile` (tag + digest); Helm chart `deploy/helm/listmngr` (Deployment, Service, Secret/ConfigMap, PVC, probes `/healthz` `/readyz`, PodSecurity read-only/non-root) + `helm lint` + `helm template` test; SBOM CycloneDX (`cargo cyclonedx`) + `cosign sign-blob` keyless + `SHA256SUMS`; `docs/UPGRADE.md`: chính sách migration N-1 (schema thêm, không xoá/đổi nghĩa trong 1 minor; `migrate` trước khi lên binary mới; rollback = `backup` trước, `restore` vào bản cũ), kiểm tra `doctor` trước/sau. Local verify bounded: `cargo build --release` host, `cargo zigbuild --target x86_64-unknown-linux-musl` nếu được, `helm lint`, `docker build` nếu daemon chạy; phần cần GitHub runner (push image, cosign keyless OIDC) ghi là chạy ở CI.
 - [x] ~~**P7-1.0**~~ (xong) (S): bump `1.0.0` toàn workspace (`Cargo.toml`, lock), `CHANGELOG.md` `## [1.0.0] - <ngày>` gom Unreleased, README/`CLAUDE.md`/§10 cập nhật câu "0.1.0 = unreleased", bảng phase trong ledger đóng Phase 7, tag annotated `v1.0.0` tạo local (push là quyết định của người dùng).
 
+### Phase 8 — 1.1: đóng các mục "còn mở cho 1.x" (M)
+
+Mục tiêu: đóng bốn mục kỹ thuật trong `docs/SECURITY_REVIEW.md` "What remains
+open for 1.x" (mã hoá TOTP secret tại chỗ, DKIM Ed25519 + xoay selector,
+rule giới hạn tần suất gửi và số hop, trần cấu trúc MIME ở cổng nhận) và dọn
+những đoạn ledger/doc còn nói ngược với trạng thái 1.0.0. External review,
+MySQL/MariaDB, WASM plugin, SDK sinh từ OpenAPI và ZAP baseline là backlog
+(cuối phần này), không lên lịch.
+
+Tách thành work package (kế hoạch 2026-10-05, một ID một nhánh, làm theo thứ
+tự này; mỗi ID có ledger row với lệnh và số liệu thật; quy ước §7.0 giữ nguyên;
+phiên bản chỉ đổi ở `P8-1.1`):
+
+- [ ] **P8-LEDGER-RECONCILE** (S): chỉ tài liệu. `docs/FEATURE_PARITY.md`:
+  bảng phase (hàng 0–4 còn ghi "open: `P2-E2E-ACCEPTANCE`, `P2-HELD-FORWARD`",
+  "Partial / interim rendering", "PostgreSQL acceptance predates 0004") và bảng
+  "Residual P1s" (hàng "Full Phase 2 …", "Later features", "Recovery and
+  operations") sửa theo row đã đóng, giữ nguyên câu nào còn đúng (hosted CI
+  chưa có run vì repo chưa có remote; push là quyết định của người dùng); đoạn
+  "opt-in plaintext trusted-relay … not production-ready" thay bằng câu trạng
+  thái 1.0.0; thêm hàng 8 "In progress". `docs/PLAN.md` phần "Trạng thái triển
+  khai" thêm mốc 2026-10-04 (Phase 7 đóng, 1.0.0). `docs/HANDOFF.md` (ảnh chụp
+  2026-09-19 nói P5-MBOX chưa commit) và `docs/MAILMAN_REPLACEMENT.md` ("the
+  complete open scope") nhận banner "historical — superseded" ở đầu file, không
+  xoá. Gate: toàn bộ CLAUDE.md + `python3 -m unittest discover -s scripts/tests`
+  + `mdbook build docs/book` + `scripts/check-book-links.py`.
+- [ ] **P8-MIME-LIMITS** (M): `[mta] max_header_count = 500`,
+  `max_mime_parts = 1000`, `max_mime_depth = 20` (số nguyên ≥ 1, kiểm tra khi
+  load). `listmngr_mail::structure::{Limits, Measure, measure, check}`: header =
+  số field ở khối header ngoài cùng (dòng không bắt đầu bằng WSP trước dòng
+  trống đầu tiên; mỗi dòng gập không tính); part = tổng số MIME part kể cả
+  `message/rfc822` lồng; depth = mức lồng sâu nhất (thân ngoài cùng = 1). Áp ở
+  cổng nhận trước khi ghi gì: `InboundHandler::deliver` (LMTP và inbound SMTP
+  dùng chung) trả `554 5.6.0 message structure exceeds the site's limits` cho
+  mọi recipient, không enqueue; `nntp` gatenews bỏ qua bài vượt trần (log,
+  watermark vẫn tiến, không enqueue) như bài có header không đọc được. Fuzz:
+  `measure` chạy trong target `mime_filter`. Test: unit đúng biên (20/21,
+  1000/1001, 500/501, `message/rfc822` lồng tính vào depth); runner trên phiên
+  LMTP thật (21 mức → 554 cả hai recipient, `queue_jobs` trống; 20 mức → 250);
+  gatenews với fake server; validate config. Docs: README, ARCHITECTURE,
+  `SECURITY_REVIEW.md` hàng "Size and DoS" → done, `configuration-reference.md`
+  sinh lại, CHANGELOG.
+- [ ] **P8-ABUSE-RULES** (M): hai rule mới trong `default-posting-chain`.
+  `max-hops`: `[mta] max_received_hops = 30` (0 = tắt, ≤ 1000) đếm header
+  `Received:` của bài; vượt → link `jump discard` ngay sau `loop`, lý do
+  "Too many Received: headers (N > max)". `posting-rate`:
+  `[security] rate_limit.post` (`COUNT/WINDOW` như các khoá cùng nhóm, mặc định
+  không đặt = tắt) theo cặp (list, địa chỉ người gửi) đếm bài đã được chấp nhận
+  vào pipeline trong cửa sổ; vượt → link `defer` cuối nhóm moderation (sau
+  `suspicious-header`, trước `any`) → hold với lý do "Posting rate exceeded:
+  N posts in the last WINDOW". Lưu: migration `0055` bảng
+  `posting_rate(list_id, email, posted_at)` + index, ghi trong chính giao dịch
+  chấp nhận của runner `in` (`processor.rs`, nhánh `Disposition::Accept`); bước
+  sweep mới `posting_rate` xoá hàng cũ hơn 1 ngày (cửa sổ dài nhất). Facts:
+  `gather_context` đếm hàng trong cửa sổ → `ctx.sender.recent_posts`,
+  `ctx.site_posting_rate`, `ctx.site_max_received_hops`. Cập nhật
+  `pipeline/tests/chain.rs`, `rest.rs` (`/system/chains`), snapshot schema
+  (`schema_contract.rs` + `repositories.rs`), `scripts/test-postgres.sh`. Test:
+  rule đúng biên và tắt mặc định; runner: `rate_limit.post = "3/hour"` → bài thứ
+  tư của cùng người gửi bị hold đúng lý do, người gửi khác không ảnh hưởng, hàng
+  cũ hơn cửa sổ không tính; `max-hops`: 31 `Received:` → discard, 30 → accept.
+  Docs: README, ARCHITECTURE, `SECURITY_REVIEW.md` hàng "Loop and abuse" → done,
+  config reference, CHANGELOG.
+- [ ] **P8-DKIM-ED25519** (M): file khoá quyết định thuật toán — PKCS#8 với OID
+  `1.2.840.113549.1.1.1` → RSA (`rsa-sha256`, như cũ), OID `1.3.101.112` →
+  Ed25519 (`ed25519-sha256`, RFC 8463), PKCS#1 → RSA; loại khác → lỗi khi load.
+  Nhiều `[[mta.dkim_signing]]` cùng `domain` khác `selector` được phép và mỗi
+  entry ký một `DKIM-Signature` theo thứ tự cấu hình (dual signing).
+  `SigningKeys` → `BTreeMap<domain, Vec<DkimSigner<DkimKey, Done>>>`;
+  `dns_record` trả `k=ed25519; p=<base64 32 byte>`; trang domain liệt kê mọi
+  selector. CLI mới `listmngr dkim gen --domain D --selector S --algorithm
+  rsa|ed25519 [--bits 2048] --out FILE` (PKCS#8 PEM, mode 0600, không ghi đè,
+  in record TXT, không in khoá), `listmngr dkim records` (record cho mọi entry
+  trong config), `listmngr dkim dns` (tra TXT bằng resolver của `doctor` và so
+  với `p=` mong đợi; exit 12 khi lệch). Runbook xoay selector trong
+  `docs/OPERATIONS.md`: gen selector mới → thêm entry → `dkim dns` xác nhận →
+  bỏ entry cũ sau thời gian sống dài nhất của thư. Test: ký Ed25519 → verify
+  `dkim=pass` bằng `mail_auth` Verifier trên `TxtCache` seed (như
+  `mailpath_e2e.rs`); dual → hai chữ ký cùng pass; khoá EC P-256 → lỗi load;
+  CLI trên binary thật (cả hai thuật toán, mode, định dạng record, từ chối ghi
+  đè, stdout không có khoá). Docs: README, ARCHITECTURE, OPERATIONS,
+  `SECURITY_REVIEW.md` hàng "Outbound DKIM" → done, CHANGELOG.
+- [ ] **P8-MASTER-KEY** (L): `[security] master_key_file` (tuỳ chọn; 64 ký tự
+  hex = 32 byte, đọc qua `read_secret_file`). `listmngr_db::keyring`:
+  `MasterKey` (`Zeroizing<[u8; 32]>`), HKDF-SHA256 (`ring`) với info
+  `listmngr/totp/v1`, AEAD `CHACHA20_POLY1305` nonce 12 byte ngẫu nhiên, AAD =
+  `user_id`; `user_totp.secret` giữ kiểu TEXT, bản mã ghi `v1:<base64(nonce ||
+  ct)>`, hàng base32 cũ vẫn đọc được (nâng cấp không cần migration);
+  `Database::with_master_key`. Enrol/confirm/verify TOTP đi qua keyring; bản
+  giải mã nằm trong `Zeroizing<Vec<u8>>`. CLI `listmngr secrets status` (đếm
+  hàng plain/encrypted), `listmngr secrets encrypt` (mã hoá mọi hàng plain trong
+  một giao dịch, một audit `security.encrypt_secrets`), `listmngr secrets
+  rewrap --previous-key-file FILE` (xoay khoá). `doctor`: check `master_key` —
+  `warn` khi chưa đặt khoá hoặc còn hàng plain dưới khoá; `fail` khi có hàng mã
+  mà không có khoá. Backup/restore chép nguyên bản mã; khôi phục sang site khoá
+  khác → `doctor` fail; ghi ở UPGRADE/OPERATIONS. `SmtpAuthSecret` zeroize khi
+  drop. Ngoài phạm vi, ghi là deviation: bọc khoá DKIM/ARC (file owner-only),
+  khoá ký webhook và secret S3 (đọc từ file). Test: keyring (round trip, sai
+  AAD/khoá/bản mã bị sửa → lỗi); db (enrol+confirm+verify dưới khoá → hàng
+  `v1:`; hàng cũ vẫn verify; `encrypt` chuyển N hàng + audit; `rewrap`); PG
+  `#[ignore]` cho `encrypt`; CLI và doctor trên binary thật. Docs: README,
+  ARCHITECTURE, OPERATIONS, UPGRADE, `SECURITY_REVIEW.md` hàng "Secrets" →
+  done/deviates, config reference, CHANGELOG.
+- [ ] **P8-1.1** (S): bump `1.1.0` như `P7-1.0` (workspace, path deps,
+  `Chart.yaml`, fixture `system-versions.json`, `fuzz/Cargo.lock`),
+  `CHANGELOG.md` `## [1.1.0] - <ngày>`, `SECURITY_REVIEW.md` "What remains open"
+  viết lại (còn external review), bảng phase ledger đóng Phase 8, tag annotated
+  `v1.1.0` local (push là quyết định của người dùng).
+
+Backlog sau 1.1 (chưa lên lịch): external security review; MySQL/MariaDB
+(§1.3); WASM plugin; SDK TS/Python sinh từ `/openapi.json` (§4.15); ZAP baseline
+trong CI (§8); CSP nonce; cookie `__Host-` (cần `Path=/`).
+
 ## 8. Testing strategy
 
 | Loại        | Công cụ                                                                                                  | Phạm vi                                                                                                                                                |
