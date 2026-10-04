@@ -37,6 +37,6 @@ engineering record — every behaviour with the test that proves it — is
 
 ## Status
 
-Version `0.1.0` is the pre-release of the first version; the `1.0.0`
-tag closes Phase 7 of the plan. Every feature in this book has a
-bounded, recorded acceptance in the repository's ledger.
+`1.0.0` is the first release; its tag `v1.0.0` closes Phase 7 of the
+plan. Every feature in this book has a bounded, recorded acceptance in
+the repository's ledger.

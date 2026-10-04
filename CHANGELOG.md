@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-04
+
+The first release: Phase 7 of `docs/PLAN.md` closed, every acceptance ID of Phases 0–7 with a bounded, recorded local acceptance in `docs/FEATURE_PARITY.md`.
+
 ### Added
+- Version `1.0.0` (`P7-1.0`): every workspace package and the Helm chart at `1.0.0`; the OpenAPI document and the CLI report the package version; the annotated tag `v1.0.0`.
 - Phase 0 Rust workspace, CLI, health/readiness/metrics, pinned CI and hardened deployment artifacts; acceptance remains tracked per ID in `docs/FEATURE_PARITY.md`.
 - Phase 1 domain model, portable SQLx repositories, REST APIs, scoped tokens, audit log, preference layering, typed ETags, CLI, PostgreSQL/SQLite CRUD, and `mailmanclient==3.3.5` compatibility acceptance.
 - Disposable real-client acceptance harness and CI wiring for live PostgreSQL schema semantics and production-crate checks.
@@ -99,6 +104,6 @@
 - Removed argv password input, bounded password streams without truncation, and made secret-file read diagnostics generic. Automation callers now feed passwords via stdin.
 
 ### Decisions
-- Package version starts at 0.1.0 for unreleased Phase 1 development; it is not a release or phase-completion tag.
+- The package version stayed at 0.1.0 through unreleased development (ADR-0003); `1.0.0` is the first release, marked by the annotated tag `v1.0.0`.
 - Project license is AGPL-3.0-or-later.
 - Available stable dependency versions replace unavailable future PLAN pins; see ADR-0003.

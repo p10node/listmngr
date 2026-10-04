@@ -8,7 +8,10 @@ fn phase_zero_commands_report_version_config_and_info() {
         .arg("version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("listmngr 0.1.0"));
+        .stdout(predicate::str::contains(concat!(
+            "listmngr ",
+            env!("CARGO_PKG_VERSION")
+        )));
     Command::cargo_bin("listmngr")
         .unwrap()
         .arg("conf")
