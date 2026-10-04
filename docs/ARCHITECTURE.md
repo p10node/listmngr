@@ -1,5 +1,27 @@
 # Architecture
 
+## DKIM with Ed25519, several selectors, and the `dkim` command — bounded local acceptance verified
+
+`listmngr_mail::dkim`: `Algorithm::{Rsa, Ed25519}` (`dns_tag`,
+`signature_name`); `load_key` reads a PEM and decides by its form —
+PKCS#1 is RSA, PKCS#8 by the `PrivateKeyInfo` algorithm identifier
+(`rsaEncryption` or `id-Ed25519`; anything else is refused) — keeping
+the public half as the record publishes it (`SubjectPublicKeyInfo` DER,
+or the 32 raw bytes); `SigningKeys` is `BTreeMap<domain,
+Vec<DkimSigner<DkimKey, Done>>>` (mail-auth's `DkimKey` enum over
+`RsaKey<Sha256>` and `Ed25519Key`), `load` refusing a repeated
+`(domain, selector)` rather than a repeated domain, `sign` emitting one
+signature per selector over the same bytes; `record_value(pem)`,
+`algorithm_of(pem)`, `dns_record(entry)`; `generate_key(algorithm,
+rsa_bits)` — `Ed25519Key::generate_pkcs8` (ring) PEM-encoded, or
+`rsa::RsaPrivateKey::new` with `OsRng` (the crate's `getrandom` feature)
+as PKCS#8 PEM, 2048 to 4096 bits. `crates/cli/src/dkim.rs`: `gen`
+(`create_new` with mode `0600`, the record through `dns_record`, so the
+file is proved loadable), `records`, `dns` (the doctor's resolver,
+`txt_lookup`, the `p=` tag compared without whitespace; `doctor::Failure`
+for exit 12); `Command::Dkim` runs without a database.
+`webui_domains::dkim_records` is unchanged and now lists every selector.
+
 ## Loop and abuse rules — bounded local acceptance verified
 
 `listmngr_core::RateLimit { count, window_secs }` (`parse(key, spec)`,

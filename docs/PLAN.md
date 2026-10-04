@@ -1082,7 +1082,7 @@ phiên bản chỉ đổi ở `P8-1.1`):
   cũ hơn cửa sổ không tính; `max-hops`: 31 `Received:` → discard, 30 → accept.
   Docs: README, ARCHITECTURE, `SECURITY_REVIEW.md` hàng "Loop and abuse" → done,
   config reference, CHANGELOG.
-- [ ] **P8-DKIM-ED25519** (M): file khoá quyết định thuật toán — PKCS#8 với OID
+- [x] ~~**P8-DKIM-ED25519**~~ (xong) (M): file khoá quyết định thuật toán — PKCS#8 với OID
   `1.2.840.113549.1.1.1` → RSA (`rsa-sha256`, như cũ), OID `1.3.101.112` →
   Ed25519 (`ed25519-sha256`, RFC 8463), PKCS#1 → RSA; loại khác → lỗi khi load.
   Nhiều `[[mta.dkim_signing]]` cùng `domain` khác `selector` được phép và mỗi

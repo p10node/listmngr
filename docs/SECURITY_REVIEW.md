@@ -30,7 +30,7 @@ Legend: **done** as designed · **deviates** done another way, on purpose
 | --- | --- | --- | --- |
 | Inbound SPF/DKIM/DMARC → `Authentication-Results`, `validate-authenticity` rule | done | `crates/mail/src/authenticity.rs`, the `Authentication and DMARC mitigation` ledger row | — |
 | DMARC mitigation incl. org domain (PSL), `sp=`, `pct=` | done | `P6-DMARC-WRAP` and the Phase 2 row; five actions | — |
-| Outbound DKIM: RSA-2048 + Ed25519 dual, rotation, DNS record UI | deviates | `crates/mail/src/dkim.rs` (RSA, PKCS#8, `read_key_file` owner-only); the domain page shows the record | Ed25519 signing (RFC 8463) is not implemented; RSA-2048 is what receivers verify universally. Rotation is a new selector and key file, no tooling. Open for a later release, not a vulnerability. |
+| Outbound DKIM: RSA-2048 + Ed25519 dual, rotation, DNS record UI | done (1.1) | `crates/mail/src/dkim.rs` (RSA PKCS#8/PKCS#1 and Ed25519 PKCS#8, decided by the key file; several selectors per domain sign side by side; `read_key_file` owner-only); the domain page lists every selector's record; `listmngr dkim gen|records|dns` and the rotation runbook in `docs/OPERATIONS.md` (`P8-DKIM-ED25519`) | Done since `P8-DKIM-ED25519`: Ed25519 (RFC 8463) signs beside RSA-2048, which stays the default `dkim gen` makes because receivers verify it universally; rotation is a new selector, `dkim dns` confirming publication, the old entry removed after the longest verification delay. |
 | ARC when the list alters content | done | `P6-ARC-SEAL` | — |
 | VERP with an HMAC bounce token | done | `verp.rs`, bounce probes with a hashed token (`bounce_probes.token_hash`) | — |
 | Loop and abuse: `loop` rule, max hops, per-sender and per-list posting rate | done (1.1) | `rules.rs` `loop` (the list's own `List-Post` marker), `max-hops` (`[mta] max_received_hops`, 30, discards as a loop) and `posting-rate` (`[security] rate_limit.post`, per sender and list, holds; the `posting_rate` ledger written in the accept transaction) since `P8-ABUSE-RULES`; `max-recipients`, `emergency`, `member-moderation`; per-address request cooldowns for commands; `security.rate_limit.subscribe` | The hop cap and the per-sender rate are rules of the posting chain since `P8-ABUSE-RULES`; the rate is per sender on one list, which is the design's per-list limit as well (a list-wide cap on all senders is not a separate control: `emergency` is). |
@@ -81,7 +81,6 @@ Legend: **done** as designed · **deviates** done another way, on purpose
 ## What remains open for 1.x
 
 1. At-rest encryption of TOTP secrets (and a key-wrapping scheme for DKIM/ARC keys) under a `security.master_key`.
-2. Ed25519 DKIM alongside RSA, and selector rotation tooling.
-3. An external review.
+2. An external review.
 
-Closed since: explicit MIME depth, part and header-count ceilings in the intake (`P8-MIME-LIMITS`, 1.1); the `Received:` hop cap and the per-sender posting rate as rules (`P8-ABUSE-RULES`, 1.1).
+Closed since: explicit MIME depth, part and header-count ceilings in the intake (`P8-MIME-LIMITS`, 1.1); the `Received:` hop cap and the per-sender posting rate as rules (`P8-ABUSE-RULES`, 1.1); Ed25519 DKIM beside RSA with `listmngr dkim gen|records|dns` and the rotation runbook (`P8-DKIM-ED25519`, 1.1).
