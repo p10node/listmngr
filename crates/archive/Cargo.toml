@@ -12,10 +12,10 @@ delivery-phase = 2
 workspace = true
 
 [dependencies]
-listmngr-core = { path = "../core", version = "0.1.0" }
-listmngr-db = { path = "../db", version = "0.1.0" }
-listmngr-mail = { path = "../mail", version = "0.1.0" }
-listmngr-pipeline = { path = "../pipeline", version = "0.1.0" }
+listmngr-core = { path = "../core", version = "1.0.0" }
+listmngr-db = { path = "../db", version = "1.0.0" }
+listmngr-mail = { path = "../mail", version = "1.0.0" }
+listmngr-pipeline = { path = "../pipeline", version = "1.0.0" }
 reqwest = { workspace = true, features = ["json", "rustls-tls-webpki-roots"] }
 mail-parser = "=0.11.8"
 pulldown-cmark = { version = "0.13.4", default-features = false }

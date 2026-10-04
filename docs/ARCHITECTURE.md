@@ -1,5 +1,14 @@
 # Architecture
 
+## 1.0.0 — bounded local acceptance verified
+
+The version lives in `[workspace.package]` and in each crate's path
+dependencies (`version = "1.0.0"` beside `path`), so a crate published
+alone would still resolve its siblings; `cargo update --workspace`
+rewrites only the workspace entries of `Cargo.lock`. `utoipa`'s
+`info(title = …)` without `version` takes `CARGO_PKG_VERSION`, as the
+CLI's `version` command already did, so nothing else names the number.
+
 ## Release — bounded local acceptance verified
 
 The release profile keeps `overflow-checks = true` and adds
