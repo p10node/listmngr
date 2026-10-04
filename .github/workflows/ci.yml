@@ -142,6 +142,24 @@ jobs:
           tool: cargo-fuzz@0.13.2
       - run: scripts/fuzz.sh 60
 
+  docs:
+    # P7-DOCS-SITE: the book builds, its links resolve, and the generated
+    # configuration reference is the source's.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+        with:
+          tool: mdbook@0.5.4
+      - run: python3 scripts/config-reference.py --check
+      - run: python3 scripts/check-book-links.py
+      - run: mdbook build docs/book
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: book
+          path: docs/book/book
+          retention-days: 14
+
   container:
     runs-on: ubuntu-24.04
     steps:

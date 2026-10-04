@@ -1,0 +1,19 @@
+[book]
+title = "listmngr"
+description = "A mailing-list manager that replaces GNU Mailman 3 — the operator's book"
+authors = ["the listmngr contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/p10node/listmngr"
+site-url = "/"
+
+[output.html.search]
+enable = true
