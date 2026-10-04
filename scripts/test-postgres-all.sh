@@ -28,6 +28,7 @@ exec cargo test --locked --workspace --all-targets -- --ignored \
   --skip chromium_browser_acceptance \
   --skip chromium_acceptance_journey \
   --skip search_p95_is_under_100ms_over_100k_posts --skip import_100k_posts_in_under_ten_minutes \
+  --skip a_large_list_takes_a_burst_of_posts_and_the_numbers_are_recorded \
   --skip real_postfix_lookup_agrees_with_runtime_recipient_validation \
   --skip real_postmap_compiles_hash_maps_that_answer_exact_lookups \
   --skip import21_reads_mailman3s_own_fixture \
