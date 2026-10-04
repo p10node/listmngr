@@ -36,6 +36,7 @@ pub mod webhooks;
 
 pub use bounces::run as run_bounce_processor;
 pub use inbound::{COMMAND_SUFFIXES, InboundHandler};
+pub use listmngr_mail::structure::Limits as StructureLimits;
 pub use outbound::run as run_out_processor;
 pub use outbound::{PrepareError, prepare_individual};
 pub use policy_facts::resolve_recipients;
@@ -88,6 +89,8 @@ pub struct MailRoleConfig {
     pub smtp_tls: listmngr_mail::smtp::TransportSecurity,
     pub max_recipients: usize,
     pub max_message_bytes: usize,
+    /// `[mta] max_header_count`, `max_mime_parts`, `max_mime_depth`.
+    pub structure: StructureLimits,
     pub command_timeout: Duration,
     pub max_concurrent_sessions: usize,
     pub in_max_attempts: i64,
@@ -170,6 +173,7 @@ impl MailRoleConfig {
             smtp_tls: listmngr_mail::smtp::TransportSecurity::from_mta(&config.mta)?,
             max_recipients: config.mta.max_recipients as usize,
             max_message_bytes: config.mta.max_message_bytes as usize,
+            structure: StructureLimits::from(&config.mta),
             command_timeout: Duration::from_secs(u64::from(config.mta.command_timeout_secs)),
             max_concurrent_sessions: 50,
             in_max_attempts: 5,
@@ -189,6 +193,7 @@ impl MailRoleConfig {
             command_timeout: self.command_timeout,
             in_max_attempts: self.in_max_attempts,
             verp_delimiter: self.verp_delimiter.clone(),
+            structure: self.structure,
         }
     }
 }
@@ -241,6 +246,21 @@ async fn run_acceptor(
         while sessions.join_next().await.is_some() {}
     }
     Ok(())
+}
+
+/// The `nntp` runner: `gatenews` on its schedule and the news queue.
+fn spawn_news(
+    tasks: &mut tokio::task::JoinSet<std::io::Result<()>>,
+    db: Database,
+    config: &listmngr_core::Config,
+    limits: StructureLimits,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    let news = nntp::run(db, config.nntp.clone(), limits, shutdown);
+    tasks.spawn(async move {
+        news.await;
+        Ok(())
+    });
 }
 
 /// Run the acceptor and both queue processors on an already-bound LMTP
@@ -309,11 +329,13 @@ pub async fn serve_mail_role(
     } else {
         None
     };
-    let news = nntp::run(db.clone(), config.nntp.clone(), shutdown.clone());
-    tasks.spawn(async move {
-        news.await;
-        Ok(())
-    });
+    spawn_news(
+        &mut tasks,
+        db.clone(),
+        &config,
+        role.structure,
+        shutdown.clone(),
+    );
     let inbound = Box::pin(processor::run(
         db.clone(),
         config,

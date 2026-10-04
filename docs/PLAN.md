@@ -1045,7 +1045,7 @@ phiên bản chỉ đổi ở `P8-1.1`):
   complete open scope") nhận banner "historical — superseded" ở đầu file, không
   xoá. Gate: toàn bộ CLAUDE.md + `python3 -m unittest discover -s scripts/tests`
   + `mdbook build docs/book` + `scripts/check-book-links.py`.
-- [ ] **P8-MIME-LIMITS** (M): `[mta] max_header_count = 500`,
+- [x] ~~**P8-MIME-LIMITS**~~ (xong) (M): `[mta] max_header_count = 500`,
   `max_mime_parts = 1000`, `max_mime_depth = 20` (số nguyên ≥ 1, kiểm tra khi
   load). `listmngr_mail::structure::{Limits, Measure, measure, check}`: header =
   số field ở khối header ngoài cùng (dòng không bắt đầu bằng WSP trước dòng

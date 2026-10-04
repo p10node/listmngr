@@ -20,7 +20,12 @@ const LEASE_MS: i64 = 30_000;
 /// The context key holding the replacement `Message-ID` after a refusal.
 const MUNGED_ID: &str = "nntp_message_id";
 
-pub async fn run(db: Database, config: NntpConfig, mut shutdown: watch::Receiver<bool>) {
+pub async fn run(
+    db: Database,
+    config: NntpConfig,
+    limits: listmngr_mail::structure::Limits,
+    mut shutdown: watch::Receiver<bool>,
+) {
     if !config.enabled() {
         // Gated posts wait in the queue for a news server to be configured.
         tracing::info!("nntp runner idle: no [nntp] host configured");
@@ -34,7 +39,7 @@ pub async fn run(db: Database, config: NntpConfig, mut shutdown: watch::Receiver
         // `gatenews_every`; the first poll happens at once.
         if !every.is_zero() && last_poll.is_none_or(|at| at.elapsed() >= every) {
             last_poll = Some(Instant::now());
-            poll_and_log(&db, &config).await;
+            poll_and_log(&db, &config, &limits).await;
         }
         let claimed = db
             .mail_queue()
@@ -58,8 +63,12 @@ pub async fn run(db: Database, config: NntpConfig, mut shutdown: watch::Receiver
 }
 
 /// One scheduled `gatenews`, its report in the log.
-async fn poll_and_log(db: &Database, config: &NntpConfig) {
-    match gate_news(db, config).await {
+async fn poll_and_log(
+    db: &Database,
+    config: &NntpConfig,
+    limits: &listmngr_mail::structure::Limits,
+) {
+    match gate_news_with(db, config, limits).await {
         Ok(report) => {
             for entry in report {
                 tracing::info!(
@@ -258,6 +267,18 @@ pub async fn gate_news(
     db: &Database,
     config: &NntpConfig,
 ) -> Result<Vec<GateReport>, listmngr_core::Error> {
+    gate_news_with(db, config, &listmngr_mail::structure::Limits::default()).await
+}
+
+/// [`gate_news`] with the site's structure ceilings: an article over them
+/// is passed, not gated, like one whose headers cannot be read.
+/// # Errors
+/// As [`gate_news`].
+pub async fn gate_news_with(
+    db: &Database,
+    config: &NntpConfig,
+    limits: &listmngr_mail::structure::Limits,
+) -> Result<Vec<GateReport>, listmngr_core::Error> {
     let mut report = Vec::new();
     let lists: Vec<_> = db
         .lists()
@@ -301,7 +322,7 @@ pub async fn gate_news(
         match reader.group(&newsgroup).await {
             Err(error) => entry.error = Some(error.to_string()),
             Ok((first, last)) => {
-                match poll(db, &mut reader, &list, first, last, &mut entry).await {
+                match poll(db, &mut reader, &list, first, last, &mut entry, limits).await {
                     Ok(()) => {}
                     Err(PollStop::Contended) => {
                         entry.error = Some("watermark moved by another poller; stopped".into());
@@ -347,6 +368,46 @@ enum PollStop {
     Database(listmngr_core::Error),
 }
 
+/// One article of a poll: the message to gate, `None` when the article is
+/// passed over — gone from the server, unreadable, the list's own, or over
+/// the site's structure ceilings — and the session failure that stops the
+/// poll.
+async fn gate_article(
+    reader: &mut listmngr_mail::nntp::Reader,
+    number: u64,
+    list: &listmngr_core::MailingList,
+    limits: &listmngr_mail::structure::Limits,
+) -> Result<Option<NewMessage>, PollStop> {
+    let article = match reader.article(number).await {
+        Ok(Some(article)) => article,
+        // Expired on the server: gone for good, passed.
+        Ok(None) => {
+            tracing::warn!(list = %list.id, number, "gatenews: article gone from the server, passed");
+            return Ok(None);
+        }
+        // The session, not the article: stop here and keep the watermark.
+        Err(error) => return Err(PollStop::Server(error.to_string())),
+    };
+    Ok(match listmngr_mail::nntp::inbound(&article, list) {
+        Ok(Some((raw, sender))) => match listmngr_mail::structure::check(&raw, limits) {
+            Ok(_) => Some(gated_message(list, raw, &sender)),
+            // Over the site's ceilings: passed like an unreadable one, or
+            // the list would never get past it.
+            Err(excess) => {
+                tracing::warn!(list = %list.id, number, %excess, "gatenews: article over the structure ceilings, passed");
+                None
+            }
+        },
+        Ok(None) => None,
+        // A header block this runtime cannot read: Mailman logs and moves
+        // on, and so does this, or the list would never get past it.
+        Err(error) => {
+            tracing::warn!(list = %list.id, number, %error, "gatenews: article unreadable, passed");
+            None
+        }
+    })
+}
+
 async fn poll(
     db: &Database,
     reader: &mut listmngr_mail::nntp::Reader,
@@ -354,6 +415,7 @@ async fn poll(
     lowest: u64,
     highest: u64,
     entry: &mut GateReport,
+    limits: &listmngr_mail::structure::Limits,
 ) -> Result<(), PollStop> {
     let watermark = |number: u64| i64::try_from(number).unwrap_or(i64::MAX);
     let now = || chrono::Utc::now().timestamp_millis();
@@ -382,26 +444,7 @@ async fn poll(
         .saturating_add(1)
         .max(lowest);
     for number in start..=highest {
-        let gated = match reader.article(number).await {
-            Ok(Some(article)) => match listmngr_mail::nntp::inbound(&article, list) {
-                Ok(Some((raw, sender))) => Some(gated_message(list, raw, &sender)),
-                Ok(None) => None,
-                // A header block this runtime cannot read: Mailman logs and
-                // moves on, and so does this, or the list would never get
-                // past it.
-                Err(error) => {
-                    tracing::warn!(list = %list.id, number, %error, "gatenews: article unreadable, passed");
-                    None
-                }
-            },
-            // Expired on the server: gone for good, passed.
-            Ok(None) => {
-                tracing::warn!(list = %list.id, number, "gatenews: article gone from the server, passed");
-                None
-            }
-            // The session, not the article: stop here and keep the watermark.
-            Err(error) => return Err(PollStop::Server(error.to_string())),
-        };
+        let gated = gate_article(reader, number, list, limits).await?;
         let queued = gated.is_some();
         advance(Some(expected), watermark(number), gated).await?;
         expected = watermark(number);

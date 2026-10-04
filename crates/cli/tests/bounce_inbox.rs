@@ -238,6 +238,7 @@ fn seed_inbox(url: &str) {
             command_timeout: Duration::from_secs(3),
             in_max_attempts: 3,
             verp_delimiter: "+".into(),
+            structure: listmngr_mail::structure::Limits::default(),
         };
         let recipients: Vec<String> = vec![
             "list-bounces@example.invalid".into(),

@@ -26,6 +26,7 @@ async fn fixture() -> (Database, InboundHandler) {
         command_timeout: Duration::from_secs(5),
         in_max_attempts: 1,
         verp_delimiter: "+".into(),
+        structure: listmngr_mail::structure::Limits::default(),
     };
     (db, handler)
 }
