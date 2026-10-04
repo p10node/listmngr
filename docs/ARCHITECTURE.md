@@ -1,6 +1,24 @@
 # Architecture
 
-## Chaos — bounded local acceptance verified
+## Load — bounded local acceptance verified
+
+`crates/cli/tests/load.rs` reuses the chaos harness's shape: a loopback
+relay that counts recipients per transaction and records the moment of
+each acceptance with the post number read from the delivered subject,
+an LMTP client, the binary as CLI and as `serve`. The roster is written
+through `MemberRepo::create` (one transaction per member, as the API
+would) rather than ten thousand process starts; the posts go in one
+after another, each durable (`250` to `DATA`) before the next; the run
+waits until every expected recipient (`posts × (members + 1)`, the
+author being a member) has been accepted, then computes throughput and
+the per-post latency percentiles and prints them as JSON.
+`docs/OPERATIONS.md` carries the recorded numbers and the tuning they
+imply. Running it in release mode found that macOS 27's `dyld` refuses
+the proc-macro dylibs a release build produces without debug info
+(`mis-aligned LINKEDIT string pool`, `sqlx-macros`); the root
+`Cargo.toml` therefore sets `[profile.release.build-override] debug =
+"line-tables-only"`, which only affects build scripts and proc macros.
+
 
 `crates/cli/tests/chaos.rs` has a harness of its own, smaller than the
 mail path's: a loopback SMTP relay (`Sink`) with a `stall` fault that
