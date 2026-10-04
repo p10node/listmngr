@@ -19,7 +19,12 @@ pub async fn run(db: &Database, config: &Config, command: Command) -> Result<()>
                 config.nntp.enabled(),
                 "no news server: set nntp.host before gating"
             );
-            let report = listmngr_runners::nntp::gate_news(db, &config.nntp).await?;
+            let report = listmngr_runners::nntp::gate_news_with(
+                db,
+                &config.nntp,
+                &listmngr_runners::StructureLimits::from(&config.mta),
+            )
+            .await?;
             for entry in &report {
                 println!("{}", entry.to_json());
             }

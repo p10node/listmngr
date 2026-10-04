@@ -1,6 +1,6 @@
 //! Content filtering (`mime-delete`): a message filtered with the default
-//! settings and with aggressive ones, and HTML turned into text, on
-//! arbitrary bytes.
+//! settings and with aggressive ones, HTML turned into text, and the
+//! intake's structure measure, on arbitrary bytes.
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use listmngr_core::{AlterMessages, FilterAction};
@@ -22,6 +22,7 @@ fn aggressive() -> AlterMessages {
 
 fuzz_target!(|data: &[u8]| {
     let _ = mime_delete::apply(data, &AlterMessages::default());
+    let _ = listmngr_mail::structure::measure(data);
     let _ = mime_delete::apply(data, &aggressive());
     let text = String::from_utf8_lossy(data);
     let _ = listmngr_mail::html_text::html_to_text(&text);
