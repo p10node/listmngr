@@ -116,7 +116,11 @@ impl Database {
             .map_err(db_error)?;
         let (secret, confirmed) = if let Some(row) = row {
             (
-                row.try_get::<String, _>("secret").map_err(db_error)?,
+                self.open_totp_secret(
+                    user,
+                    &row.try_get::<String, _>("secret").map_err(db_error)?,
+                )?
+                .to_string(),
                 row.try_get::<Option<i64>, _>("confirmed_at")
                     .map_err(db_error)?
                     .is_some(),
@@ -129,7 +133,7 @@ impl Database {
             let secret = totp::encode(&bytes);
             sqlx::query("INSERT INTO user_totp(user_id,secret,created_at) VALUES($1,$2,$3)")
                 .bind(user.to_string())
-                .bind(&secret)
+                .bind(self.seal_totp_secret(user, &secret)?)
                 .bind(now_ms)
                 .execute(&mut *tx)
                 .await
@@ -234,7 +238,8 @@ impl Database {
                 "a second factor is already enabled".into(),
             ));
         }
-        let secret: String = row.try_get("secret").map_err(db_error)?;
+        let secret =
+            self.open_totp_secret(user, &row.try_get::<String, _>("secret").map_err(db_error)?)?;
         let bytes = totp::decode(&secret).ok_or_else(|| Error::Database("stored secret".into()))?;
         let step = totp::verify(&bytes, now_ms / 1000, code, 0)
             .ok_or_else(|| Error::Validation("the code did not match".into()))?;
@@ -352,7 +357,8 @@ impl Database {
             .await
             .map_err(db_error)?
             .ok_or(Error::Authentication)?;
-        let secret: String = row.try_get("secret").map_err(db_error)?;
+        let secret =
+            self.open_totp_secret(user, &row.try_get::<String, _>("secret").map_err(db_error)?)?;
         let last: i64 = row.try_get("last_counter").map_err(db_error)?;
         let bytes = totp::decode(&secret).ok_or_else(|| Error::Database("stored secret".into()))?;
         if let Some(step) = totp::verify(&bytes, now_ms / 1000, presented, last) {
@@ -465,5 +471,42 @@ impl Database {
             .verify_password(password.as_bytes(), &parsed)
             .map_err(|_| Error::Authentication)?;
         Ok(user)
+    }
+}
+
+impl Database {
+    /// The stored form of a TOTP secret: sealed under the master key when
+    /// the site has one, the base32 text otherwise.
+    fn seal_totp_secret(&self, user: UserId, secret: &str) -> Result<String> {
+        self.master_key().map_or_else(
+            || Ok(secret.to_owned()),
+            |key| {
+                key.seal(
+                    crate::keyring::TOTP_PURPOSE,
+                    user.to_string().as_bytes(),
+                    secret.as_bytes(),
+                )
+            },
+        )
+    }
+
+    /// The base32 secret from its stored form; a sealed row needs the key
+    /// it was sealed under, and a plain row reads as every release before
+    /// 1.1 wrote it.
+    fn open_totp_secret(&self, user: UserId, stored: &str) -> Result<zeroize::Zeroizing<String>> {
+        if !crate::keyring::is_sealed(stored) {
+            return Ok(zeroize::Zeroizing::new(stored.to_owned()));
+        }
+        let key = self
+            .master_key()
+            .ok_or_else(|| Error::Database("a sealed secret needs security.master_key".into()))?;
+        let bytes = key.open(
+            crate::keyring::TOTP_PURPOSE,
+            user.to_string().as_bytes(),
+            stored,
+        )?;
+        String::from_utf8(bytes.to_vec())
+            .map(zeroize::Zeroizing::new)
+            .map_err(|_| Error::Database("stored secret".into()))
     }
 }

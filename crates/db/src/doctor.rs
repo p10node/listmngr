@@ -3,12 +3,23 @@ use crate::{MIGRATOR, install_drivers};
 use sqlx::{ConnectOptions, Connection, migrate::Migrate};
 use std::str::FromStr;
 
-/// Check the embedded migration ledger and enumerate at most 1000 mail domains.
+/// What the read-only inspection found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Inspection {
+    /// At most 1000 mail domains.
+    pub domains: Vec<String>,
+    /// TOTP secrets sealed under a master key, and in the clear.
+    pub totp_sealed: u64,
+    pub totp_plain: u64,
+}
+
+/// Check the embedded migration ledger, enumerate at most 1000 mail domains
+/// and count the sealed and plain TOTP secrets.
 /// The caller must impose an overall deadline. No raw database error escapes.
 ///
 /// # Errors
 /// Returns a static diagnostic code for connection/schema/inventory failures.
-pub async fn inspect(url: &str) -> Result<Vec<String>, &'static str> {
+pub async fn inspect(url: &str) -> Result<Inspection, &'static str> {
     install_drivers();
     let sqlite = url.starts_with("sqlite:");
     let url = if sqlite {
@@ -41,7 +52,7 @@ pub async fn inspect(url: &str) -> Result<Vec<String>, &'static str> {
 
 async fn inspect_connection(
     connection: &mut sqlx::AnyConnection,
-) -> Result<Vec<String>, &'static str> {
+) -> Result<Inspection, &'static str> {
     let dirty = connection
         .dirty_version()
         .await
@@ -68,11 +79,21 @@ async fn inspect_connection(
     }
     let domains: Vec<String> =
         sqlx::query_scalar("SELECT mail_host FROM domains ORDER BY mail_host LIMIT 1001")
-            .fetch_all(connection)
+            .fetch_all(&mut *connection)
             .await
             .map_err(|_| "schema_unavailable")?;
     if domains.len() > 1000 {
         return Err("domain_limit_exceeded");
     }
-    Ok(domains)
+    let (sealed, plain): (i64, i64) = sqlx::query_as(
+        "SELECT COALESCE(SUM(CASE WHEN secret LIKE 'v1:%' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN secret LIKE 'v1:%' THEN 0 ELSE 1 END),0) FROM user_totp",
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(|_| "schema_unavailable")?;
+    Ok(Inspection {
+        domains,
+        totp_sealed: u64::try_from(sealed).unwrap_or(0),
+        totp_plain: u64::try_from(plain).unwrap_or(0),
+    })
 }

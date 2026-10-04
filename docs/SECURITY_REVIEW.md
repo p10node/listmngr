@@ -55,7 +55,7 @@ Legend: **done** as designed · **deviates** done another way, on purpose
 
 | Item | Status | Evidence | Review |
 | --- | --- | --- | --- |
-| Secrets: `SecretString` + `zeroize`, no Debug/log, `*_file`, DKIM key and TOTP secret encrypted at rest with `security.master_key` | deviates | `SmtpAuthSecret` (no `Debug`, serialises as `[REDACTED]`), every secret has a `*_file` read owner-only (`read_secret_file`), `redacted_json`; DKIM/ARC keys are files; TOTP secrets are rows | **Open**: no at-rest encryption of TOTP secrets and no `zeroize`. Mitigation: the database and the key files are the service user's only; `backup` carries the secrets as the database does (keep backups where the database is kept). A master key is a 1.x item, not a 1.0 blocker. |
+| Secrets: `SecretString` + `zeroize`, no Debug/log, `*_file`, DKIM key and TOTP secret encrypted at rest with `security.master_key` | done (1.1) / deviates | `SmtpAuthSecret` (no `Debug`, serialises as `[REDACTED]`, zeroed on drop), every secret has a `*_file` read owner-only (`read_secret_file`), `redacted_json`; `[security] master_key`/`master_key_file` and `listmngr_db::keyring` seal TOTP secrets at rest (ChaCha20-Poly1305 under an HKDF-derived key, the account id as associated data), `listmngr secrets status|encrypt|rewrap|new-key`, the doctor's `master_key` check (`P8-MASTER-KEY`) | Done for the secret the database must read back (TOTP); the plaintext lives in `Zeroizing` buffers. Deviates, on purpose: the DKIM and ARC keys, the webhook signing key and the S3 secret stay owner-only files rather than being wrapped under the master key — wrapping a file key with another file key on the same host adds no protection the file mode does not give. A site without a key keeps the 1.0 behaviour and the doctor says so. |
 | Audit: every change audited with actor, ip, diff; UI; export | done | `record_tx_with_context` at over a hundred sites, the audit page, `P4-GDPR` export | — |
 | Backup: `listmngr backup` + restore | done | `P6-BACKUP` (any backend to any backend, message bytes included) | — |
 | Supply chain: lock, `cargo deny`, `cargo audit`, SBOM, cosign, Dependabot | partly / **fixed** | lock committed, `deny.toml`, `cargo audit` in CI; SBOM and cosign are `P7-RELEASE` | **F4** `.github/dependabot.yml` (cargo at `/` and `/fuzz`, github-actions, weekly) was missing and is added. |
@@ -80,7 +80,6 @@ Legend: **done** as designed · **deviates** done another way, on purpose
 
 ## What remains open for 1.x
 
-1. At-rest encryption of TOTP secrets (and a key-wrapping scheme for DKIM/ARC keys) under a `security.master_key`.
-2. An external review.
+1. An external review.
 
-Closed since: explicit MIME depth, part and header-count ceilings in the intake (`P8-MIME-LIMITS`, 1.1); the `Received:` hop cap and the per-sender posting rate as rules (`P8-ABUSE-RULES`, 1.1); Ed25519 DKIM beside RSA with `listmngr dkim gen|records|dns` and the rotation runbook (`P8-DKIM-ED25519`, 1.1).
+Closed since: explicit MIME depth, part and header-count ceilings in the intake (`P8-MIME-LIMITS`, 1.1); the `Received:` hop cap and the per-sender posting rate as rules (`P8-ABUSE-RULES`, 1.1); Ed25519 DKIM beside RSA with `listmngr dkim gen|records|dns` and the rotation runbook (`P8-DKIM-ED25519`, 1.1); TOTP secrets sealed at rest under `security.master_key` with `listmngr secrets` and the doctor's `master_key` check (`P8-MASTER-KEY`, 1.1 — the DKIM/ARC file keys deliberately stay files).
