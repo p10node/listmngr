@@ -33,9 +33,13 @@ the recipient up in the `lsearch` maps and delivers over LMTP.
 
 ## Signing and checking
 
-- **DKIM** per domain: one `[[mta.dkim_signing]]` table per domain with
-  `domain`, `selector` and `private_key_file`; the domain page shows
-  the TXT record to publish.
+- **DKIM** per domain: a `[[mta.dkim_signing]]` table per selector with
+  `domain`, `selector` and `private_key_file` — an RSA or an Ed25519
+  key, several selectors per domain signing side by side; the domain
+  page shows the TXT records to publish. `listmngr dkim gen` makes a
+  key and prints its record, `dkim records` prints every configured
+  record, and `dkim dns` checks what DNS publishes; the operations
+  chapter has the rotation steps.
 - **ARC**: `[mta.arc]` seals every delivered post so the list's changes
   (subject prefix, footer, `From` munging) do not break DMARC
   downstream.

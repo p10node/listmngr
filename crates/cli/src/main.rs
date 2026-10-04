@@ -5,6 +5,7 @@ mod archive;
 mod backup;
 mod bounce;
 mod digests;
+mod dkim;
 mod doctor;
 mod errors;
 mod import21;
@@ -60,6 +61,12 @@ enum Command {
     Status,
     /// Read-only DB/schema, relay and mail-domain DNS diagnostics as JSON.
     Doctor(doctor::Options),
+    /// DKIM signing keys: generate one, print the configured records,
+    /// check what DNS publishes.
+    Dkim {
+        #[command(subcommand)]
+        command: dkim::Command,
+    },
     Migrate,
     Serve,
     Domains {
@@ -346,6 +353,7 @@ async fn run() -> Result<()> {
         Command::Status => status::check(&config).await?,
         Command::Plugins => plugins::run(),
         Command::Doctor(options) => doctor::run(&config, options).await?,
+        Command::Dkim { command } => dkim::run(&config, command).await?,
         command => Box::pin(run_database(command, config)).await?,
     }
     Ok(())
@@ -449,7 +457,8 @@ async fn run_database(command: Command, config: Config) -> Result<()> {
         | Command::Info
         | Command::Status
         | Command::Plugins
-        | Command::Doctor(_) => {
+        | Command::Doctor(_)
+        | Command::Dkim { .. } => {
             bail!("command does not use database")
         }
     }
