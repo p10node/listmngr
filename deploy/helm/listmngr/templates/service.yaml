@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "listmngr.fullname" . }}
+  labels:
+    {{- include "listmngr.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "listmngr.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    {{- if .Values.service.lmtp.enabled }}
+    - name: lmtp
+      port: {{ .Values.service.lmtp.port }}
+      targetPort: lmtp
+    {{- end }}

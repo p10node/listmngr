@@ -1,5 +1,46 @@
 # listmngr
 
+## Release (`P7-RELEASE`) — bounded local acceptance verified
+
+`.github/workflows/release.yml` runs on a `v*` tag, every action pinned
+by commit: static binaries for `x86_64-unknown-linux-musl`,
+`aarch64-unknown-linux-musl`, `aarch64-apple-darwin` and
+`x86_64-apple-darwin` (`cargo build --locked --release` on the pinned
+toolchain; one `.tar.gz` each with the binary, the licence, the README,
+`docs/UPGRADE.md` and the systemd unit); a `.deb` (`cargo-deb` 3.8.0)
+and an `.rpm` (`cargo-generate-rpm` 0.21.0) for x86_64 Linux from the
+musl binary, installing `/usr/bin/listmngr`, the unit (disabled), the
+`listmngr` account, `/etc/listmngr` and `/var/lib/listmngr`
+(`[package.metadata.deb]` and `[package.metadata.generate-rpm]` in
+`crates/cli/Cargo.toml`, `deploy/packaging/debian/postinst`); the image
+from `deploy/Dockerfile` for `linux/amd64` and `linux/arm64`, pushed to
+GHCR as `<version>` and `<major>.<minor>` and signed keyless with cosign
+by digest; the Helm chart `deploy/helm/listmngr` linted, rendered and
+packaged; a CycloneDX SBOM (`cargo-cyclonedx` 0.5.9); one `SHA256SUMS`
+over everything, signed keyless with `cosign sign-blob`. The release
+profile is `lto = "thin"`, `codegen-units = 1`, `strip = "symbols"`
+with the overflow checks kept: a clean `cargo build --locked --release -p listmngr` on this laptop went from 370.6 s and 52,987,616 bytes to 518.8 s and 36,120,624 bytes (-32% size, +40% build time; a panic still names its file and line, a backtrace no longer names functions). `docs/UPGRADE.md`
+is the migration policy: a migration only adds within a minor series,
+a binary runs against exactly the ledger its own migrations produce
+(`serve` applies the missing ones at start and refuses a database with
+one it does not know; `doctor` reports `schema_mismatch`), so a
+rollback is a restore of the backup made before the upgrade. The unit's
+`ExecStart` is now `/usr/bin/listmngr`, where the packages put the
+binary; CI's `chart` job lints and renders the chart on every push.
+
+```sh
+cargo build --locked --release -p listmngr
+env -u CFLAGS -u CPPFLAGS -u LDFLAGS cargo zigbuild --locked --release -p listmngr --target x86_64-unknown-linux-musl
+cargo deb --no-build --locked -p listmngr --target x86_64-unknown-linux-musl -o dist/
+cargo generate-rpm -p crates/cli --target x86_64-unknown-linux-musl -o dist/
+cargo cyclonedx --manifest-path crates/cli/Cargo.toml --format json --override-filename listmngr.cdx
+helm lint deploy/helm/listmngr && helm template listmngr deploy/helm/listmngr
+```
+
+Limits: no tag has been pushed, so the workflow has not run; the
+keyless signing, the GHCR push, the multi-architecture image and the
+macOS and arm64 runners exist only in CI; the musl binary here was linked by `cargo-zigbuild` (zig 0.16.0), not by the `musl-tools` CI uses, and the packages built from it were inspected by listing (`ar`, `tar`, the RPM header), not installed on a Debian or RPM host; `docker build` was not run (no daemon); the chart was linted and rendered, not deployed; the build times are this laptop's with `jobs = 4`.
+
 ## The operator's book (`P7-DOCS-SITE`) — bounded local acceptance verified
 
 `docs/book/` is an mdBook (`mdbook` 0.5.4, pinned in CI): an

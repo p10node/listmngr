@@ -1,0 +1,10 @@
+apiVersion: v2
+name: listmngr
+description: A mailing-list manager that replaces GNU Mailman 3 — core, web interface and archive in one binary.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/p10node/listmngr
+sources:
+  - https://github.com/p10node/listmngr
+kubeVersion: ">=1.27.0-0"

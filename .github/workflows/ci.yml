@@ -38,7 +38,7 @@ jobs:
       - run: cargo build --locked --workspace
       - name: Validate hardened Linux unit against the built executable
         run: |
-          sudo install -m 0755 target/debug/listmngr /usr/local/bin/listmngr
+          sudo install -m 0755 target/debug/listmngr /usr/bin/listmngr
           systemd-analyze verify deploy/systemd/listmngr.service
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --locked --workspace --all-targets
@@ -159,6 +159,17 @@ jobs:
           name: book
           path: docs/book/book
           retention-days: 14
+
+  chart:
+    # P7-RELEASE: the Helm chart lints and renders on every push; the
+    # release workflow packages it.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - run: helm lint deploy/helm/listmngr
+      - run: helm template listmngr deploy/helm/listmngr > /dev/null
+      - run: helm template listmngr deploy/helm/listmngr --set 'secretFiles.dkim\.pem=KEY' --set ingress.enabled=true > /dev/null
 
   container:
     runs-on: ubuntu-24.04

@@ -1,0 +1,111 @@
+# The listmngr chart: one Deployment (one replica — the mail role and the
+# runners are one process over one database), its Service, the configuration
+# as a ConfigMap, the secrets as a Secret, and a volume for the state
+# directory (MTA maps, an fs message store, SQLite when no PostgreSQL).
+
+image:
+  repository: ghcr.io/pierreneter/listmngr
+  tag: ""            # defaults to the chart's appVersion
+  pullPolicy: IfNotPresent
+  digest: ""         # set to pin the image by digest instead of tag
+
+replicaCount: 1
+
+# listmngr.toml, verbatim. Secrets are not written here: a secret with a
+# plain key (`database.url`, `message_store.s3_secret_access_key`,
+# `mta.smtp_auth_password`, an OIDC `client_secret`) is set through `secrets`
+# below as its environment variable; a secret that only exists as a file
+# (`[[mta.dkim_signing]] private_key_file`, `[mta.arc] private_key_file`,
+# `webhooks.signing_key_file`, `nntp.password_file`) goes in `secretFiles`.
+config: |
+  [site]
+  name = "Example Lists"
+  site_owner = "postmaster@example.com"
+  base_url = "https://lists.example.com"
+
+  [web]
+  listen = "0.0.0.0:8000"
+  trusted_proxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+  [mta]
+  enabled = false
+
+# Environment variables (`LISTMNGR__SECTION__KEY`) kept in a Secret and given
+# to the migrate and serve containers. The value below is a placeholder.
+secrets:
+  LISTMNGR__DATABASE__URL: "postgres://listmngr:change-me@postgresql:5432/listmngr"
+
+# An existing Secret with the same keys, instead of `secrets`.
+existingSecret: ""
+
+# Files for the `*_file` keys, by name, under /etc/listmngr/secrets/<name>.
+# A Secret volume's files are group-readable under `fsGroup` and the binary
+# refuses a secret file others can read, so an init container copies them
+# into an in-memory volume with mode 0400 at every start.
+secretFiles: {}
+#  dkim-example.com.pem: |
+#    -----BEGIN PRIVATE KEY-----
+#    ...
+
+# An existing Secret whose keys are the file names, instead of `secretFiles`.
+existingFilesSecret: ""
+
+# The image that copies `secretFiles` (needs `sh` and `install`); pinned by
+# digest, multi-architecture.
+secretFilesImage: "busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  existingClaim: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+  # The LMTP port is exposed only when the mail role is enabled in `config`.
+  lmtp:
+    enabled: false
+    port: 8024
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: lists.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 1Gi
+
+# The migrate step runs in an init container before every start.
+migrate:
+  enabled: true
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+env: []
