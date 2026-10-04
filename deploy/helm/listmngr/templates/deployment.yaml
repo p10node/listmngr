@@ -1,0 +1,144 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "listmngr.fullname" . }}
+  labels:
+    {{- include "listmngr.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "listmngr.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "listmngr.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if or .Values.migrate.enabled (include "listmngr.hasSecretFiles" .) }}
+      initContainers:
+        {{- if include "listmngr.hasSecretFiles" . }}
+        - name: secret-files
+          image: {{ .Values.secretFilesImage }}
+          command: ["sh", "-c"]
+          args:
+            - for f in /secrets-in/*; do [ -f "$f" ] && install -m 0400 "$f" /etc/listmngr/secrets/; done
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: secret-files-in
+              mountPath: /secrets-in
+              readOnly: true
+            - name: secrets
+              mountPath: /etc/listmngr/secrets
+        {{- end }}
+        {{- if .Values.migrate.enabled }}
+        - name: migrate
+          image: {{ include "listmngr.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config", "/etc/listmngr/listmngr.toml", "migrate"]
+          envFrom:
+            - secretRef:
+                name: {{ include "listmngr.secretName" . }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/listmngr/listmngr.toml
+              subPath: listmngr.toml
+              readOnly: true
+            - name: secrets
+              mountPath: /etc/listmngr/secrets
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/listmngr
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: listmngr
+          image: {{ include "listmngr.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config", "/etc/listmngr/listmngr.toml", "serve"]
+          ports:
+            - name: http
+              containerPort: 8000
+            {{- if .Values.service.lmtp.enabled }}
+            - name: lmtp
+              containerPort: {{ .Values.service.lmtp.port }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "listmngr.secretName" . }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/listmngr/listmngr.toml
+              subPath: listmngr.toml
+              readOnly: true
+            - name: secrets
+              mountPath: /etc/listmngr/secrets
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/listmngr
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "listmngr.fullname" . }}
+        - name: secrets
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        {{- if include "listmngr.hasSecretFiles" . }}
+        - name: secret-files-in
+          secret:
+            secretName: {{ include "listmngr.filesSecretName" . }}
+        {{- end }}
+        - name: state
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (include "listmngr.fullname" .) .Values.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

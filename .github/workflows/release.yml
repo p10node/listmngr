@@ -1,0 +1,179 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  binaries:
+    # P7-RELEASE: one static binary per platform, built --locked with the
+    # pinned toolchain; the archive carries the binary, the licence and the
+    # systemd unit.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, pinned 2026-09-04
+        with:
+          toolchain: 1.88.0
+          targets: ${{ matrix.target }}
+      - name: musl tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - run: cargo build --locked --release -p listmngr --target ${{ matrix.target }}
+      - name: Archive
+        run: |
+          set -eu
+          name="listmngr-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/listmngr" "dist/$name/"
+          cp LICENSE README.md docs/UPGRADE.md deploy/systemd/listmngr.service "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: dist/*.tar.gz*
+          if-no-files-found: error
+
+  packages:
+    # Debian and RPM packages for x86_64 Linux: the binary, the unit, the
+    # service account, /etc/listmngr and /var/lib/listmngr.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, pinned 2026-09-04
+        with:
+          toolchain: 1.88.0
+          targets: x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+        with:
+          tool: cargo-deb@3.8.0,cargo-generate-rpm@0.21.0
+      - run: cargo build --locked --release -p listmngr --target x86_64-unknown-linux-musl
+      - run: cargo deb --no-build --locked -p listmngr --target x86_64-unknown-linux-musl -o dist/
+      - run: cargo generate-rpm -p crates/cli --target x86_64-unknown-linux-musl -o dist/
+      - run: (cd dist && shasum -a 256 *.deb *.rpm > packages.sha256)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: packages
+          path: dist/*
+          if-no-files-found: error
+
+  sbom:
+    # A CycloneDX SBOM of the locked dependency graph of the binary.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, pinned 2026-09-04
+        with:
+          toolchain: 1.88.0
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+        with:
+          tool: cargo-cyclonedx@0.5.9
+      - run: cargo cyclonedx --manifest-path crates/cli/Cargo.toml --format json --override-filename listmngr.cdx
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: crates/cli/listmngr.cdx.json
+          if-no-files-found: error
+
+  image:
+    # The multi-architecture container image from deploy/Dockerfile, pushed
+    # to GHCR and signed keyless with cosign.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Sign the image by digest (keyless, OIDC)
+        run: cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}"
+
+  chart:
+    # The Helm chart, linted and rendered, packaged with the release.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - run: helm lint deploy/helm/listmngr
+      - run: helm template listmngr deploy/helm/listmngr --set image.tag=${GITHUB_REF_NAME#v} > /dev/null
+      - run: mkdir -p dist && helm package deploy/helm/listmngr --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}" -d dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: chart
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  publish:
+    # Everything above on the GitHub release, with one SHA256SUMS signed
+    # keyless with cosign; the image digest in the notes.
+    needs: [binaries, packages, sbom, image, chart]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Checksums and their signature
+        run: |
+          set -eu
+          cd dist
+          rm -f *.sha256
+          shasum -a 256 * > SHA256SUMS
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+          printf 'Image: ghcr.io/%s@%s\n' "${{ github.repository }}" "${{ needs.image.outputs.digest }}" > IMAGE_DIGEST.txt
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: dist/*
+          generate_release_notes: false
+          body_path: dist/IMAGE_DIGEST.txt

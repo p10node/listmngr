@@ -16,3 +16,6 @@ docs/HANDOFF.md
 # The real Mailman 3 and HyperKitty databases the importer is tested against.
 !crates/import/tests/fixtures/mailman3/mailman.db
 !crates/import/tests/fixtures/hyperkitty/hyperkitty.db
+
+# `cargo cyclonedx` writes one SBOM per workspace member; the release job uploads crates/cli/listmngr.cdx.json.
+*.cdx.json
