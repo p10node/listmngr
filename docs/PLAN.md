@@ -1101,7 +1101,7 @@ phiên bản chỉ đổi ở `P8-1.1`):
   CLI trên binary thật (cả hai thuật toán, mode, định dạng record, từ chối ghi
   đè, stdout không có khoá). Docs: README, ARCHITECTURE, OPERATIONS,
   `SECURITY_REVIEW.md` hàng "Outbound DKIM" → done, CHANGELOG.
-- [ ] **P8-MASTER-KEY** (L): `[security] master_key_file` (tuỳ chọn; 64 ký tự
+- [x] ~~**P8-MASTER-KEY**~~ (xong) (L): `[security] master_key_file` (tuỳ chọn; 64 ký tự
   hex = 32 byte, đọc qua `read_secret_file`). `listmngr_db::keyring`:
   `MasterKey` (`Zeroizing<[u8; 32]>`), HKDF-SHA256 (`ring`) với info
   `listmngr/totp/v1`, AEAD `CHACHA20_POLY1305` nonce 12 byte ngẫu nhiên, AAD =

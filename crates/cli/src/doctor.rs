@@ -56,9 +56,15 @@ pub async fn run(config: &Config, options: Options) -> Result<()> {
         "tls_auth_and_delivery_not_probed",
     ));
     match &database {
-        Ok(domains) => checks.extend(dns::checks(domains, options.dns_server).await),
+        Ok(inspection) => {
+            checks.extend(dns::checks(&inspection.domains, options.dns_server).await);
+        }
         Err(_) => checks.push(check("dns", "skip", "database_unavailable")),
     }
+    checks.push(master_key_check(
+        database.as_ref().ok(),
+        config.security.master_key.is_some(),
+    ));
     checks.push(check(
         "dns_authentication",
         "skip",
@@ -70,6 +76,33 @@ pub async fn run(config: &Config, options: Options) -> Result<()> {
         return Err(Failure.into());
     }
     Ok(())
+}
+
+/// Whether the database's own secrets are sealed under the configured
+/// master key: `ok` when every TOTP secret is, `warn` while rows are in
+/// the clear or no key is configured, `fail` when sealed rows exist and no
+/// key does — that site cannot verify a second factor.
+fn master_key_check(
+    inspection: Option<&listmngr_db::doctor::Inspection>,
+    configured: bool,
+) -> Value {
+    let Some(inspection) = inspection else {
+        return check("master_key", "skip", "database_unavailable");
+    };
+    match (configured, inspection.totp_sealed, inspection.totp_plain) {
+        (true, _, 0) => check("master_key", "ok", "totp_secrets_sealed"),
+        (true, _, _) => check(
+            "master_key",
+            "warn",
+            "plain_totp_secrets_remain_run_secrets_encrypt",
+        ),
+        (false, 0, _) => check("master_key", "warn", "no_master_key_totp_secrets_in_clear"),
+        (false, _, _) => check(
+            "master_key",
+            "fail",
+            "sealed_totp_secrets_without_master_key",
+        ),
+    }
 }
 
 async fn smtp_greeting(address: &str) -> Result<(), ()> {

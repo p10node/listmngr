@@ -135,6 +135,8 @@ the effective values with secrets redacted; `listmngr conf --key section.key` pr
 | `require_2fa_for` | `Vec<String>` | `["server_owner"]` |  |
 | `pending_request_life` | `String` | `"3d"` |  |
 | `rate_limit` | section | — | see `[security.rate_limit]` |
+| `master_key` | `Option<SmtpAuthSecret>` | `None` | The key the database's own secrets (TOTP secrets) are sealed under: 32 bytes as 64 hexadecimal digits (`listmngr secrets new-key`). Unset: they are stored in the clear, as before 1.1. |
+| `master_key_file` | `Option<PathBuf>` | `None` | A file holding `master_key`, readable by nobody else; it wins. |
 
 ## `[security.argon2]`
 
