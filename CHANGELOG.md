@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- The ledger and the documents agree with the release (`P8-LEDGER-RECONCILE`): the phase table and the residual table of `docs/FEATURE_PARITY.md` name the rows that closed them, the 2026-09 "plaintext trusted-relay, not production-ready" paragraphs in the ledger and the README are replaced by pointers to those rows, `docs/PLAN.md` carries the 1.0.0 milestone and Phase 8, and `docs/HANDOFF.md` and `docs/MAILMAN_REPLACEMENT.md` are marked historical.
+
 ## [1.0.0] - 2026-10-04
 
 The first release: Phase 7 of `docs/PLAN.md` closed, every acceptance ID of Phases 0–7 with a bounded, recorded local acceptance in `docs/FEATURE_PARITY.md`.

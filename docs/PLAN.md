@@ -5,6 +5,12 @@
 
 ## Trạng thái triển khai (2026-09-14) — thay cho các checkpoint 2026-09-06/07
 
+**Cập nhật 2026-10-05 (`P8-LEDGER-RECONCILE`):** Phase 0–7 đã đóng theo ledger;
+`1.0.0` là bản phát hành đầu tiên (2026-10-04, tag `v1.0.0` tạo local, push là
+quyết định của người dùng). Việc còn lại là Phase 8 (§7). Các đoạn dưới đây là
+ảnh chụp 2026-09-14, giữ nguyên để đối chiếu; câu "Chưa có: toàn bộ Phase 4–7
+trừ …" không còn đúng.
+
 Tài liệu này là **hợp đồng sản phẩm chuẩn và roadmap**, không phải bảng kê tính
 năng đã giao. Bằng chứng theo từng acceptance ID nằm ở
 [FEATURE_PARITY.md](FEATURE_PARITY.md); bề mặt đã triển khai mô tả ở
@@ -1026,7 +1032,7 @@ Tách thành work package (kế hoạch 2026-10-05, một ID một nhánh, làm 
 tự này; mỗi ID có ledger row với lệnh và số liệu thật; quy ước §7.0 giữ nguyên;
 phiên bản chỉ đổi ở `P8-1.1`):
 
-- [ ] **P8-LEDGER-RECONCILE** (S): chỉ tài liệu. `docs/FEATURE_PARITY.md`:
+- [x] ~~**P8-LEDGER-RECONCILE**~~ (xong) (S): chỉ tài liệu. `docs/FEATURE_PARITY.md`:
   bảng phase (hàng 0–4 còn ghi "open: `P2-E2E-ACCEPTANCE`, `P2-HELD-FORWARD`",
   "Partial / interim rendering", "PostgreSQL acceptance predates 0004") và bảng
   "Residual P1s" (hàng "Full Phase 2 …", "Later features", "Recovery and
