@@ -1078,6 +1078,18 @@ impl Config {
         if let Some(secret_file) = &config.database.url_file {
             config.database.url = read_secret_file(secret_file, "database.url_file")?;
         }
+        if let Some(secret_file) = &config.security.master_key_file {
+            config.security.master_key =
+                Some(read_secret_file(secret_file, "security.master_key_file")?.into());
+        }
+        if let Some(key) = &config.security.master_key {
+            let digits = key.expose().as_bytes();
+            if digits.len() != 64 || !digits.iter().all(u8::is_ascii_hexdigit) {
+                return Err(Error::Validation(
+                    "security.master_key must be 64 hexadecimal digits (32 bytes)".into(),
+                ));
+            }
+        }
         for (index, check) in config.antispam.header_checks.iter().enumerate() {
             let header = check.header.trim();
             if header.is_empty() || !header.bytes().all(|b| b.is_ascii_graphic() && b != b':') {
@@ -1165,6 +1177,12 @@ impl Config {
             store.remove("s3_secret_access_key");
             store.remove("s3_secret_access_key_file");
         }
+        if let Some(security) = value
+            .get_mut("security")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            security.remove("master_key_file");
+        }
         value
     }
 
@@ -1185,7 +1203,12 @@ impl Config {
 
 /// A secret read from a file only the service user can read; the path and
 /// the value never appear in an error.
-fn read_secret_file(secret_file: &Path, setting: &str) -> Result<String> {
+/// A secret from a file readable by nobody else, trimmed; `setting` names
+/// it in the error.
+/// # Errors
+/// Validation when the file is group- or world-accessible, unreadable or
+/// empty.
+pub fn read_secret_file(secret_file: &Path, setting: &str) -> Result<String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1372,6 +1395,12 @@ impl From<String> for SmtpAuthSecret {
 impl From<&str> for SmtpAuthSecret {
     fn from(value: &str) -> Self {
         Self(value.into())
+    }
+}
+impl Drop for SmtpAuthSecret {
+    fn drop(&mut self) {
+        use zeroize::Zeroize as _;
+        self.0.zeroize();
     }
 }
 impl fmt::Debug for SmtpAuthSecret {
@@ -1937,7 +1966,19 @@ config_struct!(RateLimitConfig {
     // "20/hour"). Unset: no limit.
     post: Option<String> = None
 });
-config_struct!(SecurityConfig { argon2: Argon2Config = Argon2Config::default(), password_min_score: u8 = 3, require_2fa_for: Vec<String> = vec!["server_owner".into()], pending_request_life: String = "3d".into(), rate_limit: RateLimitConfig = RateLimitConfig::default() });
+config_struct!(SecurityConfig {
+    argon2: Argon2Config = Argon2Config::default(),
+    password_min_score: u8 = 3,
+    require_2fa_for: Vec<String> = vec!["server_owner".into()],
+    pending_request_life: String = "3d".into(),
+    rate_limit: RateLimitConfig = RateLimitConfig::default(),
+    // The key the database's own secrets (TOTP secrets) are sealed under:
+    // 32 bytes as 64 hexadecimal digits (`listmngr secrets new-key`). Unset:
+    // they are stored in the clear, as before 1.1.
+    master_key: Option<SmtpAuthSecret> = None,
+    // A file holding `master_key`, readable by nobody else; it wins.
+    master_key_file: Option<PathBuf> = None
+});
 config_struct!(MailmanConfig {
     default_member_action: ModerationAction = ModerationAction::Defer,
     default_nonmember_action: ModerationAction = ModerationAction::Hold,

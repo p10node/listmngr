@@ -1,5 +1,32 @@
 # Architecture
 
+## The master key — bounded local acceptance verified
+
+`listmngr_db::keyring`: `MasterKey(Zeroizing<[u8; 32]>)` (`from_hex`,
+`generate_hex`, a redacted `Debug`), `derived(purpose)` (ring
+HKDF-SHA256, salt `listmngr master key v1`, info the purpose label, a
+ChaCha20-Poly1305 `LessSafeKey`), `seal(purpose, aad, plain)` → `v1:` +
+base64 of a random 12-byte nonce and the ciphertext with its tag,
+`open` → `Zeroizing<Vec<u8>>`; `is_sealed`, `SEALED_PREFIX`,
+`TOTP_PURPOSE`. `Database` carries `master_key: Option<Arc<MasterKey>>`
+(`connect_with_security` reads `security.master_key`;
+`with_master_key`; `master_key()`), and `web_totp` goes through
+`seal_totp_secret` on insert and `open_totp_secret` on every read (a
+sealed row without a key is `Error::Database`, a plain row is read as
+before). `listmngr_db::secrets::SecretsRepo`: `status`, `encrypt`
+(every plain row sealed in one transaction, `security.encrypt_secrets`),
+`rewrap(previous)` (every sealed row opened with the previous key and
+sealed again, `security.rewrap_secrets`; one row that does not open
+fails the run). `listmngr_db::doctor::inspect` returns an `Inspection`
+with the domains and the sealed/plain counts, and `listmngr doctor`
+adds the `master_key` check with a `warn` status. `listmngr_core`:
+`SecurityConfig::master_key: Option<SmtpAuthSecret>` and
+`master_key_file`, read at load like the other secret files, validated
+as 64 hexadecimal digits, removed from `redacted_json`;
+`read_secret_file` is public for the CLI; `SmtpAuthSecret` zeroes its
+value on drop. `crates/cli/src/secrets.rs`: `status`, `encrypt`,
+`rewrap`, `new-key`.
+
 ## DKIM with Ed25519, several selectors, and the `dkim` command — bounded local acceptance verified
 
 `listmngr_mail::dkim`: `Algorithm::{Rsa, Ed25519}` (`dns_tag`,

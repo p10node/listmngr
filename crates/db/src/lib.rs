@@ -13,6 +13,8 @@ pub mod bounces;
 pub mod digests;
 pub mod doctor;
 pub mod header_matches;
+pub mod keyring;
+pub mod secrets;
 mod web_webhooks;
 pub mod webhooks;
 pub use archive::interact_import::{ImportedInteractions, InteractionReport};
@@ -154,6 +156,9 @@ pub struct Database {
     webhook_allow_http: bool,
     /// Whether the pool is `SQLite`, decided once from the URL.
     sqlite: bool,
+    /// `[security] master_key`: what the database's own secrets are sealed
+    /// under; `None` keeps them in the clear.
+    master_key: Option<std::sync::Arc<keyring::MasterKey>>,
     /// `[archive] archivers.mail_archive_address`: where a public list's
     /// copy goes when its `mail-archive` archiver is on. Empty when the
     /// archiver is not configured, which switches it off.
@@ -217,10 +222,17 @@ impl Database {
             });
         }
         let pool = options.connect(url).await.map_err(db_error)?;
+        let master_key = security
+            .master_key
+            .as_ref()
+            .map(|key| keyring::MasterKey::from_hex(key.expose()))
+            .transpose()?
+            .map(std::sync::Arc::new);
         Ok(Self {
             pool,
             blobs: blobs::BlobStore::db(),
             sqlite,
+            master_key,
             argon2: security.argon2.clone(),
             password_min_score: security.password_min_score,
             default_language: "en".into(),
@@ -279,6 +291,17 @@ impl Database {
     #[must_use]
     pub const fn blobs(&self) -> &blobs::BlobStore {
         &self.blobs
+    }
+    /// Seal the database's own secrets under `key` (`[security] master_key`).
+    #[must_use]
+    pub fn with_master_key(mut self, key: Option<keyring::MasterKey>) -> Self {
+        self.master_key = key.map(std::sync::Arc::new);
+        self
+    }
+    /// The master key, when the site has one.
+    #[must_use]
+    pub fn master_key(&self) -> Option<&keyring::MasterKey> {
+        self.master_key.as_deref()
     }
     /// Whether the pool is `SQLite` rather than `PostgreSQL`.
     #[must_use]

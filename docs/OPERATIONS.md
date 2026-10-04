@@ -119,3 +119,21 @@ with selector `s2025`:
 `listmngr dkim records` prints the records of every configured key at
 any time, so the DNS side can be checked against the configuration
 without reading a key.
+
+## The master key
+
+`listmngr secrets new-key` prints a 32-byte key as 64 hexadecimal
+digits. Put it in `[security] master_key_file` (a file the service
+user alone can read) or in `LISTMNGR__SECURITY__MASTER_KEY`, restart,
+and run `listmngr secrets encrypt` once: every TOTP secret the site
+already holds is sealed, and every new enrolment is sealed from then
+on. `listmngr doctor` reports `master_key` as `ok` when nothing is left
+in the clear, `warn` while rows remain or no key is configured, and
+`fail` when sealed rows exist but the key is gone.
+
+To change the key: keep the old value in a file, configure the new
+one, restart, run `listmngr secrets rewrap --previous-key-file
+/path/to/old.key`, then destroy the old file. Keep the key with the
+backups: a backup restored without the key it was sealed under leaves
+every enrolled account unable to pass the second step until the key is
+configured again (`docs/UPGRADE.md`).
