@@ -1,5 +1,40 @@
 # listmngr
 
+## The operator's book (`P7-DOCS-SITE`) — bounded local acceptance verified
+
+`docs/book/` is an mdBook (`mdbook` 0.5.4, pinned in CI): an
+introduction; Install (from source, the first run, systemd, Docker,
+PostgreSQL, upgrading); Configure, with a generated reference of every
+section and key; Connect the mail system (Postfix, Exim, DKIM, ARC, the
+authenticity checks, delivery, TLS for the web); Migration
+(`docs/MIGRATION.md`); Operations (`docs/OPERATIONS.md`);
+Administration on the web, by role; The API and webhooks; Security
+(`docs/SECURITY.md` and the review); Architecture, a summary; Releases;
+and the Changelog. The chapters that restate an existing document
+include it rather than copy it. The reference,
+`docs/book/src/configuration-reference.md`, is written by
+`scripts/config-reference.py` from the `config_struct!` blocks of
+`crates/core/src/lib.rs` and checked against them in CI;
+`scripts/check-book-links.py` checks that every chapter named in
+`SUMMARY.md` exists and that every relative link and `{{#include}}`
+resolves; `scripts/tests/test_book.py` holds both to a positive and a
+negative case; CI's `docs` job runs the three, builds the book and
+keeps the site as an artifact.
+
+```sh
+python3 scripts/config-reference.py           # regenerate the reference after a config change
+python3 scripts/config-reference.py --check   # what CI runs
+python3 scripts/check-book-links.py
+mdbook build docs/book                        # docs/book/book/, ignored by git
+```
+
+Limits: the book is built and checked, not published; external links
+are not fetched; a link inside an included document is the
+repository's (`docs/SECURITY.md` links `../security.txt`) and does not
+resolve from the rendered page; the install chapter's Helm section
+waits for `P7-RELEASE`; this README stays the ledger's prose and is not
+a chapter.
+
 ## Load (`P7-LOAD`) — bounded local acceptance verified
 
 `crates/cli/tests/load.rs` is the benchmark the plan asks for: a list of

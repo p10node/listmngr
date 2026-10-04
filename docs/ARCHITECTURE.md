@@ -1,5 +1,24 @@
 # Architecture
 
+## The operator's book — bounded local acceptance verified
+
+`docs/book/` is mdBook with `create-missing = false` and the built site
+in `docs/book/book/` (ignored). A chapter that restates an existing
+document includes it (`{{#include ../../OPERATIONS.md}}`,
+`MIGRATION.md`, `SECURITY.md`, `../../../CHANGELOG.md`) so that one
+document stays the source. The configuration reference is generated:
+`scripts/config-reference.py` parses every `config_struct!` block in
+`crates/core/src/lib.rs` (field, type, default, and the `//` comment
+above the field as its note), reads `pub struct Config` for the section
+names, and nests a struct-typed field as a `[parent.child]` section
+under its parent; `--check` compares the committed page with what the
+source says, so a new key cannot ship undocumented.
+`scripts/check-book-links.py` resolves the chapters of `SUMMARY.md`,
+every relative link and every include without fetching anything;
+`--src` points it at another book, which is how its negative test
+works. `scripts/tests/test_book.py` runs both scripts, their negative
+cases, and checks the CI job's commands.
+
 ## Load — bounded local acceptance verified
 
 `crates/cli/tests/load.rs` reuses the chaos harness's shape: a loopback
