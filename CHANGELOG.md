@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Loop and abuse rules (`P8-ABUSE-RULES`): `max-hops` discards a post with more `Received:` headers than `[mta] max_received_hops` (30; 0 off) as a mail loop, right after `loop`; `posting-rate` holds a sender's post once `[security] rate_limit.post` (unset by default, `COUNT/WINDOW`) of theirs were accepted on the list inside the window, with the numbers in the reason — counted in the new `posting_rate` table (migration `0055`) written by the accept transaction and swept after a day; both in `/api/v1/system/chains`.
 - Structure ceilings at the intake (`P8-MIME-LIMITS`): `[mta] max_header_count` (500), `max_mime_parts` (1000) and `max_mime_depth` (20) bound a message's shape before anything is stored — the LMTP and inbound SMTP listeners answer `554 5.6.0` for every recipient of a message over any of them and queue nothing, and the news gateway passes over such an article as it passes an unreadable one; `listmngr_mail::structure` measures, the `mime_filter` fuzz target runs it.
 
 ### Changed

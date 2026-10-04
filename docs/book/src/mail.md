@@ -51,7 +51,12 @@ the recipient up in the `lsearch` maps and delivers over LMTP.
 1000 and 20 by default) bound the shape: a message over any of them is
 refused at `DATA` with `554 5.6.0` for every recipient and nothing is
 stored, and the news gateway passes over such an article. The per-list
-`max_message_size` is a moderation rule, not a listener limit.
+`max_message_size` is a moderation rule, not a listener limit. Two more
+rules of the posting chain guard against loops and floods:
+`mta.max_received_hops` (30; 0 off) discards a post with more
+`Received:` headers than that, and `security.rate_limit.post` (unset by
+default; `"20/hour"`, say) holds a sender's post for a moderator once
+that many of theirs were accepted on the list inside the window.
 
 ## Delivery
 
