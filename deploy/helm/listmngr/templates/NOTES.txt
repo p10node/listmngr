@@ -1,0 +1,9 @@
+listmngr {{ default .Chart.AppVersion .Values.image.tag }} is deployed as {{ include "listmngr.fullname" . }}.
+
+The web interface answers on the Service port {{ .Values.service.port }} (`/healthz`, `/readyz`, `/web`).
+Create the first server owner from inside the pod:
+
+  kubectl exec deploy/{{ include "listmngr.fullname" . }} -- listmngr --config /etc/listmngr/listmngr.toml \
+      user create admin@example.com --display-name Admin --server-owner --password-stdin < password
+
+Mail needs `[mta] enabled = true` in `config`, `service.lmtp.enabled`, and an MTA that delivers over LMTP to this Service.

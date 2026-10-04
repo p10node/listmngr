@@ -1,5 +1,31 @@
 # Architecture
 
+## Release — bounded local acceptance verified
+
+The release profile keeps `overflow-checks = true` and adds
+`lto = "thin"`, `codegen-units = 1` and `strip = "symbols"`
+(a clean build of the binary on this laptop: 370.6 s and 52,987,616 bytes before, 518.8 s and 36,120,624 bytes after); a panic still names its file and line (that is a
+string in the binary, not debug info), a backtrace does not name
+functions. `[profile.release.build-override]` keeps line tables for
+build scripts and proc macros (macOS 27's `dyld`). The workflow has one
+job per artefact kind — `binaries` (a matrix of four targets),
+`packages`, `sbom`, `image`, `chart` — and a `publish` job that
+downloads them all, writes one `SHA256SUMS`, signs it keyless with
+`cosign sign-blob` (`id-token: write`) and attaches everything to the
+GitHub release with the image digest in the notes; the image job signs
+the pushed image by digest. The packages come from `cargo-deb`
+(`systemd-units` with `unit-scripts = deploy/systemd`, so the unit is
+installed to `/usr/lib/systemd/system` and the generated `postinst`,
+`prerm` and `postrm` snippets reload systemd and stop the service on
+removal; `postinst` first creates the account and the directories) and
+`cargo-generate-rpm` (the same unit and a `pre_install_script` doing
+what `postinst` does). The chart runs one replica with `Recreate`,
+`migrate` in an init container, secrets with a plain key as environment
+variables from a Secret (`envFrom`), and secrets that only exist as
+files copied by a pinned `busybox` init container into an in-memory
+volume with mode `0400` — a Secret volume's files are group-readable
+under `fsGroup` and `read_secret_file` refuses them.
+
 ## The operator's book — bounded local acceptance verified
 
 `docs/book/` is mdBook with `create-missing = false` and the built site
