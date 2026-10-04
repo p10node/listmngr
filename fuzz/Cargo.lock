@@ -1756,7 +1756,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listmngr-archive"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "listmngr-core",
  "listmngr-db",
@@ -1775,7 +1775,7 @@ dependencies = [
 
 [[package]]
 name = "listmngr-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1796,7 +1796,7 @@ dependencies = [
 
 [[package]]
 name = "listmngr-db"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1843,7 +1843,7 @@ dependencies = [
 
 [[package]]
 name = "listmngr-i18n"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "fluent-bundle",
  "intl-memoizer",
@@ -1852,7 +1852,7 @@ dependencies = [
 
 [[package]]
 name = "listmngr-import"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "listmngr-core",
@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "listmngr-mail"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "libc",
@@ -1893,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "listmngr-pipeline"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "listmngr-core",
  "regex",
