@@ -90,9 +90,23 @@ fn dkim_key(dir: &std::path::Path) -> std::path::PathBuf {
     path
 }
 
+/// An Ed25519 key as `listmngr dkim gen` writes one.
+fn ed25519_key(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+    let path = dir.join("ed25519.pem");
+    std::fs::write(
+        &path,
+        listmngr_mail::dkim::generate_key(listmngr_mail::dkim::Algorithm::Ed25519, 0).unwrap(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    path
+}
+
 async fn matrix(db: Database) {
     let keys = tempfile::tempdir().unwrap();
     let key = dkim_key(keys.path());
+    let ed_key = ed25519_key(keys.path());
     let (db, app) = seeded_fixture_configured(db, |config: &mut Config| {
         config
             .mta
@@ -101,6 +115,14 @@ async fn matrix(db: Database) {
                 domain: "example.com".into(),
                 selector: "sel".into(),
                 private_key_file: key.clone(),
+            });
+        config
+            .mta
+            .dkim_signing
+            .push(listmngr_core::DkimSigningConfig {
+                domain: "example.com".into(),
+                selector: "ed".into(),
+                private_key_file: ed_key.clone(),
             });
         // The ARC sealing key is published the same way, on its domain.
         config.mta.arc = listmngr_core::ArcConfig {
@@ -231,6 +253,8 @@ async fn domain_index_and_add(db: &Database, app: &axum::Router, root: &str) {
     has(&html, "sel._domainkey.example.com");
     has(&html, "arc._domainkey.example.com");
     has(&html, "v=DKIM1; k=rsa; p=");
+    has(&html, "ed._domainkey.example.com");
+    has(&html, "v=DKIM1; k=ed25519; p=");
     lacks(&html, "PRIVATE KEY");
 }
 

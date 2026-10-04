@@ -1,5 +1,27 @@
 # listmngr
 
+## DKIM with Ed25519, several selectors, and the `dkim` command (`P8-DKIM-ED25519`) — bounded local acceptance verified
+
+A `[[mta.dkim_signing]]` key file may now hold an Ed25519 key (PKCS#8,
+RFC 8463 `ed25519-sha256`) as well as an RSA one (PKCS#8 or PKCS#1,
+`rsa-sha256`); the file decides, and a key of any other kind refuses to
+load. Several entries may name the same `domain` with different
+selectors, and every one of them signs: a dual-signed delivery carries
+one `DKIM-Signature` per selector, each over the message as it was
+before any of them, so a receiver that verifies only RSA still passes
+it. The domain page lists every selector's record, `k=rsa` or
+`k=ed25519`. `listmngr dkim gen --domain D --selector S [--algorithm
+rsa|ed25519] [--bits 2048] --out FILE` writes a new PKCS#8 PEM readable
+by nobody else (it refuses an existing file) and prints the record to
+publish as one JSON line, never the key; `listmngr dkim records` prints
+the record of every configured key; `listmngr dkim dns [--dns-server
+IP:PORT]` looks each record up and reports `ok`, `missing`, `mismatch`
+or `error` per selector, exit 12 unless every one is `ok`. Rotating a
+key is therefore: `dkim gen` a new selector, add its entry, publish,
+`dkim dns` until `ok`, remove the old entry after the longest time a
+signed message may wait to be verified, then the old record
+(`docs/OPERATIONS.md`). ARC sealing stays RSA.
+
 ## Loop and abuse rules (`P8-ABUSE-RULES`) — bounded local acceptance verified
 
 Two rules join `default-posting-chain`. `max-hops`, right after `loop`,
