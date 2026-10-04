@@ -11,7 +11,7 @@ use hickory_resolver::{
 use serde_json::Value;
 use std::{net::SocketAddr, time::Duration};
 
-fn resolver(server: Option<SocketAddr>) -> Result<TokioResolver, ()> {
+pub fn resolver(server: Option<SocketAddr>) -> Result<TokioResolver, ()> {
     let mut builder = if let Some(server) = server {
         let mut udp = ConnectionConfig::udp();
         udp.port = server.port();

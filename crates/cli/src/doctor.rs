@@ -3,7 +3,7 @@ use listmngr_core::Config;
 use serde_json::{Value, json};
 use std::time::Duration;
 
-mod dns;
+pub mod dns;
 
 #[derive(Debug, clap::Args)]
 pub struct Options {

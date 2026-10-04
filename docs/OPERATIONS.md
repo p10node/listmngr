@@ -96,3 +96,26 @@ What they say for sizing:
 `[web] tls` with `cert_file`/`key_file`, or `acme_domains` for a
 certificate ordered and renewed through ACME on the listener itself;
 the plain `web.listen` stays for probes and a proxy.
+
+## Rotating a DKIM key
+
+A rotation is a new selector beside the old one, never a key swapped
+under a published name. With the site at `lists.example.com` signing
+with selector `s2025`:
+
+1. `listmngr dkim gen --domain lists.example.com --selector s2026 --algorithm rsa --out /etc/listmngr/dkim-s2026.pem`
+   (or `--algorithm ed25519` for a second, smaller signature). The
+   command prints the TXT record to publish and refuses an existing
+   file; the key is readable by the service user only.
+2. Add a second `[[mta.dkim_signing]]` entry for `s2026` and restart
+   the mail role: every delivery now carries both signatures.
+3. Publish the printed record at `s2026._domainkey.lists.example.com`
+   and wait for `listmngr dkim dns` to report `ok` for every selector
+   (exit 12 until it does).
+4. After the longest time a signed message may still be verified —
+   a week covers mail that waited in a relay queue — remove the `s2025`
+   entry, restart, and only then remove its DNS record.
+
+`listmngr dkim records` prints the records of every configured key at
+any time, so the DNS side can be checked against the configuration
+without reading a key.
