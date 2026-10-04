@@ -26,6 +26,8 @@ fn base_ctx() -> PostingContext {
         },
         site_header_checks: Vec::new(),
         site_jump_chain: "hold".into(),
+        site_max_received_hops: 0,
+        site_posting_rate: None,
         member_moderation_action: None,
         default_member_action: ModerationAction::Defer,
         default_nonmember_action: ModerationAction::Hold,

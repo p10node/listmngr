@@ -35,6 +35,9 @@ pub struct SenderChecks {
     /// The `From` domain publishes a DMARC policy of `reject` or
     /// `quarantine` (the runner's `validate-authenticity` verdict).
     pub dmarc_policy_restrictive: bool,
+    /// Posts by this sender the list accepted inside the site's posting-rate
+    /// window; zero when no limit is configured.
+    pub recent_posts: u32,
 }
 
 /// One per-list `header_matches` row, or one site-wide antispam check.
@@ -126,6 +129,10 @@ pub struct PostingContext {
     pub member_moderation_action: Option<Option<ModerationAction>>,
     pub default_member_action: ModerationAction,
     pub default_nonmember_action: ModerationAction,
+    /// `[mta] max_received_hops` for `max-hops`; zero is off.
+    pub site_max_received_hops: u32,
+    /// `[security] rate_limit.post` for `posting-rate`; `None` is off.
+    pub site_posting_rate: Option<listmngr_core::RateLimit>,
 }
 
 impl Default for PostingContext {
@@ -142,6 +149,8 @@ impl Default for PostingContext {
             member_moderation_action: None,
             default_member_action: ModerationAction::Defer,
             default_nonmember_action: ModerationAction::Hold,
+            site_max_received_hops: 0,
+            site_posting_rate: None,
         }
     }
 }

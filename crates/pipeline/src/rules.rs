@@ -437,6 +437,50 @@ impl Rule for Any {
     }
 }
 
+/// More `Received:` headers than the site allows: the post has been
+/// relayed round and round, so it is a loop whatever the `List-Post`
+/// marker says. Off when `[mta] max_received_hops` is zero.
+#[derive(Debug)]
+pub struct MaxHops;
+
+impl Rule for MaxHops {
+    fn name(&self) -> &'static str {
+        "max-hops"
+    }
+    fn check(&self, ctx: &PostingContext, _state: &mut EvalState) -> Option<String> {
+        let max = ctx.site_max_received_hops;
+        if max == 0 {
+            return None;
+        }
+        let count = ctx.headers("Received").count();
+        (count > max as usize)
+            .then(|| format!("Too many Received: headers ({count}, at most {max}): a mail loop"))
+    }
+}
+
+/// The sender has already had as many posts accepted on this list in the
+/// window as `[security] rate_limit.post` allows; the next one waits for
+/// a moderator. Off when the limit is not set.
+#[derive(Debug)]
+pub struct PostingRate;
+
+impl Rule for PostingRate {
+    fn name(&self) -> &'static str {
+        "posting-rate"
+    }
+    fn check(&self, ctx: &PostingContext, _state: &mut EvalState) -> Option<String> {
+        let limit = ctx.site_posting_rate?;
+        let recent = ctx.sender.recent_posts;
+        (recent >= limit.count).then(|| {
+            format!(
+                "Posting rate exceeded: {recent} posts accepted in the last {} (at most {})",
+                limit.window_name(),
+                limit.count
+            )
+        })
+    }
+}
+
 /// Every rule the shipped registry knows, in `default-posting-chain` order
 /// followed by the glue rules.
 #[must_use]
@@ -448,6 +492,7 @@ pub fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(Approved),
         Box::new(Emergency),
         Box::new(Loop),
+        Box::new(MaxHops),
         Box::new(BannedAddress),
         Box::new(MemberModeration),
         Box::new(NonmemberModeration),
@@ -457,6 +502,7 @@ pub fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MaxSize),
         Box::new(NoSubject),
         Box::new(SuspiciousHeader),
+        Box::new(PostingRate),
         Box::new(Any),
         Box::new(Truth),
     ]

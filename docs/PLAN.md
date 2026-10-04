@@ -1061,7 +1061,7 @@ phiên bản chỉ đổi ở `P8-1.1`):
   gatenews với fake server; validate config. Docs: README, ARCHITECTURE,
   `SECURITY_REVIEW.md` hàng "Size and DoS" → done, `configuration-reference.md`
   sinh lại, CHANGELOG.
-- [ ] **P8-ABUSE-RULES** (M): hai rule mới trong `default-posting-chain`.
+- [x] ~~**P8-ABUSE-RULES**~~ (xong) (M): hai rule mới trong `default-posting-chain`.
   `max-hops`: `[mta] max_received_hops = 30` (0 = tắt, ≤ 1000) đếm header
   `Received:` của bài; vượt → link `jump discard` ngay sau `loop`, lý do
   "Too many Received: headers (N > max)". `posting-rate`:

@@ -626,6 +626,7 @@ pub fn builtin() -> &'static Registry {
             Link::new("approved", LinkAction::Jump("accept")),
             Link::new("emergency", LinkAction::Jump("hold")),
             Link::new("loop", LinkAction::Jump("discard")),
+            Link::new("max-hops", LinkAction::Jump("discard")),
             Link::new("banned-address", LinkAction::Jump("reject")),
             // Determine whether the member or nonmember has an action to take.
             Link::new("member-moderation", LinkAction::Jump("moderation")),
@@ -638,6 +639,7 @@ pub fn builtin() -> &'static Registry {
             Link::new("news-moderation", LinkAction::Defer),
             Link::new("no-subject", LinkAction::Defer),
             Link::new("suspicious-header", LinkAction::Defer),
+            Link::new("posting-rate", LinkAction::Defer),
             // Now if any of the above hit, jump to the moderation chain.
             Link::new("any", LinkAction::Jump("moderation")),
             // Take a detour through the list's own header-match rows.
@@ -646,7 +648,7 @@ pub fn builtin() -> &'static Registry {
             Link::new("truth", LinkAction::Jump("accept")),
         ];
         if !plugin_links.is_empty() {
-            posting.insert(6, Link::new("truth", LinkAction::Detour("plugins")));
+            posting.insert(7, Link::new("truth", LinkAction::Detour("plugins")));
             registry.register_chain(Chain::links("plugins", plugin_links));
         }
         registry.register_chain(Chain::links("default-posting-chain", posting));

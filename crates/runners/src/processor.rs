@@ -118,6 +118,8 @@ async fn accept_post(
         dmarc_mitigate,
         authentication_results,
         arc_chain,
+        // Only a site with a limit keeps the ledger.
+        posting_rate_sender: envelope_sender.filter(|_| config.security.rate_limit.post.is_some()),
     };
     for effect in &data.effects {
         match effect {

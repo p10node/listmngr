@@ -1,0 +1,4 @@
+C|posting_rate|list_id|text|required|-
+C|posting_rate|email|text|required|-
+C|posting_rate|posted_at|integer|required|-
+F|posting_rate|list_id|mailing_lists|list_id|cascade
