@@ -23,6 +23,9 @@ const BATCH: i64 = 100;
 const MAX_BATCHES: usize = 100;
 /// The help command's per-address cooldown.
 const HELP_COOLDOWN_MS: i64 = 3_600_000;
+/// How long the posting-rate ledger keeps a row: a day, the longest
+/// window `security.rate_limit.post` can name.
+const POSTING_RATE_LIFE_MS: i64 = 86_400_000;
 /// Entries listed per section of the pending notice.
 const LISTED: usize = 50;
 
@@ -42,6 +45,8 @@ pub struct TaskSummary {
     /// Objects of the `fs` or `s3` message store no row names any more,
     /// older than the store's grace period.
     pub collected_blobs: u64,
+    /// Posting-rate ledger rows older than a day, the longest window.
+    pub expired_posting_rate: u64,
 }
 
 impl TaskSummary {
@@ -58,6 +63,7 @@ impl TaskSummary {
             + self.stale_bounces_reset
             + self.collected_webhook_deliveries
             + self.collected_blobs
+            + self.expired_posting_rate
             > 0
     }
 }
@@ -150,6 +156,13 @@ impl TaskRepo<'_> {
                 cutoff,
             )
             .await?;
+        let expired_posting_rate = self
+            .purge(
+                "posting_rate",
+                "DELETE FROM posting_rate WHERE (list_id,email,posted_at) IN (SELECT list_id,email,posted_at FROM posting_rate WHERE posted_at<=$1 ORDER BY posted_at,list_id,email LIMIT $2)",
+                now_ms.saturating_sub(POSTING_RATE_LIFE_MS),
+            )
+            .await?;
         let collected_blobs = self.db.blobs().sweep_orphans(self.db, now_ms).await?;
         if collected_blobs > 0 {
             let mut tx = self.db.write_tx().await?;
@@ -167,6 +180,7 @@ impl TaskRepo<'_> {
             stale_bounces_reset,
             collected_webhook_deliveries,
             collected_blobs,
+            expired_posting_rate,
         })
     }
 

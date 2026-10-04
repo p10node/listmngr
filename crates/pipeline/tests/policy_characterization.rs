@@ -141,6 +141,7 @@ fn contexts() -> impl Iterator<Item = PostingContext> {
                                 // The capture predates DMARC facts; lists in
                                 // it never mitigate, so the policy is moot.
                                 dmarc_policy_restrictive: false,
+                                recent_posts: 0,
                             },
                             list: ListChecks {
                                 emergency: bits(flags, 3),
@@ -154,6 +155,8 @@ fn contexts() -> impl Iterator<Item = PostingContext> {
                             message: clean_message(),
                             site_header_checks: Vec::new(),
                             site_jump_chain: "hold".into(),
+                            site_max_received_hops: 0,
+                            site_posting_rate: None,
                             member_moderation_action: membership,
                             default_member_action: member_default,
                             default_nonmember_action: nonmember_default,

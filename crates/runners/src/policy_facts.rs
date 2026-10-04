@@ -107,6 +107,37 @@ async fn is_approved(db: &Database, list_id: &ListId, raw: &[u8]) -> Result<bool
     }
 }
 
+/// The `posting-rate` facts: the site's limit, if any, and how many posts
+/// the sender had accepted on the list inside its window (zero without a
+/// limit or a sender). The limit was validated at load.
+async fn posting_rate_facts(
+    db: &Database,
+    config: &Config,
+    list_id: &ListId,
+    envelope_sender: Option<&str>,
+) -> Result<(Option<listmngr_core::RateLimit>, u32)> {
+    let limit = config
+        .security
+        .rate_limit
+        .post
+        .as_deref()
+        .and_then(|spec| listmngr_core::RateLimit::parse("post", spec).ok());
+    let recent = match (limit, envelope_sender) {
+        (Some(limit), Some(sender)) => {
+            let window_ms =
+                i64::try_from(limit.window_secs.saturating_mul(1000)).unwrap_or(i64::MAX);
+            let since = chrono::Utc::now()
+                .timestamp_millis()
+                .saturating_sub(window_ms);
+            db.posting_rate()
+                .count_since(list_id, sender, since)
+                .await?
+        }
+        _ => 0,
+    };
+    Ok((limit, recent))
+}
+
 /// Gather every fact `listmngr_pipeline::policy::decide_posting` needs for
 /// one inbound submission. No decision logic lives here.
 /// # Errors
@@ -158,6 +189,8 @@ pub async fn gather_context(
             .map(|address| address.to_ascii_lowercase())
             .collect(),
     };
+    let (site_posting_rate, recent_posts) =
+        posting_rate_facts(db, config, list_id, envelope_sender).await?;
     Ok(PostingContext {
         envelope_sender: envelope_sender.map(str::to_owned),
         sender: SenderChecks {
@@ -167,6 +200,7 @@ pub async fn gather_context(
             nonmember_action,
             // Filled by the runner from the `validate-authenticity` verdict.
             dmarc_policy_restrictive: false,
+            recent_posts,
         },
         list: ListChecks {
             emergency: list.emergency,
@@ -194,6 +228,8 @@ pub async fn gather_context(
         message,
         site_header_checks: site_header_checks(config),
         site_jump_chain: config.antispam.jump_chain.clone(),
+        site_max_received_hops: config.mta.max_received_hops,
+        site_posting_rate,
         member_moderation_action,
         default_member_action: list
             .default_member_action

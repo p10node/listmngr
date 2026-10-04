@@ -1004,31 +1004,60 @@ pub struct Config {
     pub observability: ObservabilityConfig,
 }
 
+/// A `COUNT/WINDOW` rate limit as `security.rate_limit.*` spell it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateLimit {
+    pub count: u32,
+    pub window_secs: u64,
+}
+
+impl RateLimit {
+    /// Parse `COUNT/WINDOW`; `key` names the setting in the error.
+    /// # Errors
+    /// A validation error naming the setting and what is wrong with it.
+    pub fn parse(key: &str, spec: &str) -> Result<Self> {
+        let Some((count, window)) = spec.split_once('/') else {
+            return Err(Error::Validation(format!(
+                "security.rate_limit.{key} must use COUNT/WINDOW"
+            )));
+        };
+        let count = count
+            .parse::<u32>()
+            .ok()
+            .filter(|count| *count > 0)
+            .ok_or_else(|| {
+                Error::Validation(format!(
+                    "security.rate_limit.{key} count must be a positive integer"
+                ))
+            })?;
+        let window_secs = match window {
+            "s" | "sec" | "second" => 1,
+            "m" | "min" | "minute" => 60,
+            "h" | "hour" => 3600,
+            "d" | "day" => 86_400,
+            _ => {
+                return Err(Error::Validation(format!(
+                    "security.rate_limit.{key} has an unsupported window"
+                )));
+            }
+        };
+        Ok(Self { count, window_secs })
+    }
+
+    /// The window as a word, for a reason shown to people.
+    #[must_use]
+    pub const fn window_name(&self) -> &'static str {
+        match self.window_secs {
+            1 => "second",
+            60 => "minute",
+            3600 => "hour",
+            _ => "day",
+        }
+    }
+}
+
 fn validate_rate_limit(key: &str, spec: &str) -> Result<()> {
-    let Some((count, window)) = spec.split_once('/') else {
-        return Err(Error::Validation(format!(
-            "security.rate_limit.{key} must use COUNT/WINDOW"
-        )));
-    };
-    if count
-        .parse::<u32>()
-        .ok()
-        .filter(|count| *count > 0)
-        .is_none()
-    {
-        return Err(Error::Validation(format!(
-            "security.rate_limit.{key} count must be a positive integer"
-        )));
-    }
-    if !matches!(
-        window,
-        "s" | "sec" | "second" | "m" | "min" | "minute" | "h" | "hour" | "d" | "day"
-    ) {
-        return Err(Error::Validation(format!(
-            "security.rate_limit.{key} has an unsupported window"
-        )));
-    }
-    Ok(())
+    RateLimit::parse(key, spec).map(|_| ())
 }
 
 impl Config {
@@ -1089,6 +1118,9 @@ impl Config {
         validate_rate_limit("api", &config.security.rate_limit.api)?;
         if let Some(spec) = &config.security.rate_limit.api_pre_auth {
             validate_rate_limit("api_pre_auth", spec)?;
+        }
+        if let Some(spec) = &config.security.rate_limit.post {
+            validate_rate_limit("post", spec)?;
         }
         config.mta.validate()?;
         config.mailman.validate()?;
@@ -1415,6 +1447,9 @@ config_struct!(MtaConfig {
     max_header_count: u32 = 500,
     max_mime_parts: u32 = 1000,
     max_mime_depth: u32 = 20,
+    // The `max-hops` rule: a post with more `Received:` headers than this
+    // is discarded as a mail loop. 0 turns the rule off.
+    max_received_hops: u32 = 30,
     command_timeout_secs: u32 = 30,
     // Mailman's `incoming` MTA: "none", "postfix" or "exim". Lookup maps are
     // published under `map_directory` as `generation-*` directories behind a
@@ -1515,6 +1550,11 @@ impl MtaConfig {
         if !(1..=1000).contains(&self.max_mime_depth) {
             return Err(Error::Validation(
                 "mta.max_mime_depth must be 1..1000".into(),
+            ));
+        }
+        if self.max_received_hops > 1000 {
+            return Err(Error::Validation(
+                "mta.max_received_hops must be 0..1000".into(),
             ));
         }
         if !(1..=3600).contains(&self.retry_initial_secs)
@@ -1891,7 +1931,11 @@ config_struct!(RateLimitConfig {
     login: String = "5/min".into(),
     subscribe: String = "10/hour".into(),
     api: String = "600/min".into(),
-    api_pre_auth: Option<String> = None
+    api_pre_auth: Option<String> = None,
+    // The `posting-rate` rule: posts one sender may have accepted on one
+    // list per window before the next is held for a moderator (for example
+    // "20/hour"). Unset: no limit.
+    post: Option<String> = None
 });
 config_struct!(SecurityConfig { argon2: Argon2Config = Argon2Config::default(), password_min_score: u8 = 3, require_2fa_for: Vec<String> = vec!["server_owner".into()], pending_request_life: String = "3d".into(), rate_limit: RateLimitConfig = RateLimitConfig::default() });
 config_struct!(MailmanConfig {

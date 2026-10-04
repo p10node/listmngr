@@ -1,5 +1,24 @@
 # Architecture
 
+## Loop and abuse rules — bounded local acceptance verified
+
+`listmngr_core::RateLimit { count, window_secs }` (`parse(key, spec)`,
+which `validate_rate_limit` now uses, and `window_name()`); `[security]
+rate_limit.post: Option<String>` validated like its siblings; `[mta]
+max_received_hops` (0..=1000). `PostingContext` gains
+`site_max_received_hops` and `site_posting_rate`, `SenderChecks` gains
+`recent_posts`; `policy_facts::gather_context` fills them from the
+configuration and `PostingRateRepo::count_since(list, sender, now −
+window)`. `rules::MaxHops` (`ctx.headers("Received").count() > max`) is
+linked `max-hops → discard` after `loop`, so the plugins detour moves to
+index 7; `rules::PostingRate` (`recent_posts >= count`) is a `defer`
+link after `suspicious-header`. `AcceptEffects::posting_rate_sender`
+makes `complete_accepted` insert the `posting_rate` row in the accept
+transaction (the runner sets it only when the limit is configured);
+`TaskRepo::sweep` gained the `posting_rate` step (`expired_posting_rate`,
+cutoff one day) and the table is in the schema snapshot
+(`posting-rate-schema.snapshot`) and the PostgreSQL contract set.
+
 ## Structure ceilings at the intake — bounded local acceptance verified
 
 `listmngr_mail::structure`: `Limits { max_header_count, max_mime_parts,

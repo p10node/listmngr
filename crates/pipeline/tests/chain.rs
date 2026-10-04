@@ -27,6 +27,8 @@ fn ctx() -> PostingContext {
         },
         site_header_checks: Vec::new(),
         site_jump_chain: "hold".into(),
+        site_max_received_hops: 0,
+        site_posting_rate: None,
         member_moderation_action: Some(None),
         default_member_action: ModerationAction::Defer,
         default_nonmember_action: ModerationAction::Hold,
@@ -82,6 +84,7 @@ fn builtin_posting_chain_preserves_the_documented_rule_order() {
             "approved",
             "emergency",
             "loop",
+            "max-hops",
             "banned-address",
             "member-moderation",
             "nonmember-moderation",
@@ -92,6 +95,7 @@ fn builtin_posting_chain_preserves_the_documented_rule_order() {
             "news-moderation",
             "no-subject",
             "suspicious-header",
+            "posting-rate",
             "any",
             "truth",
             "truth",
@@ -104,16 +108,16 @@ fn builtin_posting_chain_preserves_the_documented_rule_order() {
         "a restrictive policy jumps to the DMARC chain"
     );
     assert_eq!(
-        actions[15],
+        actions[17],
         LinkAction::Jump("moderation"),
         "any -> moderation"
     );
     assert_eq!(
-        actions[16],
+        actions[18],
         LinkAction::Detour("header-match"),
         "detour through the list's header rules"
     );
-    assert_eq!(actions[17], LinkAction::Jump("accept"));
+    assert_eq!(actions[19], LinkAction::Jump("accept"));
 }
 
 #[test]
@@ -381,6 +385,7 @@ fn an_accepted_post_records_every_rule_it_passed() {
             "approved",
             "emergency",
             "loop",
+            "max-hops",
             "banned-address",
             "member-moderation",
             "nonmember-moderation",
@@ -391,6 +396,7 @@ fn an_accepted_post_records_every_rule_it_passed() {
             "news-moderation",
             "no-subject",
             "suspicious-header",
+            "posting-rate",
             "any",
         ]
     );
