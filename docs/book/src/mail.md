@@ -44,6 +44,15 @@ the recipient up in the `lsearch` maps and delivers over LMTP.
   `dmarc_mitigate_action` decides what happens to a post from a domain
   with `p=reject` or `p=quarantine`.
 
+## Limits at the intake
+
+`mta.max_message_bytes` bounds the size the listeners accept, and
+`mta.max_header_count`, `max_mime_parts` and `max_mime_depth` (500,
+1000 and 20 by default) bound the shape: a message over any of them is
+refused at `DATA` with `554 5.6.0` for every recipient and nothing is
+stored, and the news gateway passes over such an article. The per-list
+`max_message_size` is a moderation rule, not a listener limit.
+
 ## Delivery
 
 Posts go out in SMTP transactions of at most `mta.max_recipients`

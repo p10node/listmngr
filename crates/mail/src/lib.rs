@@ -36,6 +36,7 @@ pub mod owner;
 pub mod personalize;
 pub mod reply_to;
 pub mod smtp;
+pub mod structure;
 pub mod templates;
 pub mod templates_mailman;
 mod templates_vi;

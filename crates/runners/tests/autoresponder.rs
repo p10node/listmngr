@@ -51,6 +51,7 @@ async fn fixture(settings: serde_json::Value) -> (Database, InboundHandler) {
         command_timeout: Duration::from_secs(5),
         in_max_attempts: 3,
         verp_delimiter: "+".into(),
+        structure: listmngr_mail::structure::Limits::default(),
     };
     (db, handler)
 }

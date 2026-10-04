@@ -1,5 +1,30 @@
 # Architecture
 
+## Structure ceilings at the intake — bounded local acceptance verified
+
+`listmngr_mail::structure`: `Limits { max_header_count, max_mime_parts,
+max_mime_depth }` (`Default` = 500/1000/20, `From<&MtaConfig>`),
+`Measure`, `Excess::{Headers, Parts, Depth}` (a `Display` naming the
+measured and the configured number) and `measure(raw)` / `check(raw,
+&limits)`. The header count is one pass over the outer header block (a
+line not starting with whitespace, up to the first empty line; no blank
+line means the whole input is header). The MIME shape is one
+`mail_parser` parse and an iterative walk of the part tree — a
+`Multipart` pushes its children one level deeper, a `Message` pushes the
+nested message's root one level deeper — so a tree the parser built
+without recursion is measured without recursion too; bytes the parser
+cannot read are one part, one deep. `check` judges headers, then parts,
+then depth. `InboundHandler` carries `structure: Limits` and refuses in
+`deliver` before `parse_optional_message_id`, one `554 5.6.0` outcome per
+recipient, counted as `rejected` in `listmngr_lmtp_recipients_total`;
+`MailRoleConfig::structure` feeds it from `[mta]`. `nntp::run` and
+`gate_news_with(db, &nntp, &limits)` (`gate_news` keeps the defaults)
+measure each gated article after `inbound` and pass an excessive one with
+a warning and the watermark advanced, like an unreadable header block.
+`MtaConfig::validate` requires each ceiling to be at least 1 and at most
+65 536 header fields, 1 000 000 parts and 1 000 levels. The `mime_filter`
+fuzz target also runs `measure`.
+
 ## 1.0.0 — bounded local acceptance verified
 
 The version lives in `[workspace.package]` and in each crate's path
