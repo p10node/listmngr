@@ -1,5 +1,31 @@
 # listmngr
 
+## 1.0.0 (`P7-1.0`) — bounded local acceptance verified
+
+Every workspace package, every path dependency between them and the
+Helm chart are `1.0.0`; `Cargo.lock` follows (`cargo update
+--workspace`). The OpenAPI document and the CLI's `version` report the
+package version instead of a literal, and `crates/cli/tests/cli.rs`
+asserts whatever the package says. `CHANGELOG.md` opens an empty
+`[Unreleased]` above `[1.0.0] - 2026-10-04`, which gathers everything
+that was unreleased. The sentences that called `0.1.0` unreleased
+(`CLAUDE.md`, `docs/SECURITY.md`, this README, the book, `docs/PLAN.md`,
+the ledger's version baseline) now say what `1.0.0` is; the ledger's
+phase table closes Phase 7. `scripts/tests/test_version.py` holds all
+of that. The annotated tag `v1.0.0` is created locally on the merge
+commit; pushing it, which runs the release workflow, is the
+maintainer's decision.
+
+```sh
+git tag -n1 v1.0.0
+python3 -m unittest scripts/tests/test_version.py
+```
+
+Limits: the tag is local until pushed; no release has been produced
+from it yet (the workflow runs on the push); `0.1.0` stays in the
+historical rows and sections below, which describe the snapshot they
+were written at.
+
 ## Release (`P7-RELEASE`) — bounded local acceptance verified
 
 `.github/workflows/release.yml` runs on a `v*` tag, every action pinned
@@ -3341,7 +3367,7 @@ confirmation does not verify or relink a pre-existing user account. Focused
 regressions and a restart/HTTP/LMTP/SMTP probe cover this repair; composed release
 acceptance remains separate (see `docs/FEATURE_PARITY.md`).
 
-`listmngr` is a security-focused mailing-list manager written in Rust, version **0.1.0 (unreleased development)**, licensed **AGPL-3.0-or-later**. Phase 1 has recorded local acceptance evidence. The current development checkpoint adds a **bounded, opt-in plaintext trusted-relay LMTP → held moderation → SMTP path**, durable queue attempts and conservative uncertainty quarantine through migration `0004_delivery_attempt_token.sql`.
+`listmngr` is a security-focused mailing-list manager written in Rust, version **1.0.0** (the first release; this paragraph was written at `0.1.0`), licensed **AGPL-3.0-or-later**. Phase 1 has recorded local acceptance evidence. The current development checkpoint adds a **bounded, opt-in plaintext trusted-relay LMTP → held moderation → SMTP path**, durable queue attempts and conservative uncertainty quarantine through migration `0004_delivery_attempt_token.sql`.
 
 **This is not production-ready or a complete Mailman replacement.** The composed development tree now includes subscription confirmation, digest and archive behavior. Parent verification on 2026-09-06 passed locked workspace build, workspace tests on rerun, full Clippy, isolated PostgreSQL and the pinned mailmanclient 3.3.5 bounded compatibility probe. An initial full-suite heartbeat test failed under concurrent load and passed in isolation and on rerun; this timing sensitivity remains open. Lease-lock fencing, browser UI and email-only confirmation worktrees are not covered by this composed result. See [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md) for exact evidence boundaries; [`docs/PLAN.md`](docs/PLAN.md) remains the normative product target.
 
@@ -3943,7 +3969,7 @@ Configuration is TOML plus `LISTMNGR__SECTION__KEY` environment overrides. Prefe
 
 ## License and versioning
 
-All workspace packages are version `0.1.0`; no released tag is implied. The project is licensed under GNU Affero General Public License v3 or later. The complete license is in [`LICENSE`](LICENSE); rationale is in ADR-0003.
+All workspace packages are version `1.0.0`, the first release (annotated tag `v1.0.0`, 2026-10-04). The project is licensed under GNU Affero General Public License v3 or later. The complete license is in [`LICENSE`](LICENSE); rationale is in ADR-0003.
 
 
 ## P4-BOUNCE-WEB-RECOVERY — verified-session behavior

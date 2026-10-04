@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-No public release is currently declared. Security fixes target the current development branch until a release support matrix is published. Version `0.1.0` is an unreleased package baseline, not a support guarantee.
+`1.0.0` (tag `v1.0.0`, 2026-10-04) is the first release. Security fixes land on `main` and are released as the next `1.0.x`; only the latest `1.x` release is supported. Earlier `0.1.0` development snapshots are not.
 
 ## Assets, actors, and trust boundaries
 

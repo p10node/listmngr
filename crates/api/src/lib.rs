@@ -540,7 +540,7 @@ impl utoipa::Modify for SecurityAddon {
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "listmngr API", version = "0.1.0"),
+    info(title = "listmngr API"),
     paths(
         bans::list,
         bounces::list,
