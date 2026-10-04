@@ -1,6 +1,32 @@
 # listmngr
 
-## Chaos (`P7-CHAOS`) — bounded local acceptance verified
+## Load (`P7-LOAD`) — bounded local acceptance verified
+
+`crates/cli/tests/load.rs` is the benchmark the plan asks for: a list of
+`LOAD_MEMBERS` members (ten thousand by default) takes `LOAD_POSTS`
+posts (a hundred) through LMTP from the real binary, a loopback relay
+accepts every recipient, and the run prints one JSON line — intake
+posts per second, recipients per second, SMTP transactions, and the
+queue latency from a post's LMTP `250` to its first and last relay
+acceptance (p50, p95, max). It is `#[ignore]`d: run it by hand and read
+the numbers against the plan's targets (ten thousand members, a thousand
+posts an hour); it asserts only that every recipient was accepted
+exactly once.
+
+```sh
+LOAD_MEMBERS=10000 LOAD_POSTS=100 \
+  cargo test --release --locked -p listmngr --test load -- --ignored --nocapture
+```
+
+The recorded run and what it says for `mta.max_recipients`,
+`database.max_connections`, the retention and the retry backoff are in
+`docs/OPERATIONS.md`.
+
+Limits: one machine, SQLite, a relay that answers at once; no network
+latency, no DKIM signing in the run, no personalised delivery; the
+numbers are a floor for "what the code path costs", not a capacity
+promise.
+
 
 `crates/cli/tests/chaos.rs` drives the real binary into three failures
 around a delivery and holds it to one rule: no post is lost, and no
