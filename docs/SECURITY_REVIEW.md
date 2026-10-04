@@ -34,7 +34,7 @@ Legend: **done** as designed · **deviates** done another way, on purpose
 | ARC when the list alters content | done | `P6-ARC-SEAL` | — |
 | VERP with an HMAC bounce token | done | `verp.rs`, bounce probes with a hashed token (`bounce_probes.token_hash`) | — |
 | Loop and abuse: `loop` rule, max hops, per-sender and per-list posting rate | deviates | `rules.rs` `loop` (the list's own `List-Post` marker), `max-recipients`, `emergency`, `member-moderation`; per-address request cooldowns for commands; `security.rate_limit.subscribe` | There is no `Received:`-hop cap and no posts-per-hour limit per sender; moderation (`default_member_action`, `emergency`) is the control. Open as a feature, with the `loop` rule and `max-recipients` as mitigations. |
-| Size and DoS: LMTP reject over the size, MIME depth ≤ 20, parts ≤ 1000, headers ≤ 500, streaming to the store | deviates | LMTP `max_message_bytes` from the site (`lmtp.rs`; the line and size limits are fuzzed by `lmtp_session`), list `max_message_size` (`max-size` rule); `mail-parser` bounds its own recursion; `DefaultBodyLimit` on web posts (1 MiB) and unsubscribe (1 KiB) | Explicit MIME depth, part and header counts are not enforced beyond the parser's own; a message is held in memory once (not streamed), bounded by the LMTP size limit. |
+| Size and DoS: LMTP reject over the size, MIME depth ≤ 20, parts ≤ 1000, headers ≤ 500, streaming to the store | done (1.1) | LMTP `max_message_bytes` from the site (`lmtp.rs`; the line and size limits are fuzzed by `lmtp_session`), list `max_message_size` (`max-size` rule); `[mta] max_header_count = 500`, `max_mime_parts = 1000`, `max_mime_depth = 20` measured by `listmngr_mail::structure` and enforced at the LMTP/SMTP intake (`554 5.6.0`, nothing stored) and by the news gateway (`P8-MIME-LIMITS`; `measure` is fuzzed in `mime_filter`); `DefaultBodyLimit` on web posts (1 MiB) and unsubscribe (1 KiB) | The ceilings are explicit and independent of the parser's since `P8-MIME-LIMITS`. A message is still held in memory once (not streamed), bounded by the LMTP size limit — accepted. |
 | Attachments: sniffing, blocked extensions, `attachment` + `nosniff` | done | `mime_delete` (extensions, types), `webui_archive.rs` (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`), the `P5-RENDER` deny-list | — |
 | Address parsing: strict RFC 5322 + IDNA, no control characters, case-normalised match, `original_email` kept | done | `Address::new` (`is_control` refused, IDNA), `addresses.email` / `original_email` | — |
 
@@ -83,5 +83,6 @@ Legend: **done** as designed · **deviates** done another way, on purpose
 1. At-rest encryption of TOTP secrets (and a key-wrapping scheme for DKIM/ARC keys) under a `security.master_key`.
 2. Ed25519 DKIM alongside RSA, and selector rotation tooling.
 3. A per-sender posting rate and a `Received:` hop cap as rules.
-4. Explicit MIME depth, part and header-count ceilings in the intake, independent of the parser's.
-5. An external review.
+4. An external review.
+
+Closed since: explicit MIME depth, part and header-count ceilings in the intake (`P8-MIME-LIMITS`, 1.1).

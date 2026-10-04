@@ -403,6 +403,7 @@ fn real_postfix_lookup_agrees_with_runtime_recipient_validation() {
             command_timeout: std::time::Duration::from_secs(2),
             in_max_attempts: 3,
             verp_delimiter: "+".into(),
+            structure: listmngr_mail::structure::Limits::default(),
         };
         for (address, valid) in [
             ("alpha@example.invalid", true),

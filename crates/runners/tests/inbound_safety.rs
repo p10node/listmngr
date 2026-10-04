@@ -229,6 +229,7 @@ fn handler(db: Database) -> InboundHandler {
         command_timeout: Duration::from_secs(2),
         in_max_attempts: 3,
         verp_delimiter: "+".into(),
+        structure: listmngr_mail::structure::Limits::default(),
     }
 }
 
@@ -270,4 +271,141 @@ async fn quick_database_failure_is_transient_not_unknown_recipient() {
     );
     client.get_mut().write_all(b"QUIT\r\n").await.unwrap();
     task.await.unwrap();
+}
+
+/// A plain text body wrapped in `levels - 1` nested `multipart/mixed`
+/// bodies, as the LMTP client sends it, dot-terminated.
+fn nested(levels: u32) -> String {
+    fn body(level: u32, levels: u32) -> String {
+        if level == levels {
+            return "Content-Type: text/plain\r\n\r\nleaf\r\n".to_owned();
+        }
+        let boundary = format!("b{level}");
+        format!(
+            "Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\n{}--{boundary}--\r\n",
+            body(level + 1, levels)
+        )
+    }
+    format!(
+        "From: author@elsewhere.invalid\r\nMessage-ID: <deep{levels}@example.invalid>\r\n{}.\r\n",
+        body(1, levels)
+    )
+}
+
+async fn two_lists() -> Database {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    db.domains()
+        .create("example.invalid", "fixture", None)
+        .await
+        .unwrap();
+    for name in ["first", "second"] {
+        db.lists()
+            .create(listmngr_db::NewList {
+                list_id: format!("{name}.example.invalid").parse().unwrap(),
+                display_name: name.into(),
+                style: "legacy-default".into(),
+            })
+            .await
+            .unwrap();
+    }
+    db
+}
+
+/// A message over the site's structure ceilings is refused at `DATA` for
+/// every recipient with `554 5.6.0` naming the ceiling, before anything is
+/// stored; the same session then takes a message within them.
+#[tokio::test]
+async fn a_message_over_the_structure_ceilings_is_refused_for_every_recipient_before_storage() {
+    let db = two_lists().await;
+    let mut intake = handler(db.clone());
+    intake.structure = listmngr_mail::structure::Limits {
+        max_mime_depth: 2,
+        ..listmngr_mail::structure::Limits::default()
+    };
+    let (client, server) = tokio::io::duplex(65_536);
+    let task = tokio::spawn(async move {
+        serve_session(server, &mut intake).await.unwrap();
+    });
+    let mut client = BufReader::new(client);
+    assert!(reply(&mut client).await.starts_with("220 "));
+    assert!(command(&mut client, "LHLO peer").await.starts_with("250 "));
+    for (levels, expected) in [(3, "554 "), (2, "250 ")] {
+        assert!(
+            command(&mut client, "MAIL FROM:<author@elsewhere.invalid>")
+                .await
+                .starts_with("250 ")
+        );
+        for name in ["first", "second"] {
+            assert!(
+                command(&mut client, &format!("RCPT TO:<{name}@example.invalid>"))
+                    .await
+                    .starts_with("250 ")
+            );
+        }
+        assert!(command(&mut client, "DATA").await.starts_with("354 "));
+        client
+            .get_mut()
+            .write_all(nested(levels).as_bytes())
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            let line = reply(&mut client).await;
+            assert!(line.starts_with(expected), "{levels}: {line}");
+            if levels == 3 {
+                assert!(
+                    line.contains("5.6.0 message structure exceeds the site's limits: MIME nesting 3 deep, at most 2"),
+                    "{line}"
+                );
+            }
+        }
+    }
+    assert!(command(&mut client, "QUIT").await.starts_with("221 "));
+    task.await.unwrap();
+    let counts: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM message_blobs), (SELECT COUNT(*) FROM messages)",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        counts,
+        (1, 2),
+        "only the message within the ceilings is stored"
+    );
+    let stored: Vec<u8> = sqlx::query_scalar("SELECT raw FROM message_blobs")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert!(stored.windows(7).any(|w| w == b"<deep2@"));
+}
+
+/// Header fields are a ceiling too, judged first, with the same reply and
+/// nothing stored.
+#[tokio::test]
+async fn too_many_header_fields_are_refused_with_the_same_reply() {
+    let db = two_lists().await;
+    let mut intake = handler(db.clone());
+    intake.structure = listmngr_mail::structure::Limits {
+        max_header_count: 2,
+        ..listmngr_mail::structure::Limits::default()
+    };
+    let outcomes = intake
+        .deliver(
+            Some("author@elsewhere.invalid"),
+            &["first@example.invalid".into()],
+            b"From: author@elsewhere.invalid\r\nSubject: three\r\nMessage-ID: <h@example.invalid>\r\n\r\nbody\r\n",
+        )
+        .await;
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].code, 554);
+    assert_eq!(
+        outcomes[0].detail,
+        "5.6.0 message structure exceeds the site's limits: 3 header fields, at most 2"
+    );
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "nothing was stored");
 }

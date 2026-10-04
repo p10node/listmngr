@@ -68,6 +68,9 @@ the effective values with secrets redacted; `listmngr conf --key section.key` pr
 | `retry_initial_secs` | `u32` | `10` | Transient delivery failures back off exponentially between these bounds (seconds), with jitter. |
 | `retry_max_secs` | `u32` | `3600` |  |
 | `max_message_bytes` | `u32` | `10_485_760` |  |
+| `max_header_count` | `u32` | `500` | Ceilings on a message's shape at the intake (LMTP, inbound SMTP, the news gateway), checked before anything is stored: header fields in the outer block (a folded field counts once), MIME parts in all (a nested message's parts included) and nesting depth (the outer body is 1). Over any of them: `554 5.6.0`, nothing queued. |
+| `max_mime_parts` | `u32` | `1000` |  |
+| `max_mime_depth` | `u32` | `20` |  |
 | `command_timeout_secs` | `u32` | `30` |  |
 | `map_directory` | `String` | `"data/mta"` | Mailman's `incoming` MTA: "none", "postfix" or "exim". Lookup maps are published under `map_directory` as `generation-*` directories behind a `current` symlink, at startup and after every list creation/removal. |
 | `lmtp_map_target` | `Option<String>` | `None` | How the MTA reaches the LMTP listener (`host:port`); defaults to `lmtp_listen`, which must then be a concrete address. |

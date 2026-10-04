@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Structure ceilings at the intake (`P8-MIME-LIMITS`): `[mta] max_header_count` (500), `max_mime_parts` (1000) and `max_mime_depth` (20) bound a message's shape before anything is stored — the LMTP and inbound SMTP listeners answer `554 5.6.0` for every recipient of a message over any of them and queue nothing, and the news gateway passes over such an article as it passes an unreadable one; `listmngr_mail::structure` measures, the `mime_filter` fuzz target runs it.
+
 ### Changed
 - The ledger and the documents agree with the release (`P8-LEDGER-RECONCILE`): the phase table and the residual table of `docs/FEATURE_PARITY.md` name the rows that closed them, the 2026-09 "plaintext trusted-relay, not production-ready" paragraphs in the ledger and the README are replaced by pointers to those rows, `docs/PLAN.md` carries the 1.0.0 milestone and Phase 8, and `docs/HANDOFF.md` and `docs/MAILMAN_REPLACEMENT.md` are marked historical.
 

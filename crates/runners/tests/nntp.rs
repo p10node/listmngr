@@ -269,7 +269,12 @@ async fn admit(db: &Database, raw: &[u8], context: Value) -> Vec<(String, String
 /// for good, or five seconds pass.
 async fn gate(db: &Database, config: NntpConfig) -> (String, String) {
     let (stop, receiver) = tokio::sync::watch::channel(false);
-    let mut worker = tokio::spawn(listmngr_runners::nntp::run(db.clone(), config, receiver));
+    let mut worker = tokio::spawn(listmngr_runners::nntp::run(
+        db.clone(),
+        config,
+        listmngr_mail::structure::Limits::default(),
+        receiver,
+    ));
     let settled = tokio::time::timeout(Duration::from_secs(8), async {
         loop {
             let (state, error): (String, String) =
@@ -480,6 +485,7 @@ async fn a_refused_message_id_is_replaced_once_and_a_dead_server_waits() {
             port: dead,
             ..NntpConfig::default()
         },
+        listmngr_mail::structure::Limits::default(),
         receiver,
     ));
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -849,6 +855,7 @@ async fn the_nntp_runner_polls_the_newsgroups_on_its_schedule() {
             gatenews_every_secs: 3600,
             ..NntpConfig::default()
         },
+        listmngr_mail::structure::Limits::default(),
         receiver,
     ));
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -872,10 +879,63 @@ async fn the_nntp_runner_polls_the_newsgroups_on_its_schedule() {
             gatenews_every_secs: 0,
             ..NntpConfig::default()
         },
+        listmngr_mail::structure::Limits::default(),
         receiver,
     ));
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert_eq!(watermark(&db).await, Value::Null);
     stop.send(true).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(2), worker).await;
+}
+
+/// An article over the site's structure ceilings is passed over — the
+/// watermark moves, nothing is queued, the poll reports no error — like
+/// one whose headers cannot be read, so the list is never stuck behind it.
+#[tokio::test]
+async fn an_article_over_the_structure_ceilings_is_passed_not_gated() {
+    let db =
+        fixture(json!({"gateway_to_mail": true, "linked_newsgroup": "comp.lang.rust.lists"})).await;
+    let config = |port| NntpConfig {
+        host: "127.0.0.1".into(),
+        port,
+        ..NntpConfig::default()
+    };
+    let limits = listmngr_mail::structure::Limits {
+        max_mime_depth: 2,
+        ..listmngr_mail::structure::Limits::default()
+    };
+    let (port, _, articles) = news_server_with_group(None, "comp.lang.rust.lists").await;
+    *articles.lock().unwrap() = vec![article(41, "old@elsewhere.invalid", "before", None)];
+    listmngr_runners::nntp::gate_news_with(&db, &config(port), &limits)
+        .await
+        .unwrap();
+    assert_eq!(watermark(&db).await, 41);
+    let deep = (
+        42,
+        b"Path: news.invalid!not-for-mail\r\nFrom: carol@elsewhere.invalid\r\nNewsgroups: comp.lang.rust.lists\r\nSubject: deep\r\nDate: Tue, 2 Sep 2026 09:00:00 +0000\r\nMessage-ID: <42@news.invalid>\r\nTo: readers@elsewhere.invalid\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: multipart/mixed; boundary=\"b2\"\r\n\r\n--b2\r\nContent-Type: text/plain\r\n\r\nleaf\r\n--b2--\r\n--b1--\r\n".to_vec(),
+    );
+    let (port, _, articles) = news_server_with_group(None, "comp.lang.rust.lists").await;
+    *articles.lock().unwrap() = vec![
+        article(41, "old@elsewhere.invalid", "before", None),
+        deep,
+        article(43, "dave@elsewhere.invalid", "after", None),
+    ];
+    let report = listmngr_runners::nntp::gate_news_with(&db, &config(port), &limits)
+        .await
+        .unwrap();
+    assert_eq!(report.len(), 1);
+    assert_eq!(report[0].error, None, "{report:?}");
+    assert_eq!(report[0].gated, 1, "{report:?}");
+    assert_eq!(report[0].watermark, Some(43), "{report:?}");
+    assert_eq!(watermark(&db).await, 43);
+    assert_eq!(queued_ids(&db).await, ["<43@news.invalid>"]);
+    // With the defaults the same article is well within the ceilings.
+    assert!(
+        listmngr_mail::structure::check(&deep_copy(), &listmngr_mail::structure::Limits::default())
+            .is_ok()
+    );
+}
+
+fn deep_copy() -> Vec<u8> {
+    b"Content-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: multipart/mixed; boundary=\"b2\"\r\n\r\n--b2\r\nContent-Type: text/plain\r\n\r\nleaf\r\n--b2--\r\n--b1--\r\n".to_vec()
 }

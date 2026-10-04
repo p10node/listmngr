@@ -1,5 +1,24 @@
 # listmngr
 
+## Structure ceilings at the intake (`P8-MIME-LIMITS`) — bounded local acceptance verified
+
+Three numbers bound what a message may be shaped like before anything is
+stored: `[mta] max_header_count = 500` (fields in the outer header block;
+a folded field counts once), `max_mime_parts = 1000` (MIME parts in all,
+the parts of a nested `message/rfc822` included) and `max_mime_depth = 20`
+(the outer body is 1, a multipart's children 2, a nested message's body one
+deeper than its part). They are checked at load (each at least 1) and
+enforced where mail enters from the network: the LMTP and inbound SMTP
+listener answer `554 5.6.0 message structure exceeds the site's limits:
+…` for every recipient of such a message and queue nothing — the
+measured and the configured number are in the reply, never any content —
+and the news gateway passes over an article that exceeds them as it
+passes one whose headers it cannot read, logging it and moving the
+watermark so the list is not stuck behind it. The size limit
+(`max_message_bytes`) still runs first; the parser's own bounds remain
+underneath these. What an operator injects (`queue inject`, `archive
+import`, the imports) is not measured.
+
 ## 1.0.0 (`P7-1.0`) — bounded local acceptance verified
 
 Every workspace package, every path dependency between them and the

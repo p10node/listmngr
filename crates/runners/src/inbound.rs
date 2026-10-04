@@ -34,6 +34,10 @@ pub struct InboundHandler {
     /// `[mta] verp_delimiter`: `list-bounces<delimiter>local=domain` names
     /// the recipient a bounce concerns.
     pub verp_delimiter: String,
+    /// `[mta] max_header_count`, `max_mime_parts`, `max_mime_depth`: a
+    /// message over any of them is refused for every recipient before
+    /// anything is stored.
+    pub structure: listmngr_mail::structure::Limits,
 }
 
 /// Where an inbound recipient address routes.
@@ -198,6 +202,36 @@ impl InboundHandler {
     }
 }
 
+impl InboundHandler {
+    /// The checks before anything is stored: the structure ceilings, then
+    /// the header block and its `Message-ID`. `Err` carries the reply for
+    /// every recipient.
+    fn admit(
+        &self,
+        recipients: &[String],
+        data: &[u8],
+    ) -> Result<Option<String>, Vec<RecipientOutcome>> {
+        if let Err(excess) = listmngr_mail::structure::check(data, &self.structure) {
+            tracing::info!(
+                %excess,
+                recipients = recipients.len(),
+                "intake: message over the structure ceilings refused"
+            );
+            let outcomes: Vec<_> = recipients
+                .iter()
+                .map(|_| RecipientOutcome {
+                    code: 554,
+                    detail: format!("5.6.0 message structure exceeds the site's limits: {excess}"),
+                })
+                .collect();
+            count_lmtp_outcomes(&outcomes);
+            return Err(outcomes);
+        }
+        listmngr_mail::parse_optional_message_id(data)
+            .map_err(|_| recipients.iter().map(|_| invalid_metadata()).collect())
+    }
+}
+
 impl LmtpHandler for InboundHandler {
     fn local_hostname(&self) -> &str {
         &self.local_hostname
@@ -228,8 +262,9 @@ impl LmtpHandler for InboundHandler {
         recipients: &[String],
         data: &[u8],
     ) -> Vec<RecipientOutcome> {
-        let Ok(external_id) = listmngr_mail::parse_optional_message_id(data) else {
-            return recipients.iter().map(|_| invalid_metadata()).collect();
+        let external_id = match self.admit(recipients, data) {
+            Ok(external_id) => external_id,
+            Err(outcomes) => return outcomes,
         };
 
         let now_ms = chrono::Utc::now().timestamp_millis();

@@ -1407,6 +1407,14 @@ config_struct!(MtaConfig {
     retry_initial_secs: u32 = 10,
     retry_max_secs: u32 = 3600,
     max_message_bytes: u32 = 10_485_760,
+    // Ceilings on a message's shape at the intake (LMTP, inbound SMTP, the
+    // news gateway), checked before anything is stored: header fields in
+    // the outer block (a folded field counts once), MIME parts in all
+    // (a nested message's parts included) and nesting depth (the outer
+    // body is 1). Over any of them: `554 5.6.0`, nothing queued.
+    max_header_count: u32 = 500,
+    max_mime_parts: u32 = 1000,
+    max_mime_depth: u32 = 20,
     command_timeout_secs: u32 = 30,
     // Mailman's `incoming` MTA: "none", "postfix" or "exim". Lookup maps are
     // published under `map_directory` as `generation-*` directories behind a
@@ -1492,6 +1500,21 @@ impl MtaConfig {
         if !(1..=1000).contains(&self.max_recipients_per_transaction) {
             return Err(Error::Validation(
                 "mta.max_recipients_per_transaction must be 1..1000".into(),
+            ));
+        }
+        if !(1..=65_536).contains(&self.max_header_count) {
+            return Err(Error::Validation(
+                "mta.max_header_count must be 1..65536".into(),
+            ));
+        }
+        if !(1..=1_000_000).contains(&self.max_mime_parts) {
+            return Err(Error::Validation(
+                "mta.max_mime_parts must be 1..1000000".into(),
+            ));
+        }
+        if !(1..=1000).contains(&self.max_mime_depth) {
+            return Err(Error::Validation(
+                "mta.max_mime_depth must be 1..1000".into(),
             ));
         }
         if !(1..=3600).contains(&self.retry_initial_secs)
