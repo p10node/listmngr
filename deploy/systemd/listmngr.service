@@ -9,7 +9,7 @@ Type=simple
 User=listmngr
 Group=listmngr
 EnvironmentFile=-/etc/listmngr/listmngr.env
-ExecStart=/usr/local/bin/listmngr --config /etc/listmngr/listmngr.toml serve
+ExecStart=/usr/bin/listmngr --config /etc/listmngr/listmngr.toml serve
 Restart=on-failure
 RestartSec=5s
 

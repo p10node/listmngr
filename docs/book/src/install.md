@@ -7,14 +7,26 @@ it and a relay behind it (see [Connect the mail system](mail.md)).
 
 ## The binary
 
-From source (Rust 1.88, see `rust-toolchain.toml`); release archives
-and packages are produced by the release pipeline described in
-[Releases](release.md) once a version is tagged:
+A tagged release ships archives and packages (see
+[Releases](release.md)): a `.tar.gz` per platform with the binary, the
+licence and the systemd unit; a `.deb` and an `.rpm` for x86_64 Linux
+that install `/usr/bin/listmngr`, the unit (disabled), the `listmngr`
+service account, `/etc/listmngr` and `/var/lib/listmngr`; a container
+image; a Helm chart. `SHA256SUMS` beside them is signed with cosign.
+
+```sh
+apt install ./listmngr_<version>-1_amd64.deb      # or: dnf install ./listmngr-<version>-1.x86_64.rpm
+```
+
+From source (Rust 1.88, see `rust-toolchain.toml`):
 
 ```sh
 cargo build --locked --release -p listmngr
-install -m 0755 target/release/listmngr /usr/local/bin/listmngr
+install -m 0755 target/release/listmngr /usr/bin/listmngr
 ```
+
+The unit's `ExecStart` names `/usr/bin/listmngr`; a binary installed
+elsewhere needs a drop-in (`systemctl edit listmngr`) that overrides it.
 
 ## First run
 
@@ -71,6 +83,29 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build --wait
 curl --fail http://127.0.0.1:8000/readyz
 ```
 
+## Helm
+
+`deploy/helm/listmngr` is the chart (one replica, `Recreate`; the mail
+role and the runners are one process over one database). The
+configuration file is a value, `config`; secrets with a plain key go in
+`secrets` as their environment variable (`LISTMNGR__DATABASE__URL`, …);
+secrets that only exist as files (DKIM and ARC keys, the webhooks
+signing key) go in `secretFiles` and are copied at start into an
+in-memory volume with mode `0400`, because a Secret volume's files are
+group-readable under `fsGroup` and the binary refuses a secret file
+others can read. `migrate` runs in an init container before every
+start; the pod runs as UID 1000 with a read-only root, no capabilities
+and the runtime seccomp profile; `/healthz` and `/readyz` are the
+probes.
+
+```sh
+helm install lists deploy/helm/listmngr \
+  --set secrets.LISTMNGR__DATABASE__URL='postgres://listmngr:…@postgresql:5432/listmngr' \
+  --set-file 'secretFiles.dkim-example\.com\.pem=dkim.pem'
+kubectl exec deploy/lists-listmngr -- listmngr --config /etc/listmngr/listmngr.toml \
+  user create admin@example.com --display-name Admin --server-owner --password-stdin < password
+```
+
 ## PostgreSQL
 
 Point `database.url` (or `database.url_file`, a file only the service
@@ -80,8 +115,10 @@ Every schema change ships as a migration the binary applies itself;
 
 ## Upgrading
 
-Stop the server, `listmngr backup <dir>` (see Operations), install the
-new binary, `listmngr migrate`, start. Migrations only add; a binary
-runs against the ledger it knows and refuses any other. To go back:
-install the old binary, `listmngr restore <dir>` into an empty database
-migrated by it.
+Stop the server, `listmngr backup <dir>`, install the new binary,
+`listmngr migrate`, `listmngr doctor`, start. Migrations only add
+within a minor series; a binary runs against exactly the ledger its
+own migrations produce and refuses a database with a migration it does
+not know, so going back is a restore of the backup into an empty
+database migrated by the old binary. The policy and the steps are
+`docs/UPGRADE.md` in the repository.

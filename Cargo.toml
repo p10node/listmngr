@@ -75,6 +75,13 @@ nursery = { level = "warn", priority = -1 }
 # is a bug worth a panic, never silent (docs/PLAN.md §5.4).
 [profile.release]
 overflow-checks = true
+# Measured on the P7-RELEASE bytes (clean builds of `-p listmngr` on this
+# laptop): thin LTO, one codegen unit and stripped symbols take the binary
+# from 52,987,616 to 36,120,624 bytes for 371 s -> 519 s of build time. A
+# panic still names its file and line; a backtrace no longer names functions.
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
 
 # The proc-macro dylibs a release build produces without debug info are
 # refused by macOS 27's dyld ("mis-aligned LINKEDIT string pool"); keeping

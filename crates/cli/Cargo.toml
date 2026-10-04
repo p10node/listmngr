@@ -1,5 +1,6 @@
 [package]
 name = "listmngr"
+description = "Mailing-list manager that replaces GNU Mailman 3"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -53,3 +54,38 @@ assert_cmd = "2.1.1"
 predicates = "3.1.3"
 base64.workspace = true
 mail-auth = { version = "=0.12.1", default-features = false, features = ["ring"] }
+
+[package.metadata.deb]
+name = "listmngr"
+maintainer = "the listmngr contributors"
+license-file = ["../../LICENSE", "0"]
+extended-description = "A mailing-list manager that replaces GNU Mailman 3: core, web interface and archive in one binary."
+section = "mail"
+priority = "optional"
+# A static musl binary: nothing to depend on, and no dpkg-shlibdeps at build.
+depends = ""
+assets = [
+  ["target/release/listmngr", "usr/bin/listmngr", "755"],
+  ["../../README.md", "usr/share/doc/listmngr/README.md", "644"],
+  ["../../docs/UPGRADE.md", "usr/share/doc/listmngr/UPGRADE.md", "644"],
+]
+conf-files = []
+# postinst creates the service account and its directories; the unit is
+# installed from deploy/systemd and left disabled (the operator writes the
+# configuration, runs `migrate`, then enables it).
+maintainer-scripts = "../../deploy/packaging/debian"
+systemd-units = { unit-scripts = "../../deploy/systemd", enable = false, start = false }
+
+[package.metadata.generate-rpm]
+license = "AGPL-3.0-or-later"
+# A static musl binary: no shared-library requirements to discover (and no
+# `ldd` where the package is built).
+auto-req = "disabled"
+summary = "A mailing-list manager that replaces GNU Mailman 3"
+assets = [
+  { source = "target/release/listmngr", dest = "/usr/bin/listmngr", mode = "755" },
+  { source = "deploy/systemd/listmngr.service", dest = "/usr/lib/systemd/system/listmngr.service", mode = "644" },
+  { source = "README.md", dest = "/usr/share/doc/listmngr/README.md", mode = "644", doc = true },
+  { source = "docs/UPGRADE.md", dest = "/usr/share/doc/listmngr/UPGRADE.md", mode = "644", doc = true },
+]
+pre_install_script = "getent group listmngr >/dev/null || groupadd --system listmngr; getent passwd listmngr >/dev/null || useradd --system --gid listmngr --home-dir /var/lib/listmngr --shell /usr/sbin/nologin listmngr; install -d -m 0750 -o listmngr -g listmngr /etc/listmngr /var/lib/listmngr"

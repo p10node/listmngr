@@ -30,7 +30,7 @@ The digest-pinned Rust Alpine builder omits C library headers. It installs exact
 
 ## systemd
 
-Install the binary at `/usr/local/bin/listmngr`, configuration at `/etc/listmngr/listmngr.toml`, and optionally secrets at `/etc/listmngr/listmngr.env` (root-owned, mode `0600`). Create the service account without a login shell; `StateDirectory=listmngr` creates and owns `/var/lib/listmngr`.
+Install the binary at `/usr/bin/listmngr` (where the Debian and RPM packages put it; the unit's `ExecStart` names that path), configuration at `/etc/listmngr/listmngr.toml`, and optionally secrets at `/etc/listmngr/listmngr.env` (root-owned, mode `0600`). Create the service account without a login shell; `StateDirectory=listmngr` creates and owns `/var/lib/listmngr`.
 
 ```sh
 sudo install -m 0644 deploy/systemd/listmngr.service /etc/systemd/system/listmngr.service

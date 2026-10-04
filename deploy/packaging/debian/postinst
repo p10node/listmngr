@@ -1,0 +1,14 @@
+#!/bin/sh
+# The service account, its directories, and nothing started: the operator
+# writes /etc/listmngr/listmngr.toml, runs `listmngr migrate` and enables
+# the unit.
+set -e
+if ! getent group listmngr >/dev/null; then
+    groupadd --system listmngr
+fi
+if ! getent passwd listmngr >/dev/null; then
+    useradd --system --gid listmngr --home-dir /var/lib/listmngr --shell /usr/sbin/nologin listmngr
+fi
+install -d -m 0750 -o listmngr -g listmngr /etc/listmngr /var/lib/listmngr
+#DEBHELPER#
+exit 0
