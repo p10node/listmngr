@@ -53,7 +53,13 @@ listmngr --config /etc/listmngr/listmngr.toml serve
 
 `serve` listens for the web on `web.listen` (`127.0.0.1:8000` by
 default) and, once `[mta] enabled = true`, for LMTP on
-`mta.lmtp_listen`. `listmngr status` probes the running server;
+`mta.lmtp_listen`. The account `user create` made signs in at `/web/login`
+straight away: the operator vouches for the address, so it is verified
+without a mail round trip. With the default
+`security.require_2fa_for = ["server_owner"]` the account page then asks
+for a second sign-in step — enrol one at `/web/account/totp` with an
+authenticator app — before `/web/admin` and the moderation pages open; a
+development site may set the option to `[]`. `listmngr status` probes the running server;
 `listmngr doctor` checks the database, the relay and the mail domains'
 DNS without changing anything.
 
