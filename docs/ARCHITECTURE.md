@@ -1701,6 +1701,22 @@ audit event are written, shared with the CLI path; the secret exists in the
 result and nowhere else. Revocation is an ownership-guarded `UPDATE` with its
 `token.revoke` audit event.
 
+## The operator's account — bounded local acceptance verified
+
+`UserRepo::create_with_context` and `create_verified_with_context` share
+`create_inner(new, verified, context)`: the second inserts the address with
+`verified_on` set or, for a bare address it adopts, `COALESCE(verified_on,
+now)`, in the one transaction that writes the user, the credential, the
+preferences row and the `user.create` audit event, whose diff now carries
+`"verified"`. Only `listmngr user create` calls it — the operator at the
+console vouches for the address as they vouch for the password — while the
+REST `POST /users` keeps `create_with_context` and an unproven address, as
+Mailman does, and the browser proves a mailbox only by its token.
+`verify_browser_login` and the last-server-owner guard both require
+`verified_on`, so the first account of a site signs in and counts without a
+round trip through a mailbox the site cannot reach yet
+(`crates/db/tests/user_create_verified.rs`, `crates/cli/tests/cli.rs`).
+
 ## Own addresses — bounded local acceptance verified
 
 `crates/db/src/web_addresses.rs` manages the reader's addresses under

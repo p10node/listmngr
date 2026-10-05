@@ -892,6 +892,29 @@ impl UserRepo<'_> {
     ///
     /// Returns an error for invalid credentials or fields, conflicting records, or database/audit transaction failure.
     pub async fn create_with_context(&self, new: NewUser, context: &AuditContext) -> Result<User> {
+        self.create_inner(new, false, context).await
+    }
+    /// Creates a user whose address the caller vouches for: it is verified
+    /// in the same transaction, so the account signs in at once. For the
+    /// operator's command line, never for the REST surface, where an
+    /// address is proven by whoever holds the mailbox.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::create_with_context`].
+    pub async fn create_verified_with_context(
+        &self,
+        new: NewUser,
+        context: &AuditContext,
+    ) -> Result<User> {
+        self.create_inner(new, true, context).await
+    }
+    async fn create_inner(
+        &self,
+        new: NewUser,
+        verified: bool,
+        context: &AuditContext,
+    ) -> Result<User> {
         self.validate_password(&new.password)?;
         let mut address = Address::new(&new.email, new.display_name.clone())?;
         // An address already known but nobody's — a bare subscriber — is
@@ -941,17 +964,22 @@ impl UserRepo<'_> {
         .execute(&mut *tx)
         .await
         .map_err(db_error)?;
+        // The operator's word verifies the address; an adopted row keeps the
+        // moment it was proven if it already was.
+        let verified_on: Option<String> = verified.then(now);
+        let verified = verified || address.verified_on.is_some();
         if adopted {
-            sqlx::query("UPDATE addresses SET user_id=$1,display_name=$2 WHERE id=$3")
+            sqlx::query("UPDATE addresses SET user_id=$1,display_name=$2,verified_on=COALESCE(verified_on,$3) WHERE id=$4")
                 .bind(user.id.to_string())
                 .bind(&address.display_name)
+                .bind(&verified_on)
                 .bind(address.id.to_string())
                 .execute(&mut *tx)
                 .await
                 .map_err(db_error)?;
         } else {
-            sqlx::query("INSERT INTO addresses(id,email,original_email,display_name,user_id,registered_on) VALUES($1,$2,$3,$4,$5,$6)")
-                .bind(address.id.to_string()).bind(&address.email).bind(&address.original_email).bind(&address.display_name).bind(user.id.to_string()).bind(address.registered_on.to_rfc3339()).execute(&mut *tx).await.map_err(db_error)?;
+            sqlx::query("INSERT INTO addresses(id,email,original_email,display_name,user_id,registered_on,verified_on) VALUES($1,$2,$3,$4,$5,$6,$7)")
+                .bind(address.id.to_string()).bind(&address.email).bind(&address.original_email).bind(&address.display_name).bind(user.id.to_string()).bind(address.registered_on.to_rfc3339()).bind(&verified_on).execute(&mut *tx).await.map_err(db_error)?;
         }
         sqlx::query("UPDATE users SET preferred_address_id=$1 WHERE id=$2")
             .bind(address.id.to_string())
@@ -965,7 +993,7 @@ impl UserRepo<'_> {
             "user.create",
             "user",
             &user.id.to_string(),
-            serde_json::json!({"email": address.email}),
+            serde_json::json!({"email": address.email, "verified": verified}),
         )
         .await?;
         tx.commit().await.map_err(db_error)?;

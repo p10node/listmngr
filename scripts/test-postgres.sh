@@ -201,3 +201,5 @@ run domains rm "$domain"
 trap - EXIT HUP INT TERM
 
 printf '%s\n' 'PostgreSQL migration/connectivity/CRUD gate: PASS'
+cargo test --locked -p listmngr-db --test user_create_verified \
+  postgres_user_create_verified_contract -- --ignored --exact

@@ -398,3 +398,50 @@ fn backup_and_restore_carry_a_site_between_two_sqlite_files() {
         .code(2)
         .stderr(predicate::str::contains("error[CLI-VALIDATION]"));
 }
+
+#[test]
+fn user_create_vouches_for_the_address_so_the_account_signs_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("listmngr.db");
+    let url = format!("sqlite://{}?mode=rwc", db.display());
+    let run = |args: &[&str]| {
+        let mut command = Command::cargo_bin("listmngr").unwrap();
+        command.env("LISTMNGR__DATABASE__URL", &url).args(args);
+        command
+    };
+    run(&["migrate"]).assert().success();
+    let created = run(&[
+        "user",
+        "create",
+        "Owner@example.com",
+        "--display-name",
+        "Owner",
+        "--server-owner",
+        "--password-stdin",
+    ])
+    .write_stdin("Orbit!Cobalt7-River$Quartz\n")
+    .output()
+    .unwrap();
+    assert!(created.status.success());
+    let user: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    let user_id = user["id"].as_str().unwrap();
+    let exported = run(&["user", "export", user_id]).output().unwrap();
+    assert!(exported.status.success());
+    let export: serde_json::Value = serde_json::from_slice(&exported.stdout).unwrap();
+    let addresses = export["addresses"].as_array().unwrap();
+    assert_eq!(addresses.len(), 1);
+    assert_eq!(addresses[0]["email"], "owner@example.com");
+    assert!(
+        addresses[0]["verified_on"].is_string(),
+        "the operator who creates an account vouches for its address: {}",
+        addresses[0]
+    );
+    let audited = export["audit_events"].as_array().is_some_and(|rows| {
+        rows.iter()
+            .any(|row| row["action"] == "user.create" && row["diff"]["verified"] == true)
+    });
+    assert!(
+        audited,
+        "the create event records the verification: {export}"
+    );
+}
