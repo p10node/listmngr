@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- The first account signs in (`P9-CLI-USER-VERIFIED`): `listmngr user create` verifies the address it is given in the transaction that creates the account — the operator vouches for it — so the server owner of the book's "First run" steps signs in at `/web/login` at once and counts as a server owner, instead of being refused for a mailbox the site cannot mail yet; `POST /users` on the REST API still leaves an address unproven, as Mailman does, and the account page then points a server owner to `/web/account/totp` under the default `security.require_2fa_for`.
+
 ## [1.1.0] - 2026-10-05
 
 Phase 8 of `docs/PLAN.md` closed: the four technical items `docs/SECURITY_REVIEW.md` left open for 1.x, each with a bounded, recorded local acceptance in `docs/FEATURE_PARITY.md`; the schema gains one table (`posting_rate`) and no column changes, so a 1.0.0 database migrates forward and a 1.0.0 binary still reads it.

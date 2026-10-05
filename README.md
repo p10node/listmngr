@@ -1,5 +1,23 @@
 # listmngr
 
+## The first account signs in (`P9-CLI-USER-VERIFIED`) — bounded local acceptance verified
+
+`listmngr user create` vouches for the address it is given: the account's
+address is verified in the same transaction that creates the account
+(`UserRepo::create_verified_with_context`; the `user.create` audit event
+carries `"verified": true`), so the server owner of the book's "First run"
+steps signs in at `/web/login` straight away instead of being refused for a
+mailbox the site cannot mail yet, and the last-server-owner guard counts
+them. An address a bare subscriber already had is adopted and verified the
+same way. Nothing else changes: `POST /users` on the REST API still creates
+an account with an unproven address, as Mailman does, and signup still
+proves the mailbox with a mailed token. With the default
+`security.require_2fa_for = ["server_owner"]` the account page then says
+"This site requires a second sign-in step for your account" with a link to
+`/web/account/totp`; administration and moderation pages answer 403 until
+a second factor is enrolled, or the setting is emptied for a development
+site.
+
 ## 1.1.0 (`P8-1.1`) — bounded local acceptance verified
 
 Every workspace package, the path dependencies between them, `Cargo.lock`
@@ -3932,7 +3950,10 @@ listmngr user passwd "$USER_ID" --password-fd 3 3< /protected/path/password
 
 Input is UTF-8, limited to 1,024 password bytes by the shared password policy.
 One final LF or CRLF is removed from stdin/FD input; oversized input is rejected,
-not silently truncated. Password strength checks still apply. An issued API token
+not silently truncated. Password strength checks still apply. The address of an
+account created this way is verified at once — the operator at the console
+vouches for it as for the password (`P9-CLI-USER-VERIFIED`) — so the account
+signs in without a mailed token. An issued API token
 is printed once to stdout; keep that output out of logs.
 
 `listmngr status` probes `/healthz` and then `/readyz` on `web.listen`, without

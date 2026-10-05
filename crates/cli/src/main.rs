@@ -745,12 +745,15 @@ async fn users(db: &Database, command: UserCommand) -> Result<()> {
             "{}",
             serde_json::to_string_pretty(
                 &db.users()
-                    .create(NewUser {
-                        display_name,
-                        email,
-                        password: read_password(&password)?,
-                        server_owner
-                    })
+                    .create_verified_with_context(
+                        NewUser {
+                            display_name,
+                            email,
+                            password: read_password(&password)?,
+                            server_owner
+                        },
+                        &listmngr_db::AuditContext::system()
+                    )
                     .await?
             )?
         ),
