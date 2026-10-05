@@ -13,8 +13,8 @@ workspace = true
 
 [dependencies]
 askama.workspace = true
-listmngr-core = { path = "../core", version = "1.0.0" }
-listmngr-i18n = { path = "../i18n", version = "1.0.0" }
+listmngr-core = { path = "../core", version = "1.1.0" }
+listmngr-i18n = { path = "../i18n", version = "1.1.0" }
 
 [dev-dependencies]
 base64.workspace = true

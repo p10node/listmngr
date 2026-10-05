@@ -1,5 +1,22 @@
 # listmngr
 
+## 1.1.0 (`P8-1.1`) — bounded local acceptance verified
+
+Every workspace package, the path dependencies between them, `Cargo.lock`
+(`cargo update --workspace`), the Helm chart, the fuzz workspace's lock
+and the compatibility fixture's `listmngr_version` are `1.1.0`;
+`CHANGELOG.md` has `[1.1.0] - 2026-10-05` under an empty `[Unreleased]`,
+gathering Phase 8: the four technical items `docs/SECURITY_REVIEW.md` had
+left open for 1.x (`P8-MIME-LIMITS`, `P8-ABUSE-RULES`, `P8-DKIM-ED25519`,
+`P8-MASTER-KEY`) and the ledger reconciliation (`P8-LEDGER-RECONCILE`).
+The schema gained one table (`posting_rate`, migration `0055`) and no
+column changed, so a `1.0.0` database migrates forward and a `1.0.0`
+binary still reads a `1.1.0` database (`docs/UPGRADE.md`); a site that
+sets `security.master_key` should run `listmngr secrets encrypt` once.
+`docs/SECURITY.md` names `1.1.0` the supported release. The annotated
+tag `v1.1.0` is created locally on the merge commit; pushing it, which
+runs the release pipeline, is the maintainer's decision.
+
 ## The master key: TOTP secrets sealed at rest (`P8-MASTER-KEY`) — bounded local acceptance verified
 
 `[security] master_key` (64 hexadecimal digits, 32 bytes; or

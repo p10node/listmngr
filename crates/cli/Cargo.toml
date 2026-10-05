@@ -27,15 +27,15 @@ anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
 chrono.workspace = true
-listmngr-api = { path = "../api", version = "1.0.0" }
-listmngr-archive = { path = "../archive", version = "1.0.0" }
-listmngr-core = { path = "../core", version = "1.0.0" }
-listmngr-db = { path = "../db", version = "1.0.0" }
-listmngr-import = { path = "../import", version = "1.0.0" }
-listmngr-mail = { path = "../mail", version = "1.0.0" }
-listmngr-runners = { path = "../runners", version = "1.0.0" }
-listmngr-plugins = { path = "../plugins", version = "1.0.0" }
-listmngr-pipeline = { path = "../pipeline", version = "1.0.0" }
+listmngr-api = { path = "../api", version = "1.1.0" }
+listmngr-archive = { path = "../archive", version = "1.1.0" }
+listmngr-core = { path = "../core", version = "1.1.0" }
+listmngr-db = { path = "../db", version = "1.1.0" }
+listmngr-import = { path = "../import", version = "1.1.0" }
+listmngr-mail = { path = "../mail", version = "1.1.0" }
+listmngr-runners = { path = "../runners", version = "1.1.0" }
+listmngr-plugins = { path = "../plugins", version = "1.1.0" }
+listmngr-pipeline = { path = "../pipeline", version = "1.1.0" }
 serde_json.workspace = true
 rpassword.workspace = true
 reqwest.workspace = true

@@ -21,9 +21,9 @@ rustls-pki-types = "=1.15.1"
 mail-parser = "=0.11.8"
 regex.workspace = true
 mail-builder = { version = "=0.5.0", default-features = false }
-listmngr-core = { path = "../core", version = "1.0.0" }
-listmngr-i18n = { path = "../i18n", version = "1.0.0" }
-listmngr-pipeline = { path = "../pipeline", version = "1.0.0" }
+listmngr-core = { path = "../core", version = "1.1.0" }
+listmngr-i18n = { path = "../i18n", version = "1.1.0" }
+listmngr-pipeline = { path = "../pipeline", version = "1.1.0" }
 sha1 = "=0.10.7"
 sha2.workspace = true
 thiserror.workspace = true

@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-05
+
+Phase 8 of `docs/PLAN.md` closed: the four technical items `docs/SECURITY_REVIEW.md` left open for 1.x, each with a bounded, recorded local acceptance in `docs/FEATURE_PARITY.md`; the schema gains one table (`posting_rate`) and no column changes, so a 1.0.0 database migrates forward and a 1.0.0 binary still reads it.
+
 ### Added
+- Version `1.1.0` (`P8-1.1`): every workspace package and the Helm chart at `1.1.0`; the annotated tag `v1.1.0`.
 - The master key (`P8-MASTER-KEY`): `[security] master_key` or `master_key_file` (32 bytes as 64 hexadecimal digits; `listmngr secrets new-key` mints one) seals every TOTP secret at rest (ChaCha20-Poly1305 under a key derived for that purpose, bound to the account); rows a site already holds are sealed by `listmngr secrets encrypt`, moved to a new key by `secrets rewrap --previous-key-file`, counted by `secrets status`; `listmngr doctor` reports `master_key` as `ok`, `warn` (no key, or rows still in the clear) or `fail` (sealed rows without a key, exit 12); configuration secrets are zeroed when dropped.
 - DKIM with Ed25519 and several selectors (`P8-DKIM-ED25519`): a `[[mta.dkim_signing]]` key file may hold an Ed25519 key (RFC 8463 `ed25519-sha256`) or an RSA one, several entries may share a domain with different selectors and every one signs, the domain page lists every selector's record, and `listmngr dkim gen|records|dns` generates a key (never printing it), prints the configured records and checks what DNS publishes (exit 12 on a mismatch); `docs/OPERATIONS.md` has the rotation runbook.
 - Loop and abuse rules (`P8-ABUSE-RULES`): `max-hops` discards a post with more `Received:` headers than `[mta] max_received_hops` (30; 0 off) as a mail loop, right after `loop`; `posting-rate` holds a sender's post once `[security] rate_limit.post` (unset by default, `COUNT/WINDOW`) of theirs were accepted on the list inside the window, with the numbers in the reason — counted in the new `posting_rate` table (migration `0055`) written by the accept transaction and swept after a day; both in `/api/v1/system/chains`.

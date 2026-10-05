@@ -37,6 +37,7 @@ engineering record — every behaviour with the test that proves it — is
 
 ## Status
 
-`1.0.0` is the first release; its tag `v1.0.0` closes Phase 7 of the
+`1.1.0` is the current release (Phase 8: the structure ceilings, the
+abuse rules, Ed25519 DKIM and the master key). `1.0.0` is the first release; its tag `v1.0.0` closes Phase 7 of the
 plan. Every feature in this book has a bounded, recorded acceptance in
 the repository's ledger.
