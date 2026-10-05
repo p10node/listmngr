@@ -1133,6 +1133,24 @@ Backlog sau 1.1 (chưa lên lịch): external security review; MySQL/MariaDB
 (§1.3); WASM plugin; SDK TS/Python sinh từ `/openapi.json` (§4.15); ZAP baseline
 trong CI (§8); CSP nonce; cookie `__Host-` (cần `Path=/`).
 
+### Phase 9 — Bảo trì sau 1.1 (S)
+
+Sửa lỗi phát hiện sau khi `1.1.0` được tag; phiên bản không đổi cho tới khi
+có release (`docs/UPGRADE.md`). Quy ước §7.0 giữ nguyên: một ID một nhánh,
+ledger row cùng ID ghi lệnh và kết quả thật.
+
+- [x] ~~**P9-CLI-USER-VERIFIED**~~ (xong) (S): `listmngr user create` để address
+  chưa verified, nên tài khoản đầu tiên theo "First run" (book, Install)
+  bị `/web/login` từ chối (401) và không được guard "server owner cuối cùng"
+  tính. Sửa: `UserRepo::create_verified_with_context` — address verified
+  trong cùng transaction tạo user (address có sẵn của subscriber được nhận
+  và verified), audit `user.create` ghi `verified`; chỉ CLI gọi, REST
+  `POST /users` giữ nguyên như Mailman. Test: db (SQLite + PG contract, đăng
+  nhập được ngay, REST path vẫn unverified), CLI trên binary thật
+  (`user export` thấy `verified_on` và audit). Docs: README, ARCHITECTURE,
+  book Install (bước thứ hai: `require_2fa_for` mặc định → enrol TOTP ở
+  `/web/account/totp` trước khi `/web/admin` mở), book Admin, CHANGELOG.
+
 ## 8. Testing strategy
 
 | Loại        | Công cụ                                                                                                  | Phạm vi                                                                                                                                                |

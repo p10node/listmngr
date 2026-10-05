@@ -14,7 +14,10 @@ grant, and every change is audited with the actor.
 
 Sign-in accepts a password, a password with TOTP or a passkey, and
 OIDC when a `[[web.oidc]]` table names a provider; `security.require_2fa_for`
-makes a second factor mandatory for server owners. Sessions are rotated
+makes a second factor mandatory for server owners. An account the operator
+created at the console (`listmngr user create`) has its address verified
+already; one created over the REST API or by signup must prove the mailbox
+first. Sessions are rotated
 on sign-in and privilege change and expire idle after `web.session_idle`
 and in any case after `web.session_absolute`.
 
