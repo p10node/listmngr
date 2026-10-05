@@ -1,5 +1,14 @@
 # Architecture
 
+## 1.1.0 — bounded local acceptance verified
+
+The version is `[workspace.package] version` and the `version` beside
+every `path` dependency, as at `1.0.0`; `scripts/tests/test_version.py`
+holds `1.1.0` and checks every manifest, the lock, the chart and the
+changelog. Nothing else in the architecture moved for the release: Phase
+8's modules are described in their own sections below (the structure
+ceilings, the abuse rules, DKIM with Ed25519, the master key).
+
 ## The master key — bounded local acceptance verified
 
 `listmngr_db::keyring`: `MasterKey(Zeroizing<[u8; 32]>)` (`from_hex`,

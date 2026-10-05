@@ -15,9 +15,9 @@ workspace = true
 example = []
 
 [dependencies]
-listmngr-pipeline = { path = "../pipeline", version = "1.0.0" }
+listmngr-pipeline = { path = "../pipeline", version = "1.1.0" }
 
 [dev-dependencies]
-listmngr-core = { path = "../core", version = "1.0.0" }
-listmngr-mail = { path = "../mail", version = "1.0.0" }
+listmngr-core = { path = "../core", version = "1.1.0" }
+listmngr-mail = { path = "../mail", version = "1.1.0" }
 tempfile = "3.23.0"
