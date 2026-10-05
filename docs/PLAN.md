@@ -5,9 +5,10 @@
 
 ## Trạng thái triển khai (2026-09-14) — thay cho các checkpoint 2026-09-06/07
 
-**Cập nhật 2026-10-05 (`P8-LEDGER-RECONCILE`):** Phase 0–7 đã đóng theo ledger;
-`1.0.0` là bản phát hành đầu tiên (2026-10-04, tag `v1.0.0` tạo local, push là
-quyết định của người dùng). Việc còn lại là Phase 8 (§7). Các đoạn dưới đây là
+**Cập nhật 2026-10-05 (`P8-LEDGER-RECONCILE`, `P8-1.1`):** Phase 0–8 đã đóng theo
+ledger; `1.0.0` là bản phát hành đầu tiên (2026-10-04) và `1.1.0` bản thứ hai
+(2026-10-05), cả hai tag tạo local, push là quyết định của người dùng. Việc còn
+lại sau 1.1 là backlog cuối §7 Phase 8 (external review, MySQL, WASM, SDK, ZAP). Các đoạn dưới đây là
 ảnh chụp 2026-09-14, giữ nguyên để đối chiếu; câu "Chưa có: toàn bộ Phase 4–7
 trừ …" không còn đúng.
 
@@ -1122,7 +1123,7 @@ phiên bản chỉ đổi ở `P8-1.1`):
   `#[ignore]` cho `encrypt`; CLI và doctor trên binary thật. Docs: README,
   ARCHITECTURE, OPERATIONS, UPGRADE, `SECURITY_REVIEW.md` hàng "Secrets" →
   done/deviates, config reference, CHANGELOG.
-- [ ] **P8-1.1** (S): bump `1.1.0` như `P7-1.0` (workspace, path deps,
+- [x] ~~**P8-1.1**~~ (xong) (S): bump `1.1.0` như `P7-1.0` (workspace, path deps,
   `Chart.yaml`, fixture `system-versions.json`, `fuzz/Cargo.lock`),
   `CHANGELOG.md` `## [1.1.0] - <ngày>`, `SECURITY_REVIEW.md` "What remains open"
   viết lại (còn external review), bảng phase ledger đóng Phase 8, tag annotated
