@@ -12,5 +12,5 @@ delivery-phase = 2
 workspace = true
 
 [dependencies]
-listmngr-core = { path = "../core", version = "1.0.0" }
+listmngr-core = { path = "../core", version = "1.1.0" }
 regex.workspace = true

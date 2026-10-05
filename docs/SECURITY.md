@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-`1.0.0` (tag `v1.0.0`, 2026-10-04) is the first release. Security fixes land on `main` and are released as the next `1.0.x`; only the latest `1.x` release is supported. Earlier `0.1.0` development snapshots are not.
+`1.1.0` (tag `v1.1.0`, 2026-10-05) is the current release; `1.0.0` (tag `v1.0.0`, 2026-10-04) was the first. Security fixes land on `main` and are released as the next `1.1.x`; only the latest `1.x` release is supported. Earlier `0.1.0` development snapshots are not.
 
 ## Assets, actors, and trust boundaries
 

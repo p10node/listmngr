@@ -19,10 +19,10 @@ percent-encoding.workspace = true
 qrcode.workspace = true
 sha1.workspace = true
 webauthn_rp.workspace = true
-listmngr-core = { path = "../core", version = "1.0.0" }
-listmngr-i18n = { path = "../i18n", version = "1.0.0" }
-listmngr-mail = { path = "../mail", version = "1.0.0" }
-listmngr-pipeline = { path = "../pipeline", version = "1.0.0" }
+listmngr-core = { path = "../core", version = "1.1.0" }
+listmngr-i18n = { path = "../i18n", version = "1.1.0" }
+listmngr-mail = { path = "../mail", version = "1.1.0" }
+listmngr-pipeline = { path = "../pipeline", version = "1.1.0" }
 mail-parser = "=0.11.8"
 reqwest = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 rand.workspace = true
