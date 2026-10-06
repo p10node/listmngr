@@ -47,7 +47,7 @@ jobs:
           cp LICENSE README.md docs/UPGRADE.md deploy/systemd/listmngr.service "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binary-${{ matrix.target }}
           path: dist/*.tar.gz*
@@ -71,7 +71,7 @@ jobs:
       - run: cargo deb --no-build --locked -p listmngr --target x86_64-unknown-linux-musl -o dist/
       - run: cargo generate-rpm -p crates/cli --target x86_64-unknown-linux-musl -o dist/
       - run: (cd dist && shasum -a 256 *.deb *.rpm > packages.sha256)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packages
           path: dist/*
@@ -89,7 +89,7 @@ jobs:
         with:
           tool: cargo-cyclonedx@0.5.9
       - run: cargo cyclonedx --manifest-path crates/cli/Cargo.toml --format json --override-filename listmngr.cdx
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
           path: crates/cli/listmngr.cdx.json
@@ -144,7 +144,7 @@ jobs:
       - run: helm lint deploy/helm/listmngr
       - run: helm template listmngr deploy/helm/listmngr --set image.tag=${GITHUB_REF_NAME#v} > /dev/null
       - run: mkdir -p dist && helm package deploy/helm/listmngr --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}" -d dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: chart
           path: dist/*.tgz
