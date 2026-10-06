@@ -52,4 +52,4 @@ Use `--locked` for Cargo builds/tests in CI. Keep action references at reviewed 
 
 ## Documentation discipline
 
-When behavior or acceptance changes, update `README.md`, `docs/ARCHITECTURE.md`, and the acceptance ID row in `docs/FEATURE_PARITY.md` in the same change. Version `1.0.0` is the first release (annotated tag `v1.0.0`, 2026-10-04); the version moves only with a release and the schema policy in `docs/UPGRADE.md`; the license identifier is `AGPL-3.0-or-later` and the full legal text must remain in `LICENSE`.
+When behavior or acceptance changes, update `docs/ACCEPTANCE_NOTES.md` (the acceptance prose; `README.md` as well when the public surface it describes changes), `docs/ARCHITECTURE.md`, and the acceptance ID row in `docs/FEATURE_PARITY.md` in the same change. Version `1.0.0` is the first release (annotated tag `v1.0.0`, 2026-10-04); the version moves only with a release and the schema policy in `docs/UPGRADE.md`; the license identifier is `AGPL-3.0-or-later` and the full legal text must remain in `LICENSE`.

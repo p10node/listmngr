@@ -364,44 +364,44 @@ owns canonical integration, shared documentation and all final gates. Worker
 patches remain uncommitted. No worker may edit the canonical checkout or another
 worker's checkout; no nested implementation processes are permitted.
 
-| Slice | Initial owner | State |
-|---|---|---|
-| Header privacy, anonymous identity, duplicate List-Post loop handling | mail-safety worker | integrated; focused SMTP/loop tests pass |
-| Typed LMTP recipient failures, batch-intake transaction/cancellation | lmtp-safety worker | integrated; typed, rollback, timeout tests pass |
-| Global identity mutation bounds, address relink consistency | identity-safety worker | integrated; repository/API tests pass; parent also fixed legacy admin bounds |
-| Ambiguous recipient inspection and explicit audited resolution | parent | focused verification |
-| Shared docs, patch composition, PostgreSQL/MTA/browser acceptance | parent | pending |
+| Slice                                                                 | Initial owner          | State                                                                        |
+|-----------------------------------------------------------------------|------------------------|------------------------------------------------------------------------------|
+| Header privacy, anonymous identity, duplicate List-Post loop handling | mail-safety worker     | integrated; focused SMTP/loop tests pass                                     |
+| Typed LMTP recipient failures, batch-intake transaction/cancellation  | lmtp-safety worker     | integrated; typed, rollback, timeout tests pass                              |
+| Global identity mutation bounds, address relink consistency           | identity-safety worker | integrated; repository/API tests pass; parent also fixed legacy admin bounds |
+| Ambiguous recipient inspection and explicit audited resolution        | parent                 | focused verification                                                         |
+| Shared docs, patch composition, PostgreSQL/MTA/browser acceptance     | parent                 | pending                                                                      |
 
 ## Full replacement obligations
 
 None of the following rows is closed by the presence of a file or route. Preserve
 all remaining detailed requirements of PLAN.md when refining these slices.
 
-| Behavior | Required positive / negative / durable evidence | State |
-|---|---|---|
-| Mail privacy and anonymous lists | SMTP bytes conceal author/control headers; ordinary mode differential; MIME retained | in progress |
-| Intake correctness | valid vs missing vs DB fault RCPT; batch timeout rollback and per-recipient reply accounting | in progress |
-| Loop suppression | cooked mail round trip with multiple/folded/case-varied markers never redistributes | in progress |
-| Identity authorization | shared user across lists cannot grant global mutation; relink/unlink and audit rollback | in progress |
-| Queue operations | inspect ambiguous; explicit duplicate-risk recovery; stale worker cannot overwrite; audit rollback | in progress |
-| Per-list posting policy | announcement owner/member differential; bans/header predicates/emergency policy | pending |
-| Subscription and unsubscription | pending confirmation, expiry, single-use token, approval/invitation and email/API completion | pending |
-| Email commands | join/leave/request/confirm/owner routing; robust command parsing; no command loops | pending |
-| System notices | hold/reject/welcome/goodbye/invite/probe; durable outbox; no backscatter to forged/untrusted senders | partial: guarded rejection, challenge/completion and opt-in welcome/goodbye notices; remaining invitation/probe/admin notices, custom templates and sender-authenticated anti-backscatter still pending |
-| Bounce handling | authenticated VERP + DSN fixtures; scoring, stale reset, warn/disable/remove; spoof rejection | pending |
-| Digest delivery | regular/MIME/RFC1153 differential; threshold/periodic scheduling; restart/idempotence | pending |
-| MIME policy and templates | part/depth limits, filtering, footers/personalization; scoped template resolution | pending |
-| Transport and mail authentication | SMTP TLS/AUTH, DKIM verification of emitted bytes, DMARC/ARC; fail closed on negotiation | pending |
-| Archive persistence | accepted-only ingest, thread/reference IDs, dedup, never/private policy, restart | pending |
-| Archive user workflows | read/search/thread/attachments/mbox import/export; safe rendering and membership authorization | pending |
-| Account/session security | signup/verify/login/reset, CSRF/session rotation/revocation, TOTP/WebAuthn/OIDC per contract | pending |
-| Administration UI | list/domain/member/policy/moderation/templates/bans/account/system screens; browser acceptance | pending |
-| Subscriber UI | discover/subscribe/confirm/preferences/leave; archive navigation; mobile/accessibility | pending |
-| REST interoperability | real pinned mailmanclient through user/address/preferences/pending/held and lifecycle; differential responses | pending |
-| Migration | Mailman 2.1/3 import preserving identity, roles, preferences and archive; dry-run/idempotence/reconciliation | pending |
-| Persistence lifecycle | concurrent field updates, list deletion with history, retention/GC, backups and isolated restore | pending |
-| Deployment/operations | actual Postfix/Exim round trip, non-root/read-only image, Linux hardening, telemetry and failure diagnosis | pending |
-| Final acceptance | frozen composed source, complete gates, hostile/fault probes, real clients and browsers | pending |
+| Behavior                          | Required positive / negative / durable evidence                                                               | State                                                                                                                                                                                                   |
+|-----------------------------------|---------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Mail privacy and anonymous lists  | SMTP bytes conceal author/control headers; ordinary mode differential; MIME retained                          | in progress                                                                                                                                                                                             |
+| Intake correctness                | valid vs missing vs DB fault RCPT; batch timeout rollback and per-recipient reply accounting                  | in progress                                                                                                                                                                                             |
+| Loop suppression                  | cooked mail round trip with multiple/folded/case-varied markers never redistributes                           | in progress                                                                                                                                                                                             |
+| Identity authorization            | shared user across lists cannot grant global mutation; relink/unlink and audit rollback                       | in progress                                                                                                                                                                                             |
+| Queue operations                  | inspect ambiguous; explicit duplicate-risk recovery; stale worker cannot overwrite; audit rollback            | in progress                                                                                                                                                                                             |
+| Per-list posting policy           | announcement owner/member differential; bans/header predicates/emergency policy                               | pending                                                                                                                                                                                                 |
+| Subscription and unsubscription   | pending confirmation, expiry, single-use token, approval/invitation and email/API completion                  | pending                                                                                                                                                                                                 |
+| Email commands                    | join/leave/request/confirm/owner routing; robust command parsing; no command loops                            | pending                                                                                                                                                                                                 |
+| System notices                    | hold/reject/welcome/goodbye/invite/probe; durable outbox; no backscatter to forged/untrusted senders          | partial: guarded rejection, challenge/completion and opt-in welcome/goodbye notices; remaining invitation/probe/admin notices, custom templates and sender-authenticated anti-backscatter still pending |
+| Bounce handling                   | authenticated VERP + DSN fixtures; scoring, stale reset, warn/disable/remove; spoof rejection                 | pending                                                                                                                                                                                                 |
+| Digest delivery                   | regular/MIME/RFC1153 differential; threshold/periodic scheduling; restart/idempotence                         | pending                                                                                                                                                                                                 |
+| MIME policy and templates         | part/depth limits, filtering, footers/personalization; scoped template resolution                             | pending                                                                                                                                                                                                 |
+| Transport and mail authentication | SMTP TLS/AUTH, DKIM verification of emitted bytes, DMARC/ARC; fail closed on negotiation                      | pending                                                                                                                                                                                                 |
+| Archive persistence               | accepted-only ingest, thread/reference IDs, dedup, never/private policy, restart                              | pending                                                                                                                                                                                                 |
+| Archive user workflows            | read/search/thread/attachments/mbox import/export; safe rendering and membership authorization                | pending                                                                                                                                                                                                 |
+| Account/session security          | signup/verify/login/reset, CSRF/session rotation/revocation, TOTP/WebAuthn/OIDC per contract                  | pending                                                                                                                                                                                                 |
+| Administration UI                 | list/domain/member/policy/moderation/templates/bans/account/system screens; browser acceptance                | pending                                                                                                                                                                                                 |
+| Subscriber UI                     | discover/subscribe/confirm/preferences/leave; archive navigation; mobile/accessibility                        | pending                                                                                                                                                                                                 |
+| REST interoperability             | real pinned mailmanclient through user/address/preferences/pending/held and lifecycle; differential responses | pending                                                                                                                                                                                                 |
+| Migration                         | Mailman 2.1/3 import preserving identity, roles, preferences and archive; dry-run/idempotence/reconciliation  | pending                                                                                                                                                                                                 |
+| Persistence lifecycle             | concurrent field updates, list deletion with history, retention/GC, backups and isolated restore              | pending                                                                                                                                                                                                 |
+| Deployment/operations             | actual Postfix/Exim round trip, non-root/read-only image, Linux hardening, telemetry and failure diagnosis    | pending                                                                                                                                                                                                 |
+| Final acceptance                  | frozen composed source, complete gates, hostile/fault probes, real clients and browsers                       | pending                                                                                                                                                                                                 |
 
 ## Current parent-owned RED/GREEN evidence
 
