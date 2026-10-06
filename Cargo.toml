@@ -12,7 +12,7 @@ rust-version = "1.88"
 
 [workspace.dependencies]
 anyhow = "1.0.100"
-argon2 = "0.5.3"
+argon2 = "0.6.0"
 askama = "0.16.1"
 axum = "0.8.6"
 base64 = "0.22.1"
