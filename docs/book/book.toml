@@ -12,7 +12,7 @@ create-missing = false
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/pierreneter/listmngr"
+git-repository-url = "https://github.com/p10node/listmngr"
 site-url = "/"
 
 [output.html.search]

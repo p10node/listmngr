@@ -53,6 +53,6 @@ Base images, GitHub Actions, and CI tools are pinned. `Cargo.lock`, `cargo deny`
 
 Please use the repository's **private security advisory** form:
 
-<https://github.com/pierreneter/listmngr/security/advisories/new>
+<https://github.com/p10node/listmngr/security/advisories/new>
 
 Do not file public exploit details. Include the affected version/commit, minimal reproduction, impact, environment, and any suggested remediation. Do not include live credentials or personal subscriber data. Response timing depends on maintainer availability; no fixed SLA is promised while the project is unreleased. The machine-readable policy is at [`../security.txt`](../security.txt).

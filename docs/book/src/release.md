@@ -25,7 +25,7 @@ pinned by commit:
 
 ```sh
 cosign verify-blob --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity-regexp 'github.com/pierreneter/listmngr' \
+  --certificate-identity-regexp 'github.com/p10node/listmngr' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 ```
