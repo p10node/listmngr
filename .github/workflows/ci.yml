@@ -52,7 +52,7 @@ jobs:
           . "$RUNNER_TEMP/mailmanclient/bin/activate"
           python3 -m pip install -r tests/compat/requirements-mailmanclient.txt
           python3 scripts/test-mailmanclient.py
-      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2
         with:
           tool: cargo-deny@0.20.2,cargo-audit@0.22.2
       - run: cargo deny check
@@ -137,7 +137,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: fuzz
-      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2
         with:
           tool: cargo-fuzz@0.13.2
       - run: scripts/fuzz.sh 60
@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2
         with:
           tool: mdbook@0.5.4
       - run: python3 scripts/config-reference.py --check
