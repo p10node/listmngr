@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Fixed
+- CI's `acme` job passes again: the Pebble v2.10.1 release archives carry `pebble` and `pebble-challtestsrv` as `0644`, so the workflow now marks them executable after extracting, and `web_acme` names a binary it cannot start.
+- CI's `fuzz` job passes again: the `lmtp_session` harness awaits the peer task it aborts, so no drained pipe buffer survives to exit for LeakSanitizer to report.
+- The mailmanclient gate passes again: `tests/compat/mailmanclient_suite.py` expected Mailman core's three archivers and had failed since `P6-ARCHIVER-HYPERKITTY` added `hyperkitty`; the check is now a documented deviation naming listmngr's four (232 checks, 8 deviations).
 - The first account signs in (`P9-CLI-USER-VERIFIED`): `listmngr user create` verifies the address it is given in the transaction that creates the account — the operator vouches for it — so the server owner of the book's "First run" steps signs in at `/web/login` at once and counts as a server owner, instead of being refused for a mailbox the site cannot mail yet; `POST /users` on the REST API still leaves an address unproven, as Mailman does, and the account page then points a server owner to `/web/account/totp` under the default `security.require_2fa_for`.
 
 ### Changed

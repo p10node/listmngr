@@ -119,6 +119,9 @@ jobs:
             | sha256sum -c
           tar -xzf "$RUNNER_TEMP/pebble.tar.gz" -C "$RUNNER_TEMP"
           tar -xzf "$RUNNER_TEMP/challtestsrv.tar.gz" -C "$RUNNER_TEMP"
+          # The release archives carry both binaries as 0644.
+          chmod +x "$RUNNER_TEMP/pebble-linux-amd64/linux/amd64/pebble" \
+            "$RUNNER_TEMP/pebble-challtestsrv-linux-amd64/linux/amd64/pebble-challtestsrv"
       - name: Certificate ordered over TLS-ALPN-01, cached and reused
         run: |
           TEST_PEBBLE_BIN="$RUNNER_TEMP/pebble-linux-amd64/linux/amd64/pebble" \

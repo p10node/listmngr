@@ -595,7 +595,13 @@ check("list bans empty", list(test_one.bans), [])
 
 section("archivers")
 archivers = test_one.archivers
-check("archivers", sorted(archivers.keys()), ["mail-archive", "mhonarc", "prototype"])
+# Mailman core alone knows three archivers; listmngr also carries `hyperkitty`
+# (P6-ARCHIVER-HYPERKITTY), which Mailman lists only with the plugin installed.
+deviation(
+    "archivers", sorted(archivers.keys()),
+    ["hyperkitty", "mail-archive", "mhonarc", "prototype"],
+    "['mail-archive', 'mhonarc', 'prototype']",
+)
 deviation("archivers default", (archivers["mail-archive"], archivers["mhonarc"]), (False, False), "(True, True)")
 archivers["mail-archive"] = True
 archivers["mhonarc"] = True

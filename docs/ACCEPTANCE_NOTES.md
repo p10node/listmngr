@@ -347,7 +347,12 @@ gates never see it. `scripts/fuzz.sh [seconds]` runs every target for
 that long (sixty seconds by default; `scripts/fuzz.sh 86400` is the
 day-per-target campaign the plan asks for, on a machine of its own); a
 crash fails the run and its input lands in `fuzz/artifacts/<target>/`.
-CI's `fuzz` job runs the sixty-second pass on every push.
+CI's `fuzz` job runs the sixty-second pass on every push. On Linux,
+AddressSanitizer's LeakSanitizer also runs at exit, so a harness must
+not leave a task alive in its runtime: `lmtp_session` awaits the peer
+it aborts, otherwise the peer's half of the pipe survives to exit with
+a drained buffer whose only pointer is one-past-the-end, which the
+leak check reports (macOS has no LeakSanitizer and never showed it).
 
 ```sh
 rustup toolchain install nightly-2026-09-30 --profile minimal
@@ -555,7 +560,8 @@ loopback (both binaries are in one Pebble release; CI's `acme` job pins
 v2.10.1 by digest):
 
 ```sh
-# https://github.com/letsencrypt/pebble/releases/tag/v2.10.1
+# https://github.com/letsencrypt/pebble/releases/tag/v2.10.1 — the release
+# archives carry both binaries as 0644, so `chmod +x` them after extracting.
 TEST_PEBBLE_BIN=/path/to/pebble \
 TEST_PEBBLE_CHALLTESTSRV_BIN=/path/to/pebble-challtestsrv \
   cargo test --locked -p listmngr --test web_acme -- --ignored --nocapture
@@ -1184,7 +1190,7 @@ matches, the configuration sections, templates on a list and a domain,
 and the digest counters. Every call the doctest makes is made, with the
 value the doctest prints; 232 checks in 18 sections. Where listmngr differs
 on purpose the suite says so and asserts listmngr's behaviour instead, and
-prints the list at the end — seven deviations, below.
+prints the list at the end — eight deviations, below.
 
 Closing the suite made the REST surface do what mailmanclient expects:
 a domain without a description answers `null`; a new list's display name
@@ -1228,8 +1234,11 @@ address; a bare `DELETE` on a member keeps the confirmation workflow, so
 an administrative removal states `pre_confirmed` and `pre_approved`; the
 password policy refuses the doctest's `somepass`; an account's first
 address becomes its preferred address at creation (the web account mails
-it); `user.password` is always `null` — the hash is never handed out; and
-a new list's archivers start off rather than on.
+it); `user.password` is always `null` — the hash is never handed out; a
+list's archivers are four, not Mailman core's three — `hyperkitty` is
+built in since `P6-ARCHIVER-HYPERKITTY`, where Mailman lists it only
+with the plugin installed; and a new list's archivers start off rather
+than on.
 
 Limits: the suite runs on SQLite (the gate's disposable server); no
 doctest section for the digest resource exists in mailmanclient, so the
