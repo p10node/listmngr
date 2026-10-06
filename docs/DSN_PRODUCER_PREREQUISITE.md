@@ -153,7 +153,7 @@ these graceful executable restart cases. Neither proves complete MTA cutover.
 
 Source-bound read-only review of the four changed Rust files and this contract
 found no introduced P1/P2. Full verdict:
-`subagent-summary-0-20260909_180131_371152.txt`.
+a local review note (`subagent-summary-0-20260909_180131_371152.txt`), not kept in the repository.
 
 The earlier `target/single-recipient-gates-20260909-180039/` remains **failed**, not
 acceptance: incremental dependency-graph IO failure, advisory-network failures
