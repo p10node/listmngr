@@ -117,8 +117,27 @@ fn free_port() -> u16 {
         .port()
 }
 
-fn binary(variable: &str) -> std::ffi::OsString {
-    std::env::var_os(variable).unwrap_or_else(|| panic!("{variable} names a Pebble binary"))
+/// The binary `variable` names; a Pebble release archive carries it as
+/// `0644`, so a start refused as `PermissionDenied` wants a `chmod +x`.
+fn binary(variable: &str) -> std::process::Command {
+    let path =
+        std::env::var_os(variable).unwrap_or_else(|| panic!("{variable} names a Pebble binary"));
+    assert!(
+        Path::new(&path).is_file(),
+        "{variable} = {} is not a file",
+        path.to_string_lossy()
+    );
+    std::process::Command::new(path)
+}
+
+/// `command` started, or the panic names what could not start and why.
+fn start(command: &mut std::process::Command, what: &str) -> Guard {
+    Guard(command.spawn().unwrap_or_else(|error| {
+        panic!(
+            "{what} ({}) did not start: {error}",
+            command.get_program().display()
+        )
+    }))
 }
 
 fn wait_for_port(port: u16, what: &str) {
@@ -143,31 +162,31 @@ struct Ports {
 /// `pebble-challtestsrv` as a DNS server only: `A` is `127.0.0.1` for
 /// every name, `AAAA` nothing, every challenge responder off.
 fn challtestsrv(dir: &Path, ports: &Ports) -> Guard {
-    let child = std::process::Command::new(binary("TEST_PEBBLE_CHALLTESTSRV_BIN"))
-        .args([
-            "-dnsserver",
-            &format!("127.0.0.1:{}", ports.dns),
-            "-defaultIPv4",
-            "127.0.0.1",
-            "-defaultIPv6",
-            "",
-            "-http01",
-            "",
-            "-https01",
-            "",
-            "-tlsalpn01",
-            "",
-            "-doh",
-            "",
-            "-management",
-            &format!("127.0.0.1:{}", ports.dns_management),
-        ])
-        .current_dir(dir)
-        .stdout(std::fs::File::create(dir.join("challtestsrv.log")).unwrap())
-        .stderr(std::fs::File::create(dir.join("challtestsrv.err")).unwrap())
-        .spawn()
-        .unwrap();
-    let child = Guard(child);
+    let child = start(
+        binary("TEST_PEBBLE_CHALLTESTSRV_BIN")
+            .args([
+                "-dnsserver",
+                &format!("127.0.0.1:{}", ports.dns),
+                "-defaultIPv4",
+                "127.0.0.1",
+                "-defaultIPv6",
+                "",
+                "-http01",
+                "",
+                "-https01",
+                "",
+                "-tlsalpn01",
+                "",
+                "-doh",
+                "",
+                "-management",
+                &format!("127.0.0.1:{}", ports.dns_management),
+            ])
+            .current_dir(dir)
+            .stdout(std::fs::File::create(dir.join("challtestsrv.log")).unwrap())
+            .stderr(std::fs::File::create(dir.join("challtestsrv.err")).unwrap()),
+        "pebble-challtestsrv",
+    );
     wait_for_port(ports.dns_management, "pebble-challtestsrv");
     child
 }
@@ -202,19 +221,19 @@ fn pebble(dir: &Path, identity: &Identity, ports: &Ports) -> Guard {
         ),
     )
     .unwrap();
-    let child = std::process::Command::new(binary("TEST_PEBBLE_BIN"))
-        .env("PEBBLE_VA_NOSLEEP", "1")
-        .env("PEBBLE_WFE_NONCEREJECT", "0")
-        .arg("-config")
-        .arg(&config)
-        .arg("-dnsserver")
-        .arg(format!("127.0.0.1:{}", ports.dns))
-        .current_dir(dir)
-        .stdout(std::fs::File::create(dir.join("pebble.log")).unwrap())
-        .stderr(std::fs::File::create(dir.join("pebble.err")).unwrap())
-        .spawn()
-        .unwrap();
-    let child = Guard(child);
+    let child = start(
+        binary("TEST_PEBBLE_BIN")
+            .env("PEBBLE_VA_NOSLEEP", "1")
+            .env("PEBBLE_WFE_NONCEREJECT", "0")
+            .arg("-config")
+            .arg(&config)
+            .arg("-dnsserver")
+            .arg(format!("127.0.0.1:{}", ports.dns))
+            .current_dir(dir)
+            .stdout(std::fs::File::create(dir.join("pebble.log")).unwrap())
+            .stderr(std::fs::File::create(dir.join("pebble.err")).unwrap()),
+        "Pebble",
+    );
     wait_for_port(ports.directory, "Pebble");
     child
 }

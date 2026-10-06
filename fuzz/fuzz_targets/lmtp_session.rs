@@ -91,6 +91,12 @@ fuzz_target!(|data: &[u8]| {
             serve_session_as(protocol, server, &mut handler),
         )
         .await;
+        // Awaited, so the peer and its half of the pipe are dropped
+        // here and not left in the runtime: a task that outlives the
+        // run keeps a drained pipe buffer whose only pointer is
+        // one-past-the-end, which LeakSanitizer reports as a leak at
+        // exit (CI's Linux job; macOS has no LeakSanitizer).
         peer.abort();
+        let _ = peer.await;
     });
 });
