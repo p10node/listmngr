@@ -4,7 +4,7 @@
 # directory (MTA maps, an fs message store, SQLite when no PostgreSQL).
 
 image:
-  repository: ghcr.io/pierreneter/listmngr
+  repository: ghcr.io/p10node/listmngr
   tag: ""            # defaults to the chart's appVersion
   pullPolicy: IfNotPresent
   digest: ""         # set to pin the image by digest instead of tag
