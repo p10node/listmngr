@@ -39,8 +39,8 @@ class VersionTest(unittest.TestCase):
         for path, needle in [
             ("CLAUDE.md", "means unreleased"),
             ("docs/SECURITY.md", "No public release is currently declared"),
-            ("README.md", "0.1.0 (unreleased development)"),
-            ("README.md", "no released tag is implied"),
+            ("docs/ACCEPTANCE_NOTES.md", "0.1.0 (unreleased development)"),
+            ("docs/ACCEPTANCE_NOTES.md", "no released tag is implied"),
             ("docs/book/src/README.md", "pre-release of the first version"),
         ]:
             with self.subTest(path=path, needle=needle):

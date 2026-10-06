@@ -188,7 +188,7 @@ migrates, creates a domain, a list and two members through the binary,
 starts `serve` with `mta.retry_initial_secs = 1` and `retry_max_secs =
 2` so a refused relay is retried within seconds, and reads
 `queue_jobs` and `delivery_recipients` through `sqlx` for the
-assertions. The three scenarios are documented in the README; what
+assertions. The three scenarios are documented in `docs/ACCEPTANCE_NOTES.md`; what
 they rely on in the code: `MailQueueRepo::begin_delivery_with_dsn`
 marks every recipient `ambiguous` with the attempt token before the
 first SMTP command, `outbound::run` claims with the twenty-second
@@ -2858,7 +2858,7 @@ drains and then aborts/reaps owned children; no whole-page atomicity is claimed.
 No leader election or new DB clock is introduced; `sweep_at` stays a deterministic
 repository testing facility, not a production scheduler/CLI clock override.
 
-README contains safe TOML/environment defaults and explicit activation policy.
+`docs/ACCEPTANCE_NOTES.md` contains safe TOML/environment defaults and explicit activation policy.
 Focused evidence includes real serve→private warning publication, real SQLite
 multi-page progress and positive/zero list intervals, plus separately spawned
 paused-time cursor/error/no-catch-up/cancellation controls. Frozen parent run
@@ -3990,17 +3990,17 @@ cli -> api / web / runners -> archive -> pipeline -> mail / db -> core
 
 Dependencies must not point back up the graph. The nine workspace crates have these responsibilities:
 
-| Crate | Responsibility in the current tree |
-|---|---|
-| `listmngr-core` | Domain identifiers/types, configuration loading and redaction, shared errors |
-| `listmngr-db` | SQLx pool, embedded migrations, repositories, transactional persistence/audit boundary |
-| `listmngr-mail` | Bounded Message-ID metadata/hash helpers, standalone immutable filesystem storage, byte-safe header cooking (`cook_headers`), a bounded RFC 2033 LMTP session state machine (`lmtp`), and a plaintext SMTP client (`smtp`) — protocol libraries exercised by stream tests and wired into the opt-in real-socket mail role |
-| `listmngr-pipeline` | Pure inbound posting-policy decisions (`policy::decide_posting`) and enabled-recipient selection (`policy::select_recipients`); no DB/network access, no delivery claim |
-| `listmngr-runners` | Opt-in LMTP intake, inbound policy, outbound SMTP, heartbeat and role supervision; not full Phase 2 acceptance |
-| `listmngr-archive` | Future archive boundary; no Phase 5 archive claim |
-| `listmngr-api` | Axum `/api/v1` and Mailman-compatible `/3.1` adapters, auth, OpenAPI |
-| `listmngr-web` | Dependency-free escaped semantic HTML and local responsive CSS used by the browser router; not full Phase 4 administration |
-| `listmngr` (`cli`) | Binary commands, configuration bootstrap, migration, and HTTP process startup |
+| Crate               | Responsibility in the current tree                                                                                                                                                                                                                                                                                        |
+|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `listmngr-core`     | Domain identifiers/types, configuration loading and redaction, shared errors                                                                                                                                                                                                                                              |
+| `listmngr-db`       | SQLx pool, embedded migrations, repositories, transactional persistence/audit boundary                                                                                                                                                                                                                                    |
+| `listmngr-mail`     | Bounded Message-ID metadata/hash helpers, standalone immutable filesystem storage, byte-safe header cooking (`cook_headers`), a bounded RFC 2033 LMTP session state machine (`lmtp`), and a plaintext SMTP client (`smtp`) — protocol libraries exercised by stream tests and wired into the opt-in real-socket mail role |
+| `listmngr-pipeline` | Pure inbound posting-policy decisions (`policy::decide_posting`) and enabled-recipient selection (`policy::select_recipients`); no DB/network access, no delivery claim                                                                                                                                                   |
+| `listmngr-runners`  | Opt-in LMTP intake, inbound policy, outbound SMTP, heartbeat and role supervision; not full Phase 2 acceptance                                                                                                                                                                                                            |
+| `listmngr-archive`  | Future archive boundary; no Phase 5 archive claim                                                                                                                                                                                                                                                                         |
+| `listmngr-api`      | Axum `/api/v1` and Mailman-compatible `/3.1` adapters, auth, OpenAPI                                                                                                                                                                                                                                                      |
+| `listmngr-web`      | Dependency-free escaped semantic HTML and local responsive CSS used by the browser router; not full Phase 4 administration                                                                                                                                                                                                |
+| `listmngr` (`cli`)  | Binary commands, configuration bootstrap, migration, and HTTP process startup                                                                                                                                                                                                                                             |
 
 ## Process and request model
 
@@ -4077,7 +4077,7 @@ CARGO_TARGET_DIR=/tmp/listmngr-webui/target cargo clippy -p listmngr-db -p listm
 CARGO_TARGET_DIR=/tmp/listmngr-webui/target cargo test -p listmngr-api -p listmngr-db
 ```
 
-All passed; README records the explicitly executed disposable PostgreSQL command.
+All passed; `docs/ACCEPTANCE_NOTES.md` records the explicitly executed disposable PostgreSQL command.
 Both backend lock matrices observe actual database busy/lock-not-available errors
 before committing ordinary competing DML. They cover valid login, hash/version
 changes, address unverify/unlink/reassignment, predecessor expiry/rotation/CSRF,

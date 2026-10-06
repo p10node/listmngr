@@ -59,12 +59,12 @@ Original transport spelling and canonical mailbox identity are both signed.
 
 Every supported re-enable writer is covered by generation changes:
 
-| Writer | Covered surface |
-|---|---|
-| `MembersRepo::update_with_context` preference update | member PATCH delivery status/mode |
-| `PreferencesRepo::update_tx` | generic member/address/user preference APIs |
-| `web_sessions` membership preference transaction | authenticated browser preferences |
-| `web_membership` recovery transaction | browser bounce recovery and counter reset |
+| Writer                                               | Covered surface                             |
+|------------------------------------------------------|---------------------------------------------|
+| `MembersRepo::update_with_context` preference update | member PATCH delivery status/mode           |
+| `PreferencesRepo::update_tx`                         | generic member/address/user preference APIs |
+| `web_sessions` membership preference transaction     | authenticated browser preferences           |
+| `web_membership` recovery transaction                | browser bounce recovery and counter reset   |
 
 Generations advance on each business preference write (including conservative
 extra invalidation for non-status edits), not lock-only no-op UPDATEs. New/absent
