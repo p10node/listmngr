@@ -9,4 +9,11 @@ Create the first server owner from inside the pod:
 (The image is `scratch`: no shell and no PATH, so the binary is named by its path, `/listmngr`.)
 Check the install: `helm test {{ .Release.Name }}`.
 
-Mail needs `[mta] enabled = true` in `config`, `service.lmtp.enabled`, and an MTA that delivers over LMTP to this Service.
+{{- if .Values.mta.enabled }}
+Mail: the Postfix sidecar announces {{ .Values.mta.hostname }} and listens on the Service {{ include "listmngr.fullname" . }}-smtp
+({{ .Values.mta.service.type }}, port {{ .Values.mta.service.port }}); point the list domains' MX there and publish SPF/DKIM
+(`secretFiles` for the keys). LMTP stays on loopback inside the pod.
+{{- else }}
+Mail needs either `mta.enabled` with `mta.hostname` (the Postfix sidecar), or `[mta] enabled = true` in `config`,
+`service.lmtp.enabled`, and an MTA of your own that delivers over LMTP to this Service.
+{{- end }}

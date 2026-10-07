@@ -79,8 +79,29 @@ required: PostgreSQL elsewhere, or SQLite on the volume for a trial.
 `networkPolicy.enabled` adds two NetworkPolicies: PostgreSQL accepts 5432 from
 the application pod only; the application accepts its web port from
 `networkPolicy.webFrom` and reaches DNS, PostgreSQL and `networkPolicy.extraEgress`.
-The mail role still needs an MTA that reaches the LMTP Service
-(`P10-HELM-MTA` in `docs/PLAN.md`).
+`mta.enabled` with `mta.hostname` adds the front MTA as Compose runs it, in
+the same pod: a Postfix sidecar from `deploy/postfix/Dockerfile`
+(`ghcr.io/p10node/listmngr-postfix`, built and signed by the release beside the
+main image; `mta.image`) mounts the state volume read-only and reads the maps
+listmngr publishes there, hands mail to LMTP on loopback (`127.0.0.1:8024`;
+the LMTP port is never a container port), relays listmngr's outbound mail as
+its `plaintext_trusted_relay` on `127.0.0.1:25` — plaintext that never leaves
+the pod — and delivers to MX, or to `mta.relayhost`; `mynetworks` is loopback
+only. The application container gets the mail role through environment
+variables (`LISTMNGR__MTA__*`), so `config` need not change; `mta.hostname`
+is what Postfix announces and listmngr's `local_hostname`. A second Service,
+`<release>-listmngr-smtp` (`mta.service`: `LoadBalancer` by default,
+`externalTrafficPolicy: Local` so Postfix sees the client's address), exposes
+port 25; the spool is an emptyDir (`mta.spool.size`), so queued mail does not
+survive the pod — a `relayhost` takes it off the pod at once. The sidecar is
+the one container that runs as root with eight capabilities and a writable
+root (Postfix's master binds port 25, switches users and keeps its spool), a
+documented exception to the chart's hardening; the application container is
+unchanged, and `service.lmtp` (for an MTA outside the pod) is refused together
+with the sidecar. With `networkPolicy.enabled`, port 25 is open inbound and
+`mta.egressPorts` (25, 587) outbound. DNS (MX, SPF for `mta.hostname`, DKIM
+keys through `secretFiles`) and the operator's end-to-end acceptance remain
+theirs, as for Compose.
 
 ```sh
 helm lint --strict deploy/helm/listmngr
@@ -96,16 +117,21 @@ kubectl exec -i deploy/lists-listmngr -c listmngr -- /listmngr --config /etc/lis
 an image built here and exercises it as an operator would: install with
 `--wait` and the chart's PostgreSQL under a password made on the spot
 (`--sqlite` installs with `postgresql.enabled=false` and SQLite on the volume
-instead), `pg_isready` in the database pod, `helm test`, the in-image
+instead; `--mta` also builds the Postfix image, installs with `mta.enabled`,
+creates a domain and a list, waits for the maps, and from a probe pod outside
+`mynetworks` checks the RCPT matrix — list address 250, unknown 550, relay
+554 — and sends one message that Postfix must hand to LMTP on loopback),
+`pg_isready` in the database pod, `helm test`, the in-image
 `listmngr status` probe, the first server owner through `kubectl exec`,
 `/healthz`, `/readyz` and `/web/login` through a port-forward, a configuration
 change through `helm upgrade` that replaces the application pod
 (`checksum/config`) while the account stays in PostgreSQL (`select count(*)
 from users` is still 1), then uninstall. CI's `helm` job runs it on every
 push. It needs Docker, kind, kubectl and helm; `--keep` leaves the cluster for
-inspection and `--image NAME:TAG` skips the build. This is one kind node with
-local-path volumes, not a production cluster: Ingress, TLS, the storage class
-and mail delivery remain the operator's acceptance.
+inspection and `--image NAME:TAG` / `--mta-image NAME:TAG` skip the builds.
+This is one kind node with local-path volumes and no load balancer, not a
+production cluster: Ingress, TLS, the storage class and delivery to the
+internet remain the operator's acceptance.
 
 ## REQUIRED outbound STARTTLS configuration
 

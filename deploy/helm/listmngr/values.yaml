@@ -160,10 +160,56 @@ serviceAccount:
 nameOverride: ""
 fullnameOverride: ""
 
+# The front MTA, as Compose runs it, in the same pod: a Postfix sidecar from
+# deploy/postfix/Dockerfile (`ghcr.io/p10node/listmngr-postfix`, the release
+# builds and signs it beside the main image) reads the maps listmngr
+# publishes on the state volume (read-only), hands mail to LMTP on
+# loopback, relays listmngr's outbound mail (`plaintext_trusted_relay` on
+# 127.0.0.1 — never leaves the pod) and delivers to MX, or to `relayhost`.
+# The sidecar is the one container that runs as root with capabilities and a
+# writable root (Postfix's master binds port 25, switches users and keeps a
+# spool): a documented exception; the application container is unchanged.
+# `hostname` is what Postfix announces and listmngr's `local_hostname`; the
+# second Service, `<release>-listmngr-smtp`, exposes port 25.
+mta:
+  enabled: false
+  hostname: ""
+  relayhost: ""          # e.g. "[smtp.example.invalid]:587"; empty = direct MX delivery
+  image:
+    repository: ghcr.io/p10node/listmngr-postfix
+    tag: ""              # defaults to the chart's appVersion
+    digest: ""
+    pullPolicy: IfNotPresent
+  service:
+    type: LoadBalancer
+    port: 25
+    externalTrafficPolicy: Local
+    loadBalancerIP: ""
+    annotations: {}
+  spool:
+    size: 1Gi            # an emptyDir: queued mail does not survive the pod
+  egressPorts: [25, 587] # with networkPolicy.enabled: where Postfix may deliver
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    runAsGroup: 0
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+      add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "NET_BIND_SERVICE", "SETGID", "SETUID"]
+
 # NetworkPolicies (the CNI must enforce them): PostgreSQL accepts 5432 from
 # the application pod only; the application accepts its web port from
 # `webFrom` (NetworkPolicy peers, e.g. the ingress controller's namespace;
-# empty = from anywhere) and may reach DNS, PostgreSQL and `extraEgress`.
+# empty = from anywhere) and may reach DNS, PostgreSQL and `extraEgress`;
+# with `mta.enabled`, port 25 is open in and `mta.egressPorts` out.
 networkPolicy:
   enabled: false
   webFrom: []

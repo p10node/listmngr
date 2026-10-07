@@ -29,6 +29,7 @@ class ReleaseTest(unittest.TestCase):
             "cargo build --locked --release -p listmngr --target",
             "cargo deb", "cargo generate-rpm", "cargo cyclonedx",
             "platforms: linux/amd64,linux/arm64", "file: deploy/Dockerfile",
+            "file: deploy/postfix/Dockerfile", "ghcr.io/${{ github.repository }}-postfix",
             "cosign sign --yes", "cosign sign-blob --yes", "SHA256SUMS",
             "helm lint --strict deploy/helm/listmngr", "helm package deploy/helm/listmngr",
         ]:

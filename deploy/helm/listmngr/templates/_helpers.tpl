@@ -86,6 +86,46 @@ app.kubernetes.io/component: postgresql
 {{- end -}}
 {{- end -}}
 
+{{- define "listmngr.mtaImage" -}}
+{{- with .Values.mta.image -}}
+{{- if .digest -}}{{ .repository }}@{{ .digest }}{{- else -}}{{ .repository }}:{{ default $.Chart.AppVersion .tag }}{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The sidecar and the LMTP Service exclude each other; the sidecar needs a hostname. */}}
+{{- define "listmngr.mtaCheck" -}}
+{{- if .Values.mta.enabled -}}
+{{- if .Values.service.lmtp.enabled -}}
+{{- fail "service.lmtp is for an MTA outside the pod; with mta.enabled the Postfix sidecar reaches LMTP on loopback" -}}
+{{- end -}}
+{{- if not .Values.mta.hostname -}}
+{{- fail "mta.hostname is required when mta.enabled: the name Postfix announces and listmngr's local_hostname" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The mail role of the serve container when the sidecar is on: everything on loopback. */}}
+{{- define "listmngr.mtaEnv" -}}
+{{- if .Values.mta.enabled }}
+- name: LISTMNGR__MTA__ENABLED
+  value: "true"
+- name: LISTMNGR__MTA__LOCAL_HOSTNAME
+  value: {{ .Values.mta.hostname | quote }}
+- name: LISTMNGR__MTA__INCOMING
+  value: "postfix"
+- name: LISTMNGR__MTA__MAP_DIRECTORY
+  value: "/var/lib/listmngr/mta"
+- name: LISTMNGR__MTA__LMTP_LISTEN
+  value: "127.0.0.1:8024"
+- name: LISTMNGR__MTA__LMTP_MAP_TARGET
+  value: "127.0.0.1:8024"
+- name: LISTMNGR__MTA__SMTP_RELAY
+  value: "127.0.0.1:25"
+- name: LISTMNGR__MTA__SMTP_TLS
+  value: "plaintext_trusted_relay"
+{{- end }}
+{{- end -}}
+
 {{/* The database environment of the migrate and serve containers. */}}
 {{- define "listmngr.databaseEnv" -}}
 {{- if .Values.postgresql.enabled }}

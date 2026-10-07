@@ -39,6 +39,19 @@ Base images, GitHub Actions, and CI tools are pinned. `Cargo.lock`, `cargo deny`
 
 `Cargo.lock` contains `rsa 0.9.10` through SQLx's disabled MySQL dependency graph. RUSTSEC-2023-0071 has no fixed release, while `cargo tree --locked --target all -i rsa` returns no active dependency path for this PostgreSQL/SQLite build. CI therefore runs `cargo audit --ignore RUSTSEC-2023-0071` with an inline explanation; all other advisories remain blocking, and `cargo deny check` evaluates the active graph without this exception. Remove the exception when SQLx no longer records the edge or a fixed `rsa` is available.
 
+### The chart's Postfix sidecar
+
+With `mta.enabled`, the Helm chart runs Postfix in the application pod as
+root with eight capabilities (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`,
+`KILL`, `NET_BIND_SERVICE`, `SETGID`, `SETUID`), a writable root and an
+emptyDir spool — the same set Compose grants it, because Postfix's master
+binds port 25, switches to its own users and writes its queue. The
+application container keeps UID 1000, a read-only root and no
+capabilities; the two share only the state volume, read-only on the
+Postfix side, and loopback (LMTP in, the plaintext relay out), which
+never leaves the pod. `allowPrivilegeEscalation` stays false and the pod's
+seccomp profile applies to both.
+
 ## Secret handling
 
 - Do not put production secrets in `.env.example`, Compose YAML, command lines, issue reports, logs, or screenshots.

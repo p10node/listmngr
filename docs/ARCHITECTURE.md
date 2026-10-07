@@ -1,5 +1,36 @@
 # Architecture
 
+## The front MTA in the chart — bounded local acceptance verified
+
+`mta.enabled` adds to the application pod the Postfix of
+`deploy/postfix/Dockerfile` as a sidecar — `listmngr.mtaImage`
+(`ghcr.io/p10node/listmngr-postfix`, the tag defaulting to the chart's
+`appVersion`, a digest optional; `release.yml` builds, pushes and signs it
+beside the main image and writes its digest into the release notes) —
+with `POSTFIX_MYHOSTNAME = mta.hostname`, `POSTFIX_MYNETWORKS =
+127.0.0.0/8` and `POSTFIX_RELAYHOST = mta.relayhost`, port 25 named `smtp`,
+the state volume mounted read-only at `/var/lib/listmngr` (the maps are
+`/var/lib/listmngr/mta/current/*.regexp`, exactly as `main.cf` expects),
+an emptyDir spool, `postfix status` as readiness (the entrypoint waits for
+the first map generation before starting Postfix, so "ready" also means
+"the maps are there") and liveness, and its own security context: root,
+the eight capabilities, a writable root, `allowPrivilegeEscalation: false`.
+The application container gets the mail role from `listmngr.mtaEnv`
+(`LISTMNGR__MTA__ENABLED`, `LOCAL_HOSTNAME`, `INCOMING = postfix`,
+`MAP_DIRECTORY = /var/lib/listmngr/mta`, `LMTP_LISTEN` and
+`LMTP_MAP_TARGET = 127.0.0.1:8024`, `SMTP_RELAY = 127.0.0.1:25`, `SMTP_TLS
+= plaintext_trusted_relay`) — environment over the `config` TOML, as
+Compose does it — and LMTP is never a container port. `listmngr.mtaCheck`
+fails the render when `service.lmtp.enabled` is set beside the sidecar or
+`mta.hostname` is empty. `templates/smtp-service.yaml` is the second
+Service, `<release>-listmngr-smtp` (`mta.service.type`, default
+`LoadBalancer`, `externalTrafficPolicy: Local` unless `ClusterIP`,
+`loadBalancerIP`, `annotations`), selecting the application pod on port
+25. The NetworkPolicy opens 25 inbound and `mta.egressPorts` outbound when
+the sidecar is on. The harness's `--mta` mode proves the path on kind from
+a probe pod outside `mynetworks`: RCPT 250/550/554 and one message handed
+to LMTP on loopback.
+
 ## PostgreSQL in the chart — bounded local acceptance verified
 
 `deploy/helm/listmngr/templates/postgresql.yaml` renders, under

@@ -1239,7 +1239,7 @@ row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong 
   `pg_dump`/restore), `docs/OPERATIONS.md` (backup trên k8s: `kubectl exec
   … listmngr backup` vào PVC + `pg_dump` từ StatefulSet), ACCEPTANCE_NOTES,
   CHANGELOG.
-- [ ] **P10-HELM-MTA** (M): Postfix front MTA như Compose, dạng sidecar.
+- [x] ~~**P10-HELM-MTA**~~ (xong) (M): Postfix front MTA như Compose, dạng sidecar.
   `mta.enabled = false` mặc định. Khi bật: container `postfix` trong cùng Pod
   từ `mta.image` (`ghcr.io/p10node/listmngr-postfix`, tag mặc định
   `appVersion`, `digest` tuỳ chọn; build từ `deploy/postfix/Dockerfile` — image
