@@ -104,6 +104,16 @@ securityContext:
   capabilities:
     drop: ["ALL"]
 
+# A ServiceAccount of its own with no API token mounted: the process never
+# talks to the Kubernetes API. `name` names an existing account instead.
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+nameOverride: ""
+fullnameOverride: ""
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

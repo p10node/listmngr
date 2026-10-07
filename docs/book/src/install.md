@@ -103,12 +103,20 @@ others can read. `migrate` runs in an init container before every
 start; the pod runs as UID 1000 with a read-only root, no capabilities
 and the runtime seccomp profile; `/healthz` and `/readyz` are the
 probes.
+The chart's `values.schema.json` refuses an unknown or mistyped value at
+install, the release gets a ServiceAccount of its own with no API token
+mounted, and `helm test <release>` asks the Service for `/healthz` and
+`/readyz`. The image is `scratch` — no shell, no `PATH` — so `kubectl
+exec` names the binary as `/listmngr`. The database is not in the chart
+yet: point `secrets.LISTMNGR__DATABASE__URL` at PostgreSQL. In the repository,
+`scripts/test-helm.sh` installs the chart on a disposable kind cluster
+and exercises it end to end; CI runs it on every push.
 
 ```sh
 helm install lists deploy/helm/listmngr \
   --set secrets.LISTMNGR__DATABASE__URL='postgres://listmngr:…@postgresql:5432/listmngr' \
   --set-file 'secretFiles.dkim-example\.com\.pem=dkim.pem'
-kubectl exec deploy/lists-listmngr -- listmngr --config /etc/listmngr/listmngr.toml \
+kubectl exec -i deploy/lists-listmngr -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml \
   user create admin@example.com --display-name Admin --server-owner --password-stdin < password
 ```
 

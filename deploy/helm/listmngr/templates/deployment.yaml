@@ -21,6 +21,8 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      serviceAccountName: {{ include "listmngr.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- if or .Values.migrate.enabled (include "listmngr.hasSecretFiles" .) }}

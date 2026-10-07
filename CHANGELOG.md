@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- The Helm chart installs for real (`P10-HELM-TEST`): `values.schema.json` refuses an unknown or mistyped value, a ServiceAccount of its own with no API token mounted, a `helm test` hook that asks the Service for `/healthz` and `/readyz`, and `scripts/test-helm.sh`, which builds the image, installs the chart on a disposable kind cluster, runs `helm test`, creates the first server owner, checks the web endpoints, upgrades with a changed configuration and uninstalls; CI's `helm` job lints strictly, renders every documented variant and runs the harness on every push. `deploy/README.md` gains its Helm section.
+
 ### Fixed
 - CI's `acme` job passes again: the Pebble v2.10.1 release archives carry `pebble` and `pebble-challtestsrv` as `0644`, so the workflow now marks them executable after extracting, and `web_acme` names a binary it cannot start.
 - CI's `fuzz` job passes again: `scripts/fuzz.sh` names the pinned nightly's host triple, since the prebuilt cargo-fuzz CI installs is a musl binary and would otherwise build the targets for `x86_64-unknown-linux-musl`, where no sanitizer runs; the `lmtp_session` harness awaits the peer task it aborts, so no drained pipe buffer survives to exit for LeakSanitizer to report; a failed job keeps `fuzz/artifacts` as a workflow artifact; `verp` has seed inputs (its corpus directory was empty, so git never carried it and libFuzzer exited on CI), and the script runs a target whose seed directory is missing from its working corpus alone.
