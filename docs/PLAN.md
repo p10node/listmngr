@@ -1151,6 +1151,168 @@ ledger row cùng ID ghi lệnh và kết quả thật.
   book Install (bước thứ hai: `require_2fa_for` mặc định → enrol TOTP ở
   `/web/account/totp` trước khi `/web/admin` mở), book Admin, CHANGELOG.
 
+### Phase 10 — Triển khai bằng Helm (M)
+
+Hiện trạng (kiểm tra 2026-10-07): chart `deploy/helm/listmngr` có từ
+`P7-RELEASE` (Deployment một replica, Service, ConfigMap, hai Secret, PVC,
+Ingress, NOTES; hardening đủ) nhưng mới chỉ được `helm lint` + `helm template`
+(CI job `chart`, `scripts/tests/test_release.py`), **chưa từng `helm install`
+lên cluster thật**; không có PostgreSQL trong chart (giá trị mặc định
+`secrets.LISTMNGR__DATABASE__URL` trỏ tới host `postgresql` không tồn tại);
+không có Postfix front MTA như Compose; không có `helm test`,
+`values.schema.json`, ServiceAccount, NetworkPolicy; chart chỉ đóng gói
+`.tgz` lên GitHub release, chưa publish OCI; `deploy/README.md` không có mục
+Helm. Mục tiêu Phase 10: `helm install` một lệnh ra một site chạy được
+(web + DB + mail), có bằng chứng trên kind local và CI, cài được từ registry.
+
+Nguyên tắc riêng của phase: không thêm chart phụ thuộc bên thứ ba (Bitnami đã
+đổi mô hình image 2025; operator cần CRD) — PostgreSQL và Postfix dùng đúng
+image/digest Compose đang dùng, cùng hardening; kiến trúc Compose (một process
+listmngr, Postfix bên cạnh, maps qua volume chung, LMTP không public) ánh xạ
+1:1 sang một Pod. Phiên bản chart và app chỉ đổi ở `P10-1.2` (chính sách
+`docs/UPGRADE.md`); cho tới đó `Chart.yaml` giữ `1.1.0` và CHANGELOG ghi dưới
+`[Unreleased]`.
+
+Tách thành work package (kế hoạch 2026-10-07, một ID một nhánh, làm theo thứ
+tự này — harness trước để mỗi ID sau có vòng lặp kind thật; mỗi ID có ledger
+row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong CI/release):
+
+- [ ] **P10-HELM-TEST** (M): harness cài thật + nền chart. `scripts/test-helm.sh
+  [--mta]`: yêu cầu `kind`, `kubectl`, `helm`, `docker`; `kind create cluster
+  --name listmngr-helm --image kindest/node:<tag>@sha256:<digest>` (pin như
+  image khác); `docker build -f deploy/Dockerfile -t listmngr:helm-test .` rồi
+  `kind load docker-image`; `helm install t deploy/helm/listmngr --wait
+  --timeout 5m` với `image.repository=listmngr`, `image.tag=helm-test`,
+  `image.pullPolicy=Never` và (cho tới `P10-HELM-DB`)
+  `secrets.LISTMNGR__DATABASE__URL=sqlite:///var/lib/listmngr/listmngr.db`
+  trên PVC; `helm test t`; `kubectl exec deploy/t-listmngr -- listmngr --config
+  /etc/listmngr/listmngr.toml user create … --server-owner --password-stdin`;
+  `kubectl port-forward` + `curl --fail /healthz /readyz` và `/web/login` 200;
+  `helm upgrade` đổi `config` → annotation `checksum/config` đổi → pod mới
+  ready; `helm uninstall`; `trap` xoá cluster. Chart: `templates/tests/
+  test-ready.yaml` (hook `test`, pod từ `secretFilesImage` busybox đã pin,
+  `wget --spider http://<svc>:<port>/readyz`, cùng securityContext);
+  `values.schema.json` (kiểu/enum/required cho mọi khoá, `additionalProperties:
+  false` ở gốc) → `helm lint --strict`; ServiceAccount riêng
+  (`serviceAccount.create`, `automountServiceAccountToken: false`);
+  `podSecurityContext`/`securityContext` giữ nguyên; `Chart.yaml` thêm
+  `keywords`, `maintainers` (lint INFO `icon` ghi là bỏ qua có chủ ý, không
+  có asset). CI: job `helm` mới dùng `helm/kind-action@99576bfa6ddf9a8e612d83b513da5a75875caced # v1.9.0`
+  (SHA tra `git ls-remote --tags` 2026-10-07) chạy `scripts/test-helm.sh`;
+  job `chart` cũ gộp vào (lint `--strict` + ma trận template: mặc định,
+  `secretFiles`+`ingress`, `existingSecret`, `persistence.enabled=false`).
+  Test: `scripts/tests/test_helm.py` (chart có hook test, schema, SA; script
+  được CI gọi; `helm lint --strict` và ma trận template chạy local khi có
+  `helm`), `test_acceptance_wiring.py` thêm `scripts/test-helm.sh`. Docs:
+  `deploy/README.md` thêm mục "Helm" (lệnh harness + giới hạn), ACCEPTANCE_NOTES,
+  ARCHITECTURE (mục deploy), CHANGELOG. Số liệu ghi: thời gian `--wait`, số
+  pod/PVC, output `helm test`.
+- [ ] **P10-HELM-DB** (M): PostgreSQL trong chart. `postgresql.enabled = true`
+  (mặc định): StatefulSet `<fullname>-postgresql` một replica từ
+  `postgres:17-alpine@sha256:18cfe3ef…` (đúng digest Compose và CI), Service
+  headless, `volumeClaimTemplates` (`postgresql.persistence.size` mặc định
+  `10Gi`, `storageClass`), probes `pg_isready -U <user> -d <db>`
+  (readiness 5s/liveness 10s), `runAsUser/runAsGroup 70` (user `postgres`
+  của Alpine), `readOnlyRootFilesystem: true` với emptyDir cho
+  `/var/run/postgresql` và `/tmp`, `drop: [ALL]`, `RuntimeDefault`,
+  `resources` riêng. Mật khẩu: `postgresql.auth.password` **bắt buộc** khi
+  bật (`required` trong template → `helm install` fail sớm, như
+  `POSTGRES_PASSWORD:?` của Compose; không sinh ngẫu nhiên vì
+  `randAlphaNum` đổi mỗi `upgrade`) hoặc `postgresql.auth.existingSecret`
+  (khoá `password`); `postgresql.auth.username/database` mặc định `listmngr`.
+  Khi bật, chart tự ghép `LISTMNGR__DATABASE__URL=postgres://<user>:<pw
+  urlquery>@<fullname>-postgresql:5432/<db>` vào Secret của app (giá trị
+  `secrets.LISTMNGR__DATABASE__URL` bị bỏ qua và `helm lint` cảnh báo qua
+  `fail` nếu cả hai cùng đặt); khi tắt, giữ hành vi hiện tại
+  (`secrets`/`existingSecret`, DB ngoài hoặc SQLite trên PVC). Init container
+  `migrate` được thêm init `wait-db` (busybox `nc -z` tới DB tối đa 120s) để
+  không đếm restart. `networkPolicy.enabled` (mặc định false): PostgreSQL chỉ
+  nhận từ pod app; app chỉ nhận 8000 từ namespace/label cấu hình
+  (`networkPolicy.webFrom`), egress DNS + DB (+ 25/587 khi MTA). Harness
+  `scripts/test-helm.sh` chuyển mặc định sang PG (`--sqlite` giữ đường cũ);
+  thêm bước `helm upgrade --set postgresql.auth.password=…` giữ nguyên PVC →
+  dữ liệu còn (user tạo ở bước trước vẫn đăng nhập). Test: `test_helm.py`
+  (StatefulSet có/không theo `postgresql.enabled`, URL ghép đúng và escape,
+  template fail khi thiếu password, NetworkPolicy đúng selector). Docs:
+  book Install "Helm" (hai đường: PG trong chart / DB ngoài), `docs/UPGRADE.md`
+  (chart không nâng major PostgreSQL: digest `17` chỉ đổi qua review +
+  `pg_dump`/restore), `docs/OPERATIONS.md` (backup trên k8s: `kubectl exec
+  … listmngr backup` vào PVC + `pg_dump` từ StatefulSet), ACCEPTANCE_NOTES,
+  CHANGELOG.
+- [ ] **P10-HELM-MTA** (M): Postfix front MTA như Compose, dạng sidecar.
+  `mta.enabled = false` mặc định. Khi bật: container `postfix` trong cùng Pod
+  từ `mta.image` (`ghcr.io/p10node/listmngr-postfix`, tag mặc định
+  `appVersion`, `digest` tuỳ chọn; build từ `deploy/postfix/Dockerfile` — image
+  này được `release.yml` job `image` build/push/cosign thêm, cùng cách image
+  chính; local harness `kind load`), mount volume `state` `subPath: mta` tại
+  `/var/lib/listmngr/mta` read-only (maps `group`-readable, `postfix` đã thuộc
+  gid 1000 trong image, `fsGroup: 1000`), emptyDir `/var/spool/postfix`
+  (`mta.spool.size`, PVC tuỳ chọn), securityContext riêng của container:
+  `runAsNonRoot: false`, `runAsUser: 0` (master cần root rồi tự hạ quyền),
+  `capabilities.add` đúng tám cap của Compose, `readOnlyRootFilesystem: false`
+  (`postconf -e`, spool) — là **ngoại lệ hardening có ghi**, pod-level giữ
+  nguyên; env `POSTFIX_MYHOSTNAME=<mta.hostname>`,
+  `POSTFIX_MYNETWORKS=127.0.0.0/8` (chỉ listmngr cùng pod được relay),
+  `POSTFIX_RELAYHOST=<mta.relayhost>`; probe `postfix status`. Container
+  listmngr nhận thêm env khi `mta.enabled` (env đè TOML, không ghép chuỗi
+  `config`): `LISTMNGR__MTA__ENABLED=true`, `INCOMING=postfix`,
+  `MAP_DIRECTORY=/var/lib/listmngr/mta`, `LMTP_LISTEN=127.0.0.1:8024`,
+  `LMTP_MAP_TARGET=127.0.0.1:8024`, `SMTP_RELAY=127.0.0.1:25`,
+  `SMTP_TLS=plaintext_trusted_relay` (loopback trong pod — đúng điều kiện
+  "isolated" của `deploy/README.md`), `LOCAL_HOSTNAME=<mta.hostname>`;
+  `service.lmtp` chỉ còn cho MTA ngoài và bị `fail` nếu bật cùng `mta.enabled`.
+  Service thứ hai `<fullname>-smtp`: `mta.service.type` (mặc định
+  `LoadBalancer`), port 25 → container 25, `externalTrafficPolicy: Local`
+  (giữ IP client cho log/`mynetworks`), `loadBalancerIP`/`annotations`.
+  Harness `--mta`: build + load image Postfix, cài với `mta.enabled=true
+  mta.hostname=lists.example.invalid`; `list create` qua CLI → maps xuất
+  hiện (`kubectl exec -c postfix -- ls /var/lib/listmngr/mta/current`);
+  phiên SMTP qua `port-forward` 25: `RCPT TO:` địa chỉ list → 250, địa chỉ lạ
+  → 550, relay ra ngoài từ client ngoài pod → 554 (ma trận
+  `scripts/check-mta-configs.sh` ở dạng live); gửi một thư vào list → runner
+  nhận (log `kubectl logs -c listmngr`), giao ra ngoài không có đích thật nên
+  dừng ở queue retry — ghi là bounded. Test: `test_helm.py` (sidecar có/không,
+  env MTA đúng, Service smtp, cap list đúng tám, `fail` khi `service.lmtp` +
+  `mta.enabled`), `test_release.py` thêm image Postfix trong workflow. Docs:
+  book Install + Connect the mail system (mục Kubernetes: DNS/MX/SPF/DKIM
+  trỏ về `LoadBalancer`, `secretFiles` cho khoá DKIM), `deploy/README.md`,
+  ARCHITECTURE, SECURITY (ngoại lệ hardening của sidecar), CHANGELOG.
+- [ ] **P10-HELM-PUBLISH** (S): cài từ registry. `release.yml` job `chart`:
+  `helm registry login ghcr.io` bằng `GITHUB_TOKEN` (`packages: write`),
+  `helm push dist/listmngr-<v>.tgz oci://ghcr.io/p10node/charts` →
+  `cosign sign --yes ghcr.io/p10node/charts/listmngr@<digest>` (digest từ
+  output `helm push`), `.tgz` vẫn lên release + `SHA256SUMS`;
+  `provenance`/`Chart.yaml` `annotations` (`org.opencontainers.image.source`).
+  Docs là phần chính: book Install "Helm" viết lại thành runbook (cài
+  `oci://ghcr.io/p10node/charts/listmngr --version <v>`, `helm show values`,
+  values tối thiểu cho DB/MTA/ingress + ví dụ cert-manager annotation,
+  first-run `user create` + TOTP như Install hiện tại, `helm upgrade`,
+  `helm rollback` ≠ rollback schema → trỏ UPGRADE); `docs/UPGRADE.md` mục
+  "Containers and Helm" mở rộng (thứ tự: backup → `helm upgrade` → `doctor`;
+  chart minor ↔ app minor cùng số); README bullet "Helm chart" thêm địa chỉ
+  OCI; `deploy/README.md` mục Helm hoàn chỉnh; ledger. Test: `test_release.py`
+  needle `helm push`/`oci://`/`cosign sign` cho chart; `test_book.py` link.
+  Giới hạn ghi rõ: push OCI và cosign chart chỉ chạy khi có tag được push —
+  cùng trạng thái với phần còn lại của `release.yml`.
+- [ ] **P10-1.2** (S, quyết định của người dùng): bump `1.2.0` như `P8-1.1`
+  (workspace, path deps, `Chart.yaml` `version`/`appVersion`, fixture
+  `system-versions.json`, `fuzz/Cargo.lock`, `scripts/tests/test_version.py`),
+  `CHANGELOG.md` `## [1.2.0] - <ngày>`, bảng phase ledger đóng Phase 10, tag
+  annotated `v1.2.0` local (push là quyết định của người dùng). Không làm thì
+  chart `1.1.0` trong repo khác chart `1.1.0` đã đóng gói — ghi ở ledger.
+
+Quyết định cần chốt trước khi bắt đầu (mặc định in đậm nếu không có ý kiến):
+
+1. PostgreSQL trong chart: **StatefulSet tự viết từ image Compose** / chỉ DB
+   ngoài / operator (CloudNativePG, cần CRD).
+2. Postfix: **sidecar cùng Pod** (volume RWO dùng chung tự nhiên, LMTP
+   loopback) / Deployment riêng (cần PVC RWX hoặc cùng node).
+3. Nơi publish chart: **`oci://ghcr.io/p10node/charts/listmngr`** / GitHub
+   Pages `index.yaml` / chỉ `.tgz` trên release như hiện tại.
+4. Có `P10-1.2` ngay sau `P10-HELM-PUBLISH` hay gom với backlog khác.
+5. Ngân sách CI: job `helm` build image trong kind (~ bằng job `container`
+   hiện tại); chấp nhận hay chỉ chạy khi `deploy/**` đổi.
+
 ## 8. Testing strategy
 
 | Loại        | Công cụ                                                                                                  | Phạm vi                                                                                                                                                |
@@ -1187,7 +1349,7 @@ ledger row cùng ID ghi lệnh và kết quả thật.
 | 3 | Frontend                                    | SSR askama + htmx (khuyến nghị) vs Leptos/Dioxus. SSR: đơn giản, CSP strict, không WASM bundle, dễ i18n.                                                                                     |
 | 4 | Tên                                         | crate prefix `listmngr-*`, binary `listmngr`, env `LISTMNGR__*`, header `X-Listmngr-*`. Có cần alias `X-Mailman-*` cho compat? (khuyến nghị: emit cả 2 trong P2, config tắt).                |
 | 5 | REST compat depth                           | `/3.1/` đủ để `mailmanclient` chạy; không mô phỏng `/3.0/`.                                                                                                                                  |
-| 6 | Deploy target                               | Docker + systemd binary. Helm ở P7.                                                                                                                                                          |
+| 6 | Deploy target                               | Docker + systemd binary. Helm ở P7; Helm cài thật (PG, Postfix sidecar, kind, OCI) ở Phase 10.                                                                                                                                                          |
 | 7 | Templates i18n                              | Đã chốt (P6-PO-TEMPLATES): vendor bản dịch Mailman (GPL-3.0-or-later) vào binary — tương thích AGPL-3.0-or-later theo GPLv3 §13; nguồn và điều khoản ở `crates/mail/catalog/mailman/SOURCE`. |
 | 8 | Built-in inbound SMTP                       | experimental P6, không phải mục tiêu chính.                                                                                                                                                  |
 | 9 | Python `mailmanclient` compat test trong CI | có (docker python), chi phí CI thấp, đảm bảo wire-compat.                                                                                                                                    |
