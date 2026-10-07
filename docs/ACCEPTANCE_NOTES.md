@@ -347,7 +347,13 @@ gates never see it. `scripts/fuzz.sh [seconds]` runs every target for
 that long (sixty seconds by default; `scripts/fuzz.sh 86400` is the
 day-per-target campaign the plan asks for, on a machine of its own); a
 crash fails the run and its input lands in `fuzz/artifacts/<target>/`.
-CI's `fuzz` job runs the sixty-second pass on every push. On Linux,
+CI's `fuzz` job runs the sixty-second pass on every push and keeps
+`fuzz/artifacts` as a workflow artifact when it fails. The script names
+the host triple (`rustc -vV`) on every `cargo fuzz run`: cargo-fuzz
+otherwise builds for the triple it was itself compiled for, and the
+prebuilt Linux cargo-fuzz CI installs is a musl binary, which would ask
+for `x86_64-unknown-linux-musl` — no sanitizer runs against a static
+libc, and that standard library is not installed. On Linux,
 AddressSanitizer's LeakSanitizer also runs at exit, so a harness must
 not leave a task alive in its runtime: `lmtp_session` awaits the peer
 it aborts, otherwise the peer's half of the pipe survives to exit with
