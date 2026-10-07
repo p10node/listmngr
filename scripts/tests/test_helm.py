@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CHART = ROOT / "deploy/helm/listmngr"
+CHART_VERSION = re.search(r"^version: (\S+)$", (CHART / "Chart.yaml").read_text(encoding="utf-8"), re.M).group(1)
 
 # Every variant the chart documents renders; the harness installs the first.
 PG = ["--set", "postgresql.auth.password=kind-only-password"]
@@ -122,7 +123,7 @@ class HelmTest(unittest.TestCase):
         existing = helm("template", "t", str(CHART), "--set", "postgresql.auth.existingSecret=pg-secret")
         self.assertEqual(existing.returncode, 0, existing.stderr)
         self.assertIn("name: pg-secret", existing.stdout)
-        self.assertNotIn("name: t-listmngr-postgresql\n  labels:\n    helm.sh/chart: \"listmngr-1.1.0\"\n    app.kubernetes.io/name: listmngr\n    app.kubernetes.io/instance: t\n    app.kubernetes.io/version: \"1.1.0\"\n    app.kubernetes.io/managed-by: Helm\ntype: Opaque", existing.stdout)
+        self.assertNotIn("stringData:\n  password:", existing.stdout, "no chart Secret for the database password")
         # Without PostgreSQL, the operator must say where the database is.
         nowhere = helm("template", "t", str(CHART), "--set", "postgresql.enabled=false")
         self.assertNotEqual(nowhere.returncode, 0)
@@ -150,7 +151,7 @@ class HelmTest(unittest.TestCase):
         self.assertEqual(rendered.returncode, 0, rendered.stderr)
         out = rendered.stdout
         for needle in [
-            "- name: postfix", "ghcr.io/p10node/listmngr-postfix:1.1.0", "containerPort: 25",
+            "- name: postfix", f"ghcr.io/p10node/listmngr-postfix:{CHART_VERSION}", "containerPort: 25",
             "name: POSTFIX_MYHOSTNAME", "value: \"lists.example.invalid\"", "name: POSTFIX_MYNETWORKS", "value: \"127.0.0.0/8\"",
             "mountPath: /var/spool/postfix", "runAsNonRoot: false", "runAsUser: 0", "readOnlyRootFilesystem: false",
             "- NET_BIND_SERVICE", "- SETUID", "- SETGID", "- CHOWN", "- DAC_OVERRIDE", "- FOWNER", "- FSETID", "- KILL",

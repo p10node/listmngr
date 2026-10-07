@@ -10,6 +10,35 @@ Until 2026-10-06 this file was the repository `README.md`. It moved here so the
 README could introduce the project; the text is unchanged apart from this
 note and the relative links, which now resolve from `docs/`.
 
+## 1.2.0 (`P10-1.2`) — bounded local acceptance verified
+
+Every workspace package, the path dependencies between them, `Cargo.lock`
+(`cargo update --workspace`), the Helm chart, the fuzz workspace's lock
+and the compatibility fixture's `listmngr_version` are `1.2.0`;
+`CHANGELOG.md` has `[1.2.0] - 2026-10-08` under an empty `[Unreleased]`,
+gathering Phase 10 — the Helm chart as a real install (`P10-HELM-TEST`),
+PostgreSQL in the chart (`P10-HELM-DB`), the Postfix front MTA as a
+sidecar (`P10-HELM-MTA`), the chart published to GHCR with a runbook
+(`P10-HELM-PUBLISH`) — and the fixes since `1.1.0` (the first account
+signs in, the CI gates). No migration was added, so a `1.1.0` database is
+a `1.2.0` database and a `1.1.0` binary still reads it (`docs/UPGRADE.md`).
+The chart's `1.2.0` is its first version that differs from the tagged
+`1.1.0` (selectors, PostgreSQL, the sidecar): a release installed from
+that older package would need a reinstall, and none exists.
+`docs/SECURITY.md` names `1.2.0` the supported release. The annotated tag
+`v1.2.0` is created locally on the merge commit. Pushing it is the
+maintainer's decision — and it must travel alone: GitHub creates no push
+event when more than three refs arrive at once, which is why the five tags
+pushed together earlier (`v1.0.0`, `v1.1.0` among them) never ran
+`release.yml`; `v1.2.0` would be its first run.
+
+```sh
+python3 -m unittest scripts.tests.test_version      # RED with VERSION = "1.2.0" before the bump, green after
+cargo update --workspace && cargo metadata --locked > /dev/null
+(cd fuzz && cargo metadata --locked --offline --format-version 1 > /dev/null)
+git tag -a v1.2.0 -m 'listmngr 1.2.0'
+```
+
 ## The chart on a registry (`P10-HELM-PUBLISH`) — bounded local acceptance verified
 
 A release now pushes the packaged chart to

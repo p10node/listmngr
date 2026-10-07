@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-08
+
+Phase 10 of `docs/PLAN.md` closed: the Helm chart installs for real — on a disposable kind cluster in CI, with PostgreSQL and the Postfix front MTA inside the chart, published to GHCR as a signed OCI artifact with a runbook — together with the fixes after `1.1.0` (the first account signs in; the CI gates). No schema change: a `1.1.0` database is a `1.2.0` database.
+
 ### Added
 - The chart on a registry (`P10-HELM-PUBLISH`): a release pushes the packaged chart to `oci://ghcr.io/p10node/charts/listmngr` and signs it keyless with cosign by digest (the digest in the release notes); the book's Install chapter is the Helm runbook from that artifact — `helm show values`, `cosign verify`, a values file with the chart's PostgreSQL, the Postfix sidecar and a cert-manager Ingress, `helm install --version`, `helm test`, the first owner, the upgrade; `scripts/test-helm.sh --oci` pushes the chart to a disposable local registry and installs and upgrades from `oci://`; CI runs it.
 - The front MTA in the Helm chart (`P10-HELM-MTA`): `mta.enabled` with `mta.hostname` runs the Postfix of `deploy/postfix` as a sidecar of the application pod — the maps from the state volume read-only, LMTP and the trusted relay on loopback, MX delivery or `mta.relayhost`, a second Service `<release>-listmngr-smtp` on port 25 (`LoadBalancer`, `externalTrafficPolicy: Local`), the mail role given to the application through `LISTMNGR__MTA__*` environment variables; the release builds and signs `ghcr.io/p10node/listmngr-postfix` beside the main image; `service.lmtp` is refused together with the sidecar; the network policy opens 25 in and `mta.egressPorts` out. The kind harness's `--mta` mode checks the RCPT matrix (250/550/554) from a pod outside `mynetworks` and one message handed to LMTP; CI runs it.

@@ -37,7 +37,9 @@ engineering record — every behaviour with the test that proves it — is
 
 ## Status
 
-`1.1.0` is the current release (Phase 8: the structure ceilings, the
-abuse rules, Ed25519 DKIM and the master key). `1.0.0` is the first release; its tag `v1.0.0` closes Phase 7 of the
+`1.2.0` is the current release (Phase 10: the Helm chart as a real
+install — PostgreSQL and the Postfix front MTA in the chart, published to
+GHCR; and the fixes after `1.1.0`). `1.1.0` closed Phase 8 (the structure
+ceilings, the abuse rules, Ed25519 DKIM and the master key). `1.0.0` is the first release; its tag `v1.0.0` closes Phase 7 of the
 plan. Every feature in this book has a bounded, recorded acceptance in
 the repository's ledger.
