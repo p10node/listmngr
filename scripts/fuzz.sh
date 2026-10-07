@@ -19,7 +19,13 @@ host=$(rustc -vV | sed -n 's/^host: //p')
 for target in $(cargo fuzz list); do
   printf '== %s (%s s)\n' "$target" "$seconds"
   mkdir -p "target/corpus/$target"
-  cargo fuzz run --target "$host" "$target" "target/corpus/$target" "corpus/$target" -- \
+  # libFuzzer exits on a corpus directory that is not there, and git
+  # does not carry an empty one: a target without seeds runs from its
+  # working corpus alone.
+  seeds=
+  [ -d "corpus/$target" ] && seeds="corpus/$target"
+  # shellcheck disable=SC2086 # $seeds is one word or none
+  cargo fuzz run --target "$host" "$target" "target/corpus/$target" $seeds -- \
     -max_total_time="$seconds" -rss_limit_mb=2048 -timeout=20
 done
 printf 'fuzz: every target ran %s s without a crash\n' "$seconds"
