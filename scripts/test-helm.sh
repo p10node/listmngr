@@ -11,9 +11,17 @@
 # from `postgres:17-alpine@sha256:…`, pulled by the node: a multi-architecture
 # digest cannot be `kind load`ed from one platform's docker image) is the
 # database, with a password made here; --sqlite installs with
-# `postgresql.enabled=false` and SQLite on the volume instead.
+# `postgresql.enabled=false` and SQLite on the volume instead. --mta builds
+# the Postfix image from deploy/postfix/Dockerfile too and installs with
+# `mta.enabled=true` (the smtp Service as ClusterIP: kind has no load
+# balancer): after the install, `postfix status` in the sidecar, a domain and
+# a list through the CLI, the maps on the shared volume, then from a probe pod
+# outside `mynetworks` the RCPT matrix (list address 250, unknown 550, relay
+# 554) and one message to the list, which Postfix must hand to LMTP on
+# loopback (`status=sent`). Delivery to the internet is not attempted.
 #
-#   scripts/test-helm.sh [--keep] [--sqlite] [--image NAME:TAG]    (--image skips the build)
+#   scripts/test-helm.sh [--keep] [--sqlite] [--mta] [--image NAME:TAG] [--mta-image NAME:TAG]
+#   (--image / --mta-image skip the builds)
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -27,13 +35,19 @@ release=t
 deploy=$release-listmngr
 keep=0
 sqlite=0
+mta=0
 image=
+mta_image=
+# The chart's own pinned busybox (`secretFilesImage`), already on the node for `helm test`.
+probe_image=busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
 while [ $# -gt 0 ]; do
   case "$1" in
     --keep) keep=1 ;;
     --sqlite) sqlite=1 ;;
+    --mta) mta=1 ;;
     --image) shift; image=${1:?--image needs NAME:TAG} ;;
-    *) printf 'usage: %s [--keep] [--sqlite] [--image NAME:TAG]\n' "$0" >&2; exit 2 ;;
+    --mta-image) shift; mta_image=${1:?--mta-image needs NAME:TAG} ;;
+    *) printf 'usage: %s [--keep] [--sqlite] [--mta] [--image NAME:TAG] [--mta-image NAME:TAG]\n' "$0" >&2; exit 2 ;;
   esac
   shift
 done
@@ -75,6 +89,11 @@ fi
 case "$image" in *:*) ;; *) fail "--image needs NAME:TAG" ;; esac
 repository=${image%:*}
 tag=${image##*:}
+if [ "$mta" -eq 1 ] && [ -z "$mta_image" ]; then
+  mta_image=listmngr-postfix:helm-test
+  step "docker build $mta_image"
+  docker build -f deploy/postfix/Dockerfile -t "$mta_image" .
+fi
 
 step "kind create cluster $cluster"
 kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
@@ -83,6 +102,9 @@ k get nodes -o wide
 
 step "kind load docker-image $image"
 kind load docker-image "$image" --name "$cluster"
+if [ "$mta" -eq 1 ]; then
+  kind load docker-image "$mta_image" --name "$cluster"
+fi
 
 step "helm install $release --wait"
 if [ "$sqlite" -eq 1 ]; then
@@ -92,6 +114,11 @@ else
   # URL-unreserved characters only: the chart writes it into the URL as is.
   password=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)
   set -- --set "postgresql.auth.password=$password"
+fi
+if [ "$mta" -eq 1 ]; then
+  set -- "$@" --set mta.enabled=true --set mta.hostname=lists.example.invalid \
+    --set "mta.image.repository=${mta_image%:*}" --set "mta.image.tag=${mta_image##*:}" \
+    --set mta.image.pullPolicy=Never --set mta.service.type=ClusterIP
 fi
 t0=$(date +%s)
 h install "$release" "$chart" --wait --timeout 5m \
@@ -107,6 +134,42 @@ checksum_before=$(k get deploy "$deploy" -o jsonpath="{.spec.template.metadata.a
 
 step "helm test $release"
 h test "$release" --logs
+
+if [ "$mta" -eq 1 ]; then
+  step "front MTA: postfix status, a domain and a list, the maps"
+  k exec "deploy/$deploy" -c postfix -- postfix status
+  k exec "deploy/$deploy" -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml domains add example.invalid > /dev/null
+  k exec "deploy/$deploy" -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml lists create alpha.example.invalid --display-name Alpha > /dev/null
+  i=0
+  until k exec "deploy/$deploy" -c postfix -- grep -q 'alpha@example' /var/lib/listmngr/mta/current/recipients.regexp 2>/dev/null; do
+    i=$((i + 1)); [ "$i" -lt 30 ] || fail "the list never reached the maps on the shared volume"
+    sleep 1
+  done
+  k exec "deploy/$deploy" -c postfix -- sh -c 'echo "maps: $(readlink /var/lib/listmngr/mta/current), $(grep -c . /var/lib/listmngr/mta/current/recipients.regexp) recipient rows"'
+  sleep 6   # the entrypoint reloads Postfix within 5 s of a new generation
+
+  step "front MTA: the RCPT matrix and one message, from a pod outside mynetworks"
+  cat > "$work/probe.sh" <<'PROBE'
+smtp="$1"
+say() { for line in "$@"; do sleep 1; printf '%s\r\n' "$line"; done; }
+code() { tr -d '\r' | grep -E '^[0-9]{3} ' | tail -2 | head -1 | cut -c1-3; }
+rcpt() { say "EHLO probe.example.invalid" "MAIL FROM:<sender@example.org>" "RCPT TO:<$1>" "QUIT" | nc -w 15 "$smtp" 25 | code; }
+printf 'list=%s unknown=%s relay=%s\n' "$(rcpt alpha@example.invalid)" "$(rcpt nobody@example.invalid)" "$(rcpt someone@elsewhere.invalid)"
+say "EHLO probe.example.invalid" "MAIL FROM:<sender@example.org>" "RCPT TO:<alpha@example.invalid>" "DATA" \
+  "From: sender@example.org" "To: alpha@example.invalid" "Subject: helm harness probe" "Message-ID: <probe@example.org>" "" "hello" "." "QUIT" \
+  | nc -w 20 "$smtp" 25 | tr -d '\r' | grep -E '^250 2\.0\.0' | sed 's/^/data=/'
+PROBE
+  k run smtp-probe --image="$probe_image" --restart=Never --rm -i --quiet --command -- sh -c "$(cat "$work/probe.sh")" "probe" "$deploy-smtp" > "$work/probe.out" 2>&1 || true
+  cat "$work/probe.out"
+  grep -q '^list=250 unknown=550 relay=554$' "$work/probe.out" || fail "RCPT matrix is not 250/550/554"
+  grep -q '^data=250 2.0.0 Ok: queued' "$work/probe.out" || fail "Postfix did not queue the message"
+  i=0
+  until k logs "deploy/$deploy" -c postfix 2>/dev/null | grep -q 'relay=127.0.0.1\[127.0.0.1\]:8024.*status=sent'; do
+    i=$((i + 1)); [ "$i" -lt 30 ] || { k logs "deploy/$deploy" -c postfix --tail=20; fail "Postfix never handed the message to LMTP on loopback"; }
+    sleep 1
+  done
+  k logs "deploy/$deploy" -c postfix | grep 'status=sent' | tail -1 | sed 's/^/postfix: /'
+fi
 
 step "in-image probe: listmngr status"
 k exec "deploy/$deploy" -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml status

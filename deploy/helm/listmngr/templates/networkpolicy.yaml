@@ -18,6 +18,10 @@ spec:
         - port: {{ .Values.service.lmtp.port }}
           protocol: TCP
         {{- end }}
+        {{- if .Values.mta.enabled }}
+        - port: 25
+          protocol: TCP
+        {{- end }}
       {{- with .Values.networkPolicy.webFrom }}
       from:
         {{- toYaml . | nindent 8 }}
@@ -36,6 +40,13 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
+    {{- end }}
+    {{- if .Values.mta.enabled }}
+    - ports:
+        {{- range .Values.mta.egressPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
     {{- end }}
     {{- with .Values.networkPolicy.extraEgress }}
     {{- toYaml . | nindent 4 }}

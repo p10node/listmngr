@@ -10,6 +10,35 @@ Until 2026-10-06 this file was the repository `README.md`. It moved here so the
 README could introduce the project; the text is unchanged apart from this
 note and the relative links, which now resolve from `docs/`.
 
+## The front MTA in the chart (`P10-HELM-MTA`) — bounded local acceptance verified
+
+`mta.enabled` with `mta.hostname` puts the Postfix of `deploy/postfix` into
+the application pod as a sidecar, the way Compose runs it beside the
+container: the maps from the state volume (read-only), LMTP and the trusted
+plaintext relay on loopback, MX delivery or `mta.relayhost`, a second
+Service `<release>-listmngr-smtp` on port 25 (`LoadBalancer`,
+`externalTrafficPolicy: Local`), the mail role handed to the application as
+`LISTMNGR__MTA__*` environment variables. The sidecar is the chart's one
+root container with capabilities and a writable root — the documented
+exception — and `service.lmtp` is refused beside it. The release builds and
+signs `ghcr.io/p10node/listmngr-postfix` with the main image. The harness's
+`--mta` mode installed it on kind, created a domain and a list, saw them in
+the maps, and from a probe pod outside `mynetworks` got the RCPT matrix
+250/550/554 and one message queued and handed to `127.0.0.1:8024` with
+`status=sent`: 120 s on this laptop, install ready in 31 s.
+
+```sh
+python3 -m unittest discover -s scripts/tests                              # 23 tests
+helm lint --strict deploy/helm/listmngr --set postgresql.auth.password=x \
+  --set mta.enabled=true --set mta.hostname=lists.example.invalid
+scripts/test-helm.sh --mta --image listmngr:helm-test --mta-image listmngr-postfix:helm-test   # OK in 120s
+```
+
+Limits: no load balancer on kind (the smtp Service was `ClusterIP`), no
+delivery to the internet, `mta.relayhost` rendered only; the policy is not
+enforced by kind's CNI; the Postfix image on GHCR exists only once a tag is
+pushed; the chart `version` stays `1.1.0` until `P10-1.2`.
+
 ## PostgreSQL in the chart (`P10-HELM-DB`) — bounded local acceptance verified
 
 `helm install` now brings its own database: `postgresql.enabled` (the

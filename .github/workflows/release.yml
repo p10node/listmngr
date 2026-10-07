@@ -105,6 +105,7 @@ jobs:
       id-token: write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
+      postfix_digest: ${{ steps.push_postfix.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
@@ -131,9 +132,29 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
+      # The front MTA for the Helm chart's sidecar (deploy/postfix), the same way.
+      - id: meta_postfix
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}-postfix
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - id: push_postfix
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/postfix/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta_postfix.outputs.tags }}
+          labels: ${{ steps.meta_postfix.outputs.labels }}
+          provenance: false
       - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
-      - name: Sign the image by digest (keyless, OIDC)
-        run: cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}"
+      - name: Sign both images by digest (keyless, OIDC)
+        run: |
+          cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}"
+          cosign sign --yes "ghcr.io/${{ github.repository }}-postfix@${{ steps.push_postfix.outputs.digest }}"
 
   chart:
     # The Helm chart, linted and rendered, packaged with the release.
@@ -172,6 +193,7 @@ jobs:
           shasum -a 256 * > SHA256SUMS
           cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
           printf 'Image: ghcr.io/%s@%s\n' "${{ github.repository }}" "${{ needs.image.outputs.digest }}" > IMAGE_DIGEST.txt
+          printf 'Postfix image: ghcr.io/%s-postfix@%s\n' "${{ github.repository }}" "${{ needs.image.outputs.postfix_digest }}" >> IMAGE_DIGEST.txt
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/*

@@ -1,4 +1,5 @@
 {{- include "listmngr.databaseCheck" . -}}
+{{- include "listmngr.mtaCheck" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -95,9 +96,12 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ include "listmngr.secretName" . }}
-          {{- if or .Values.postgresql.enabled .Values.env }}
+          {{- if or .Values.postgresql.enabled .Values.mta.enabled .Values.env }}
           env:
             {{- with (include "listmngr.databaseEnv" . | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with (include "listmngr.mtaEnv" . | trim) }}
             {{- . | nindent 12 }}
             {{- end }}
             {{- with .Values.env }}
@@ -130,6 +134,45 @@ spec:
               mountPath: /var/lib/listmngr
             - name: tmp
               mountPath: /tmp
+        {{- if .Values.mta.enabled }}
+        - name: postfix
+          image: {{ include "listmngr.mtaImage" . }}
+          imagePullPolicy: {{ .Values.mta.image.pullPolicy }}
+          env:
+            - name: POSTFIX_MYHOSTNAME
+              value: {{ .Values.mta.hostname | quote }}
+            # Only this pod relays through the sidecar: the application on loopback.
+            - name: POSTFIX_MYNETWORKS
+              value: "127.0.0.0/8"
+            - name: POSTFIX_RELAYHOST
+              value: {{ .Values.mta.relayhost | quote }}
+          ports:
+            - name: smtp
+              containerPort: 25
+          # The entrypoint waits for the first map generation before Postfix
+          # starts, so readiness also says "the maps are there".
+          readinessProbe:
+            exec:
+              command: ["postfix", "status"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["postfix", "status"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+          securityContext:
+            {{- toYaml .Values.mta.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.mta.resources | nindent 12 }}
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/listmngr
+              readOnly: true
+            - name: spool
+              mountPath: /var/spool/postfix
+        {{- end }}
       volumes:
         - name: config
           configMap:
@@ -153,6 +196,11 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
+        {{- if .Values.mta.enabled }}
+        - name: spool
+          emptyDir:
+            sizeLimit: {{ .Values.mta.spool.size }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

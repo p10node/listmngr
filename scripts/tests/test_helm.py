@@ -19,8 +19,10 @@ CHART = ROOT / "deploy/helm/listmngr"
 PG = ["--set", "postgresql.auth.password=kind-only-password"]
 SQLITE = ["--set", "postgresql.enabled=false", "--set-string",
           "secrets.LISTMNGR__DATABASE__URL=sqlite:///var/lib/listmngr/listmngr.db?mode=rwc"]
+MTA = PG + ["--set", "mta.enabled=true", "--set", "mta.hostname=lists.example.invalid"]
 VARIANTS = {
     "default": PG,
+    "mail": MTA,
     "secret-files-and-ingress": PG + ["--set", "secretFiles.dkim\\.pem=KEY", "--set", "ingress.enabled=true"],
     "existing-secrets": PG + ["--set", "existingSecret=lists-env", "--set", "existingFilesSecret=lists-files"],
     "sqlite-no-persistence-no-service-account": SQLITE + ["--set", "persistence.enabled=false", "--set", "serviceAccount.create=false"],
@@ -77,6 +79,12 @@ class HelmTest(unittest.TestCase):
                     self.assertIn("kind: ServiceAccount", rendered.stdout)
                     self.assertIn("kind: PersistentVolumeClaim", rendered.stdout)
                     self.assertIn("kind: StatefulSet", rendered.stdout)
+                if "mta.enabled=true" in extra:
+                    self.assertIn("name: postfix", rendered.stdout)
+                    self.assertIn("kind: Service\nmetadata:\n  name: t-listmngr-smtp", rendered.stdout)
+                else:
+                    self.assertNotIn("name: postfix", rendered.stdout)
+                    self.assertNotIn("t-listmngr-smtp", rendered.stdout)
                 if "networkPolicy.enabled=true" in extra:
                     self.assertEqual(rendered.stdout.count("kind: NetworkPolicy"), 2)
                 else:
@@ -135,6 +143,46 @@ class HelmTest(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, out)
 
+    def test_the_front_mta_is_a_sidecar_on_loopback(self):
+        if shutil.which("helm") is None:
+            self.skipTest("helm is not installed here; CI's helm job lints")
+        rendered = helm("template", "t", str(CHART), *MTA)
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        out = rendered.stdout
+        for needle in [
+            "- name: postfix", "ghcr.io/p10node/listmngr-postfix:1.1.0", "containerPort: 25",
+            "name: POSTFIX_MYHOSTNAME", "value: \"lists.example.invalid\"", "name: POSTFIX_MYNETWORKS", "value: \"127.0.0.0/8\"",
+            "mountPath: /var/spool/postfix", "runAsNonRoot: false", "runAsUser: 0", "readOnlyRootFilesystem: false",
+            "- NET_BIND_SERVICE", "- SETUID", "- SETGID", "- CHOWN", "- DAC_OVERRIDE", "- FOWNER", "- FSETID", "- KILL",
+            "name: LISTMNGR__MTA__ENABLED", "name: LISTMNGR__MTA__INCOMING", "value: \"postfix\"",
+            "name: LISTMNGR__MTA__LMTP_LISTEN", "value: \"127.0.0.1:8024\"", "name: LISTMNGR__MTA__LMTP_MAP_TARGET",
+            "name: LISTMNGR__MTA__SMTP_RELAY", "value: \"127.0.0.1:25\"", "name: LISTMNGR__MTA__SMTP_TLS", "value: \"plaintext_trusted_relay\"",
+            "name: LISTMNGR__MTA__LOCAL_HOSTNAME", "name: LISTMNGR__MTA__MAP_DIRECTORY", "value: \"/var/lib/listmngr/mta\"",
+            "name: t-listmngr-smtp", "type: LoadBalancer", "externalTrafficPolicy: Local", "port: 25",
+            "postfix", "status",
+        ]:
+            with self.subTest(needle=needle):
+                self.assertIn(needle, out)
+        # The maps are read from the application's state volume, read-only; LMTP never leaves the pod.
+        self.assertNotIn("containerPort: 8024", out)
+        self.assertEqual(out.count("mountPath: /var/lib/listmngr\n              readOnly: true"), 1)
+        # The eight capabilities and the root user belong to the sidecar only.
+        self.assertEqual(out.count("runAsUser: 0"), 1)
+        # The LMTP Service is for an MTA outside the pod: not together with the sidecar.
+        both = helm("template", "t", str(CHART), *MTA, "--set", "service.lmtp.enabled=true")
+        self.assertNotEqual(both.returncode, 0)
+        self.assertIn("service.lmtp", both.stderr)
+        # A relayhost is passed through; a ClusterIP smtp Service has no external traffic policy.
+        relay = helm("template", "t", str(CHART), *MTA, "--set", "mta.relayhost=[smtp.example.invalid]:587", "--set", "mta.service.type=ClusterIP")
+        self.assertEqual(relay.returncode, 0, relay.stderr)
+        self.assertIn("value: \"[smtp.example.invalid]:587\"", relay.stdout)
+        self.assertNotIn("externalTrafficPolicy", relay.stdout)
+        # With the policy on, port 25 is open in and out of the pod.
+        policy = helm("template", "t", str(CHART), *MTA, "--set", "networkPolicy.enabled=true")
+        self.assertEqual(policy.returncode, 0, policy.stderr)
+        self.assertGreaterEqual(policy.stdout.count("port: 25"), 2)
+        self.assertIn("port: 587", policy.stdout)
+
     def test_the_kind_harness_exists_and_ci_runs_it(self):
         script = ROOT / "scripts/test-helm.sh"
         self.assertTrue(script.stat().st_mode & stat.S_IXUSR, "the harness is executable")
@@ -144,11 +192,13 @@ class HelmTest(unittest.TestCase):
             "helm install", "--wait", "helm test", "user create", "/readyz", "listmngr status",
             "helm upgrade", "checksum", "helm uninstall", "kind delete cluster",
             "--sqlite", "postgresql.auth.password", "pg_isready", "postgres:17-alpine@sha256:",
+            "--mta", "deploy/postfix/Dockerfile", "mta.enabled=true", "postfix status", "RCPT TO", "550", "554",
         ]:
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
         workflow = read(".github/workflows/ci.yml")
         self.assertIn("scripts/test-helm.sh", workflow)
+        self.assertIn("scripts/test-helm.sh --mta", workflow)
         self.assertIn("helm lint --strict deploy/helm/listmngr", workflow)
         self.assertRegex(workflow, r"uses: helm/kind-action@[0-9a-f]{40} # v\d", "kind-action pinned by commit")
 

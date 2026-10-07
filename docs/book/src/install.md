@@ -117,9 +117,18 @@ until the server answers. `postgresql.auth.password` is required (or
 `postgresql.auth.existingSecret`, a Secret with a `password` key) and
 must be URL-safe — letters, digits and `._~-`; PostgreSQL reads it at
 its first start only. For a database elsewhere, set
-`postgresql.enabled=false` and `secrets.LISTMNGR__DATABASE__URL`. In the
+`postgresql.enabled=false` and `secrets.LISTMNGR__DATABASE__URL`.
+
+Mail comes with `mta.enabled` and `mta.hostname`: a Postfix sidecar in
+the same pod (the image the release builds from `deploy/postfix`) reads
+the maps listmngr publishes, hands mail to LMTP on loopback, relays the
+outbound mail and delivers to MX or to `mta.relayhost`; a second
+Service, `<release>-listmngr-smtp`, exposes port 25 as a `LoadBalancer`.
+Point the list domains' MX at it and publish SPF and DKIM (the keys
+through `secretFiles`); see [Connect the mail system](mail.md). In the
 repository, `scripts/test-helm.sh` installs the chart on a disposable
-kind cluster and exercises it end to end; CI runs it on every push.
+kind cluster and exercises it end to end, mail included; CI runs it on
+every push.
 
 ```sh
 helm install lists deploy/helm/listmngr --wait \

@@ -1,0 +1,27 @@
+{{- if .Values.mta.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "listmngr.fullname" . }}-smtp
+  labels:
+    {{- include "listmngr.labels" . | nindent 4 }}
+  {{- with .Values.mta.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.mta.service.type }}
+  {{- if ne .Values.mta.service.type "ClusterIP" }}
+  # Keep the client's address: Postfix logs it and judges `mynetworks` by it.
+  externalTrafficPolicy: {{ .Values.mta.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- with .Values.mta.service.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  selector:
+    {{- include "listmngr.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: smtp
+      port: {{ .Values.mta.service.port }}
+      targetPort: smtp
+{{- end }}

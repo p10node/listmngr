@@ -26,6 +26,18 @@ every list change) and
 `lmtp:127.0.0.1:8024` as the transport. `postmap` is run by Postfix; the
 maps are plain `hash:` tables.
 
+### On Kubernetes
+
+The Helm chart runs this Postfix as a sidecar of the application pod when
+`mta.enabled` is set (`mta.hostname` is what it announces): the maps are
+read from the state volume, LMTP and the relay are on loopback, and the
+Service `<release>-listmngr-smtp` is port 25. `mta.relayhost` names a
+smart host; without it Postfix delivers to MX from the pod's address, so
+that address needs reverse DNS and a place in SPF. The spool is an
+emptyDir: mail still queued when the pod goes is lost, which a relayhost
+avoids. The sidecar is the chart's one root container with capabilities;
+`service.lmtp` is for an MTA of your own instead and is refused alongside.
+
 ## Exim
 
 `deploy/exim/listmngr.conf` is a router and transport pair that looks
