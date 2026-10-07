@@ -51,7 +51,8 @@ The current release is `1.1.0`. A tagged release publishes, under
   `/var/lib/listmngr`;
 - a container image, `ghcr.io/p10node/listmngr`, for `linux/amd64` and
   `linux/arm64`, signed with cosign;
-- a Helm chart, [deploy/helm/listmngr](deploy/helm/listmngr);
+- a Helm chart, `oci://ghcr.io/p10node/charts/listmngr`, signed with cosign
+  (source: [deploy/helm/listmngr](deploy/helm/listmngr));
 - `SHA256SUMS` over everything, signed keyless with cosign, and a CycloneDX
   SBOM.
 

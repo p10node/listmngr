@@ -43,6 +43,13 @@ The syscall filter uses systemd's `@system-service` allowlist. Verify it on the 
 
 ## Helm
 
+A release pushes the packaged chart to `oci://ghcr.io/p10node/charts/listmngr`
+(`helm push` in `release.yml`'s `chart` job, signed keyless with cosign by
+digest, the digest in the release notes), so an install needs no checkout —
+`helm install lists oci://ghcr.io/p10node/charts/listmngr --version <version>
+-f values.yaml --wait`; the book's Install chapter is the runbook. Until a tag
+is pushed, the chart is this directory.
+
 [`helm/listmngr`](helm/listmngr) is the chart: one Deployment (one replica,
 `Recreate`; the mail role and the runners are one process over one database),
 its Service and a ServiceAccount of its own with no API token mounted, the
@@ -120,7 +127,9 @@ an image built here and exercises it as an operator would: install with
 instead; `--mta` also builds the Postfix image, installs with `mta.enabled`,
 creates a domain and a list, waits for the maps, and from a probe pod outside
 `mynetworks` checks the RCPT matrix — list address 250, unknown 550, relay
-554 — and sends one message that Postfix must hand to LMTP on loopback),
+554 — and sends one message that Postfix must hand to LMTP on loopback;
+`--oci` packages the chart, pushes it to a disposable local `registry:3` and
+installs and upgrades from `oci://` instead of from the directory),
 `pg_isready` in the database pod, `helm test`, the in-image
 `listmngr status` probe, the first server owner through `kubectl exec`,
 `/healthz`, `/readyz` and `/web/login` through a port-forward, a configuration

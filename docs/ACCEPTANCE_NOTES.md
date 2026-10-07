@@ -10,6 +10,33 @@ Until 2026-10-06 this file was the repository `README.md`. It moved here so the
 README could introduce the project; the text is unchanged apart from this
 note and the relative links, which now resolve from `docs/`.
 
+## The chart on a registry (`P10-HELM-PUBLISH`) — bounded local acceptance verified
+
+A release now pushes the packaged chart to
+`oci://ghcr.io/p10node/charts/listmngr` and signs it keyless with cosign by
+digest, the digest written into the release notes beside the images'; the
+book's Install chapter became the Helm runbook from that artifact —
+`helm show values`, `cosign verify`, a values file with the chart's
+PostgreSQL behind an existing Secret, the Postfix sidecar and a
+cert-manager Ingress, `helm install --version`, `helm test`, the first
+owner, the upgrade. `scripts/test-helm.sh --oci` walks the path a release
+takes on this laptop: `helm package`, a disposable `registry:3` on a
+loopback port, `helm push --plain-http`, `helm show chart` from the
+registry, then `helm install` and `helm upgrade` from `oci://` with
+`--version` — 56 s, install ready in 6 s, the same digest at push, show,
+install and upgrade; CI runs it as a third pass.
+
+```sh
+python3 -m unittest discover -s scripts/tests                          # 24 tests
+scripts/test-helm.sh --oci --sqlite --image listmngr:helm-test        # OK in 56s
+```
+
+Limits: the GHCR push, the chart's signature and the notes' digest run only
+when a tag is pushed, and none has been; `cosign verify` of the published
+chart is documented, not exercised; the runbook's Ingress and cert-manager
+values were rendered, not installed; the chart `version` stays `1.1.0` until
+`P10-1.2`.
+
 ## The front MTA in the chart (`P10-HELM-MTA`) — bounded local acceptance verified
 
 `mta.enabled` with `mta.hostname` puts the Postfix of `deploy/postfix` into

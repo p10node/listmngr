@@ -192,6 +192,7 @@ jobs:
           install_only: true
       - run: scripts/test-helm.sh
       - run: scripts/test-helm.sh --mta --image listmngr:helm-test
+      - run: scripts/test-helm.sh --oci --sqlite --image listmngr:helm-test
 
   container:
     runs-on: ubuntu-24.04

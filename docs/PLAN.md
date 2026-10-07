@@ -1277,7 +1277,7 @@ row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong 
   book Install + Connect the mail system (mục Kubernetes: DNS/MX/SPF/DKIM
   trỏ về `LoadBalancer`, `secretFiles` cho khoá DKIM), `deploy/README.md`,
   ARCHITECTURE, SECURITY (ngoại lệ hardening của sidecar), CHANGELOG.
-- [ ] **P10-HELM-PUBLISH** (S): cài từ registry. `release.yml` job `chart`:
+- [x] ~~**P10-HELM-PUBLISH**~~ (xong) (S): cài từ registry. `release.yml` job `chart`:
   `helm registry login ghcr.io` bằng `GITHUB_TOKEN` (`packages: write`),
   `helm push dist/listmngr-<v>.tgz oci://ghcr.io/p10node/charts` →
   `cosign sign --yes ghcr.io/p10node/charts/listmngr@<digest>` (digest từ

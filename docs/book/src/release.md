@@ -15,19 +15,24 @@ pinned by commit:
 - **Image**: `deploy/Dockerfile` built for `linux/amd64` and
   `linux/arm64`, pushed to GHCR as `<version>` and `<major>.<minor>`,
   signed keyless with cosign by digest.
-- **Chart**: `deploy/helm/listmngr`, linted, rendered and packaged
-  with the release.
+- **Chart**: `deploy/helm/listmngr`, linted strictly, rendered and
+  packaged with the release, pushed to
+  `oci://ghcr.io/p10node/charts/listmngr` as `<version>` and signed
+  keyless with cosign by digest; the chart's digest in the release notes.
 - **SBOM**: CycloneDX JSON of the binary's locked dependency graph
   (`cargo cyclonedx`).
 - **Checksums**: one `SHA256SUMS` over everything above, signed keyless
-  with `cosign sign-blob` (`SHA256SUMS.sigstore.json`); the image
-  digest in the release notes.
+  with `cosign sign-blob` (`SHA256SUMS.sigstore.json`); the digests of
+  the images and the chart in the release notes.
 
 ```sh
 cosign verify-blob --bundle SHA256SUMS.sigstore.json \
   --certificate-identity-regexp 'github.com/p10node/listmngr' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
+cosign verify ghcr.io/p10node/charts/listmngr:<version> \
+  --certificate-identity-regexp 'github.com/p10node/listmngr' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 Until the first tag, build from source as the [Install](install.md)
