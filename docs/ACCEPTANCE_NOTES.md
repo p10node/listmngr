@@ -341,7 +341,10 @@ in-memory session with no I/O:
 | `mbox_read`       | the mbox reader and the importer's per-message preparation                                                          |
 
 Each has a seed corpus in `fuzz/corpus/<target>/` from the fixtures in the
-tree. The crate is its own workspace on a pinned nightly
+tree (`verp`'s are two hand-written inputs; git carries no empty
+directory, and libFuzzer exits on a seed directory that is not there, so
+the script passes one only when it exists). The crate is its own
+workspace on a pinned nightly
 (`fuzz/rust-toolchain.toml`), excluded from the root so the stable
 gates never see it. `scripts/fuzz.sh [seconds]` runs every target for
 that long (sixty seconds by default; `scripts/fuzz.sh 86400` is the

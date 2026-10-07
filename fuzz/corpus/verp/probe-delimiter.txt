@@ -1,0 +1,5 @@
+{bounces}-{local}-{domain}
+-
+discuss@example.invalid
+probe
+discuss-bounces-probe

@@ -1,0 +1,5 @@
+{bounces}+{local}={domain}
++
+announce@lists.example.invalid
+user@example.invalid
+announce-bounces+user=example.invalid
