@@ -1,4 +1,4 @@
-listmngr {{ default .Chart.AppVersion .Values.image.tag }} is deployed as {{ include "listmngr.fullname" . }}.
+listmngr {{ default .Chart.AppVersion .Values.image.tag }} is deployed as {{ include "listmngr.fullname" . }}{{ if .Values.postgresql.enabled }} with PostgreSQL {{ .Values.postgresql.image.tag }} as {{ include "listmngr.postgresqlName" . }} (its password was read at first start; keep it, or rotate it in SQL){{ end }}.
 
 The web interface answers on the Service port {{ .Values.service.port }} (`/healthz`, `/readyz`, `/web`).
 Create the first server owner from inside the pod:

@@ -59,15 +59,33 @@ is `scratch` — no shell, no `PATH` — so `kubectl exec` names the binary as
 `/listmngr` (a bare `listmngr` fails with "executable file not found in
 $PATH"; the chart's notes said that until the harness ran).
 
-The database is not in the chart yet (`P10-HELM-DB` in `docs/PLAN.md`): point
-`secrets.LISTMNGR__DATABASE__URL` at PostgreSQL, or at SQLite on the volume
-for a trial. The mail role needs an MTA that reaches the LMTP Service
-(`P10-HELM-MTA`).
+PostgreSQL is in the chart (`postgresql.enabled`, the default): a one-replica
+StatefulSet from the image and digest Compose and CI use
+(`postgres:17-alpine@sha256:18cfe3ef…`), a headless Service, its own volume
+claim, `pg_isready` probes, UID/GID 70 with a read-only root and no
+capabilities; the application's `LISTMNGR__DATABASE__URL` is assembled by the
+chart from `postgresql.auth` and the Service name, and a `wait-db` init
+container holds `migrate` until the server answers. `postgresql.auth.password`
+is required — `helm install` fails early without it, like Compose's
+`POSTGRES_PASSWORD:?` — or `postgresql.auth.existingSecret` names a Secret with
+a `password` key. The password goes into the URL unescaped, so it is
+letters, digits and `._~-` only (the schema refuses anything else); PostgreSQL
+reads it at its first start, so a later `helm upgrade` with another value
+changes the application's URL but not the server — rotate it in SQL first.
+Changing a value under `secrets` or the database password replaces the
+application pod (`checksum/secrets`). With `postgresql.enabled=false`,
+`secrets.LISTMNGR__DATABASE__URL` (or an `existingSecret` carrying it) is
+required: PostgreSQL elsewhere, or SQLite on the volume for a trial.
+`networkPolicy.enabled` adds two NetworkPolicies: PostgreSQL accepts 5432 from
+the application pod only; the application accepts its web port from
+`networkPolicy.webFrom` and reaches DNS, PostgreSQL and `networkPolicy.extraEgress`.
+The mail role still needs an MTA that reaches the LMTP Service
+(`P10-HELM-MTA` in `docs/PLAN.md`).
 
 ```sh
 helm lint --strict deploy/helm/listmngr
 helm install lists deploy/helm/listmngr --wait \
-  --set secrets.LISTMNGR__DATABASE__URL='postgres://listmngr:…@postgresql:5432/listmngr' \
+  --set postgresql.auth.password="$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)" \
   --set-file 'secretFiles.dkim-example\.com\.pem=dkim.pem'
 helm test lists --logs
 kubectl exec -i deploy/lists-listmngr -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml \
@@ -76,15 +94,18 @@ kubectl exec -i deploy/lists-listmngr -c listmngr -- /listmngr --config /etc/lis
 
 `scripts/test-helm.sh` installs the chart on a disposable kind cluster from
 an image built here and exercises it as an operator would: install with
-`--wait`, `helm test`, the in-image `listmngr status` probe, the first server
-owner through `kubectl exec`, `/healthz`, `/readyz` and `/web/login` through a
-port-forward, a configuration change through `helm upgrade` that replaces the
-pod (`checksum/config`) while the data on the volume stays, then uninstall.
-CI's `helm` job runs it on every push. It needs Docker, kind, kubectl and
-helm; `--keep` leaves the cluster for inspection and `--image NAME:TAG` skips
-the build. This is a kind cluster with SQLite on a local-path volume, not a
-production cluster: Ingress, TLS, the storage class and mail delivery remain
-the operator's acceptance.
+`--wait` and the chart's PostgreSQL under a password made on the spot
+(`--sqlite` installs with `postgresql.enabled=false` and SQLite on the volume
+instead), `pg_isready` in the database pod, `helm test`, the in-image
+`listmngr status` probe, the first server owner through `kubectl exec`,
+`/healthz`, `/readyz` and `/web/login` through a port-forward, a configuration
+change through `helm upgrade` that replaces the application pod
+(`checksum/config`) while the account stays in PostgreSQL (`select count(*)
+from users` is still 1), then uninstall. CI's `helm` job runs it on every
+push. It needs Docker, kind, kubectl and helm; `--keep` leaves the cluster for
+inspection and `--image NAME:TAG` skips the build. This is one kind node with
+local-path volumes, not a production cluster: Ingress, TLS, the storage class
+and mail delivery remain the operator's acceptance.
 
 ## REQUIRED outbound STARTTLS configuration
 

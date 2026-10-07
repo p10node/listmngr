@@ -1,3 +1,4 @@
+{{- include "listmngr.databaseCheck" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,6 +18,7 @@ spec:
         {{- include "listmngr.selectorLabels" . | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -25,8 +27,18 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if or .Values.migrate.enabled (include "listmngr.hasSecretFiles" .) }}
+      {{- if or .Values.migrate.enabled (include "listmngr.hasSecretFiles" .) .Values.postgresql.enabled }}
       initContainers:
+        {{- if .Values.postgresql.enabled }}
+        - name: wait-db
+          image: {{ include "listmngr.postgresqlImage" . }}
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          command: ["sh", "-c"]
+          args:
+            - i=0; until pg_isready -h {{ include "listmngr.postgresqlName" . }} -p 5432 -U {{ .Values.postgresql.auth.username }} -q; do i=$((i + 1)); [ "$i" -lt 60 ] || exit 1; sleep 2; done
+          securityContext:
+            {{- toYaml .Values.postgresql.securityContext | nindent 12 }}
+        {{- end }}
         {{- if include "listmngr.hasSecretFiles" . }}
         - name: secret-files
           image: {{ .Values.secretFilesImage }}
@@ -50,6 +62,10 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ include "listmngr.secretName" . }}
+          {{- with (include "listmngr.databaseEnv" . | trim) }}
+          env:
+            {{- . | nindent 12 }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
@@ -79,9 +95,14 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ include "listmngr.secretName" . }}
-          {{- with .Values.env }}
+          {{- if or .Values.postgresql.enabled .Values.env }}
           env:
+            {{- with (include "listmngr.databaseEnv" . | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           livenessProbe:
             httpGet:

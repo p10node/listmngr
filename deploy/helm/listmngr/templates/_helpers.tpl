@@ -21,6 +21,13 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "listmngr.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "listmngr.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: listmngr
+{{- end -}}
+
+{{- define "listmngr.postgresqlSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "listmngr.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: postgresql
 {{- end -}}
 
 {{- define "listmngr.image" -}}
@@ -49,4 +56,45 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else -}}
 {{- default "default" .Values.serviceAccount.name -}}
 {{- end -}}
+{{- end -}}
+
+{{- define "listmngr.postgresqlName" -}}
+{{- printf "%s-postgresql" (include "listmngr.fullname" .) -}}
+{{- end -}}
+
+{{- define "listmngr.postgresqlSecretName" -}}
+{{- default (include "listmngr.postgresqlName" .) .Values.postgresql.auth.existingSecret -}}
+{{- end -}}
+
+{{- define "listmngr.postgresqlImage" -}}
+{{- with .Values.postgresql.image -}}
+{{- if .digest -}}{{ .repository }}:{{ .tag }}@{{ .digest }}{{- else -}}{{ .repository }}:{{ .tag }}{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Where the database is: refuse an install that would have none. */}}
+{{- define "listmngr.databaseCheck" -}}
+{{- if .Values.postgresql.enabled -}}
+{{- if hasKey .Values.secrets "LISTMNGR__DATABASE__URL" -}}
+{{- fail "postgresql.enabled assembles LISTMNGR__DATABASE__URL; do not set secrets.LISTMNGR__DATABASE__URL as well" -}}
+{{- end -}}
+{{- if and (not .Values.postgresql.auth.password) (not .Values.postgresql.auth.existingSecret) -}}
+{{- fail "postgresql.auth.password is required when postgresql.enabled (or postgresql.auth.existingSecret with a `password` key)" -}}
+{{- end -}}
+{{- else if and (not (hasKey .Values.secrets "LISTMNGR__DATABASE__URL")) (not .Values.existingSecret) -}}
+{{- fail "no database: set postgresql.enabled, or secrets.LISTMNGR__DATABASE__URL (or an existingSecret carrying it)" -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The database environment of the migrate and serve containers. */}}
+{{- define "listmngr.databaseEnv" -}}
+{{- if .Values.postgresql.enabled }}
+- name: POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "listmngr.postgresqlSecretName" . }}
+      key: password
+- name: LISTMNGR__DATABASE__URL
+  value: postgres://{{ .Values.postgresql.auth.username }}:$(POSTGRES_PASSWORD)@{{ include "listmngr.postgresqlName" . }}:5432/{{ .Values.postgresql.auth.database }}
+{{- end }}
 {{- end -}}

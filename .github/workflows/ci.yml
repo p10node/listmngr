@@ -180,11 +180,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
-      - run: helm lint --strict deploy/helm/listmngr
-      - run: helm template listmngr deploy/helm/listmngr > /dev/null
-      - run: helm template listmngr deploy/helm/listmngr --set 'secretFiles.dkim\.pem=KEY' --set ingress.enabled=true > /dev/null
-      - run: helm template listmngr deploy/helm/listmngr --set existingSecret=lists-env --set existingFilesSecret=lists-files > /dev/null
-      - run: helm template listmngr deploy/helm/listmngr --set persistence.enabled=false --set serviceAccount.create=false > /dev/null
+      - run: helm lint --strict deploy/helm/listmngr --set postgresql.auth.password=lint-only
+      - run: helm template listmngr deploy/helm/listmngr --set postgresql.auth.password=lint-only > /dev/null
+      - run: helm template listmngr deploy/helm/listmngr --set postgresql.auth.password=lint-only --set 'secretFiles.dkim\.pem=KEY' --set ingress.enabled=true > /dev/null
+      - run: helm template listmngr deploy/helm/listmngr --set postgresql.auth.password=lint-only --set existingSecret=lists-env --set existingFilesSecret=lists-files > /dev/null
+      - run: helm template listmngr deploy/helm/listmngr --set postgresql.auth.password=lint-only --set networkPolicy.enabled=true > /dev/null
+      - run: helm template listmngr deploy/helm/listmngr --set postgresql.enabled=false --set-string 'secrets.LISTMNGR__DATABASE__URL=sqlite:///var/lib/listmngr/listmngr.db?mode=rwc' --set persistence.enabled=false --set serviceAccount.create=false > /dev/null
       - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           version: v0.33.0

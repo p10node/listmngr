@@ -1,5 +1,33 @@
 # Architecture
 
+## PostgreSQL in the chart — bounded local acceptance verified
+
+`deploy/helm/listmngr/templates/postgresql.yaml` renders, under
+`postgresql.enabled` (the default), a Secret with the `password` (unless
+`postgresql.auth.existingSecret`), a headless Service and a one-replica
+StatefulSet named `<release>-listmngr-postgresql` from the image and digest
+Compose and CI use (`postgres:17-alpine@sha256:18cfe3ef…`), with
+`PGDATA=/var/lib/postgresql/data/pgdata` (a subdirectory the server owns on
+the claim), `pg_isready` readiness and liveness, UID/GID 70, a read-only
+root with in-memory `/var/run/postgresql` and a bounded `/tmp`, no
+capabilities, the runtime seccomp profile, the release's ServiceAccount
+and no API token. The application's database environment is one helper,
+`listmngr.databaseEnv`: `POSTGRES_PASSWORD` from the Secret and
+`LISTMNGR__DATABASE__URL` as `postgres://<user>:$(POSTGRES_PASSWORD)@<service>:5432/<db>`,
+expanded by the kubelet — hence the schema's rule that the password is
+URL-unreserved characters only. `listmngr.databaseCheck` fails the render
+when there is no database at all (`postgresql.enabled=false` without
+`secrets.LISTMNGR__DATABASE__URL` or an `existingSecret`), when the password
+is missing, or when the chart would assemble the URL and `secrets` also
+carries one. A `wait-db` init container (the PostgreSQL image, `pg_isready`
+against the Service, up to 120 s) runs before `migrate`; the application
+pod carries `checksum/secrets` beside `checksum/config`, so a changed
+secret replaces it. `networkPolicy.enabled` renders two policies keyed on
+`app.kubernetes.io/component` (`listmngr`, `postgresql`): the database
+accepts 5432 from the application pod only; the application accepts its
+web (and LMTP) port from `webFrom`, and reaches DNS, the database and
+`extraEgress`. `values.yaml` no longer ships a placeholder database URL.
+
 ## Helm as a real install — bounded local acceptance verified
 
 The chart `deploy/helm/listmngr` (from the release work) now carries what

@@ -7,11 +7,13 @@
 # configuration change through `helm upgrade` (the pod is replaced because
 # `checksum/config` changed; the account on the volume survives), then
 # `helm uninstall`. The cluster is deleted on exit unless --keep is given.
-# Needs docker, kind, kubectl and helm; the only pull is the pinned kind node
-# image. SQLite on the cluster's default storage class stands in for the
-# database until P10-HELM-DB.
+# Needs docker, kind, kubectl and helm. The chart's PostgreSQL (a StatefulSet
+# from `postgres:17-alpine@sha256:…`, pulled by the node: a multi-architecture
+# digest cannot be `kind load`ed from one platform's docker image) is the
+# database, with a password made here; --sqlite installs with
+# `postgresql.enabled=false` and SQLite on the volume instead.
 #
-#   scripts/test-helm.sh [--keep] [--image NAME:TAG]    (--image skips the build)
+#   scripts/test-helm.sh [--keep] [--sqlite] [--image NAME:TAG]    (--image skips the build)
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -24,12 +26,14 @@ chart=deploy/helm/listmngr
 release=t
 deploy=$release-listmngr
 keep=0
+sqlite=0
 image=
 while [ $# -gt 0 ]; do
   case "$1" in
     --keep) keep=1 ;;
+    --sqlite) sqlite=1 ;;
     --image) shift; image=${1:?--image needs NAME:TAG} ;;
-    *) printf 'usage: %s [--keep] [--image NAME:TAG]\n' "$0" >&2; exit 2 ;;
+    *) printf 'usage: %s [--keep] [--sqlite] [--image NAME:TAG]\n' "$0" >&2; exit 2 ;;
   esac
   shift
 done
@@ -81,13 +85,24 @@ step "kind load docker-image $image"
 kind load docker-image "$image" --name "$cluster"
 
 step "helm install $release --wait"
+if [ "$sqlite" -eq 1 ]; then
+  set -- --set postgresql.enabled=false \
+    --set-string 'secrets.LISTMNGR__DATABASE__URL=sqlite:///var/lib/listmngr/listmngr.db?mode=rwc'
+else
+  # URL-unreserved characters only: the chart writes it into the URL as is.
+  password=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)
+  set -- --set "postgresql.auth.password=$password"
+fi
 t0=$(date +%s)
 h install "$release" "$chart" --wait --timeout 5m \
-  --set "image.repository=$repository" --set "image.tag=$tag" --set image.pullPolicy=Never \
-  --set-string 'secrets.LISTMNGR__DATABASE__URL=sqlite:///var/lib/listmngr/listmngr.db?mode=rwc'
+  --set "image.repository=$repository" --set "image.tag=$tag" --set image.pullPolicy=Never "$@"
 printf 'installed and ready in %ss\n' "$(( $(date +%s) - t0 ))"
-k get pods,pvc,svc,sa -l "app.kubernetes.io/instance=$release"
-pod_before=$(k get pod -l "app.kubernetes.io/instance=$release" -o jsonpath='{.items[0].metadata.name}')
+k get pods,pvc,svc,sa,statefulset -l "app.kubernetes.io/instance=$release"
+if [ "$sqlite" -eq 0 ]; then
+  k exec "statefulset/$deploy-postgresql" -- pg_isready -U listmngr -d listmngr
+fi
+app="app.kubernetes.io/instance=$release,app.kubernetes.io/component=listmngr"
+pod_before=$(k get pod -l "$app" -o jsonpath='{.items[0].metadata.name}')
 checksum_before=$(k get deploy "$deploy" -o jsonpath="{.spec.template.metadata.annotations['checksum/config']}")
 
 step "helm test $release"
@@ -129,7 +144,7 @@ sed -i.bak 's/^name = .*/name = "Example Lists, upgraded"/' "$work/config.toml"
 t0=$(date +%s)
 h upgrade "$release" "$chart" --reuse-values --set-file "config=$work/config.toml" --wait --timeout 5m
 printf 'upgraded and ready in %ss\n' "$(( $(date +%s) - t0 ))"
-pod_after=$(k get pod -l "app.kubernetes.io/instance=$release" -o jsonpath='{.items[0].metadata.name}')
+pod_after=$(k get pod -l "$app" -o jsonpath='{.items[0].metadata.name}')
 checksum_after=$(k get deploy "$deploy" -o jsonpath="{.spec.template.metadata.annotations['checksum/config']}")
 [ "$checksum_before" != "$checksum_after" ] || fail "checksum/config did not change"
 [ "$pod_before" != "$pod_after" ] || fail "the pod was not replaced"
@@ -137,7 +152,13 @@ printf 'pod %s -> %s\n' "$pod_before" "$pod_after"
 k get configmap "$deploy" -o jsonpath='{.data.listmngr\.toml}' | grep -q 'Example Lists, upgraded' || fail "the ConfigMap did not change"
 k exec "deploy/$deploy" -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml user export "$user_id" | grep -q 'admin@example.com' \
   || fail "the account did not survive the upgrade"
-printf 'account %s survived on the volume\n' "$user_id"
+if [ "$sqlite" -eq 0 ]; then
+  rows=$(k exec "statefulset/$deploy-postgresql" -- psql -U listmngr -d listmngr -Atc 'select count(*) from users')
+  [ "$rows" = 1 ] || fail "PostgreSQL holds $rows accounts, expected 1"
+  printf 'account %s survived in PostgreSQL (%s row)\n' "$user_id" "$rows"
+else
+  printf 'account %s survived on the volume\n' "$user_id"
+fi
 
 step "helm uninstall $release"
 h uninstall "$release" --wait

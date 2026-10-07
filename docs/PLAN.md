@@ -1207,7 +1207,7 @@ row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong 
   `deploy/README.md` thêm mục "Helm" (lệnh harness + giới hạn), ACCEPTANCE_NOTES,
   ARCHITECTURE (mục deploy), CHANGELOG. Số liệu ghi: thời gian `--wait`, số
   pod/PVC, output `helm test`.
-- [ ] **P10-HELM-DB** (M): PostgreSQL trong chart. `postgresql.enabled = true`
+- [x] ~~**P10-HELM-DB**~~ (xong) (M): PostgreSQL trong chart. `postgresql.enabled = true`
   (mặc định): StatefulSet `<fullname>-postgresql` một replica từ
   `postgres:17-alpine@sha256:18cfe3ef…` (đúng digest Compose và CI), Service
   headless, `volumeClaimTemplates` (`postgresql.persistence.size` mặc định
