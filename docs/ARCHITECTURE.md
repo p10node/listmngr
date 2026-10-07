@@ -1,5 +1,15 @@
 # Architecture
 
+## 1.2.0 — bounded local acceptance verified
+
+The version is `[workspace.package] version` and the `version` beside
+every `path` dependency, as before; `scripts/tests/test_version.py` holds
+`1.2.0` and checks every manifest, the lock, the chart and the changelog,
+and `scripts/tests/test_helm.py` now reads the chart's version from
+`Chart.yaml` rather than carrying it. Nothing else in the architecture
+moved for the release: Phase 10's chart is described in the four sections
+below, and the schema is unchanged since `1.1.0`.
+
 ## The chart on a registry — bounded local acceptance verified
 
 `release.yml`'s `chart` job, after `helm lint --strict`, `helm template`

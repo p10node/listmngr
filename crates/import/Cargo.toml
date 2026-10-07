@@ -12,10 +12,10 @@ delivery-phase = 6
 workspace = true
 
 [dependencies]
-listmngr-core = { path = "../core", version = "1.1.0" }
-listmngr-db = { path = "../db", version = "1.1.0" }
-listmngr-i18n = { path = "../i18n", version = "1.1.0" }
-listmngr-mail = { path = "../mail", version = "1.1.0" }
+listmngr-core = { path = "../core", version = "1.2.0" }
+listmngr-db = { path = "../db", version = "1.2.0" }
+listmngr-i18n = { path = "../i18n", version = "1.2.0" }
+listmngr-mail = { path = "../mail", version = "1.2.0" }
 chrono.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls-webpki-roots"] }

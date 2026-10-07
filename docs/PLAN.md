@@ -5,6 +5,12 @@
 
 ## Trạng thái triển khai (2026-09-14) — thay cho các checkpoint 2026-09-06/07
 
+**Cập nhật 2026-10-08 (`P10-1.2`):** Phase 9–10 đóng; `1.2.0` là bản phát hành thứ ba
+(chart Helm cài thật trên kind trong CI, PostgreSQL + Postfix sidecar trong chart,
+publish OCI lên GHCR); tag `v1.2.0` tạo local, push **một mình** (GitHub bỏ qua event
+khi push >3 ref cùng lúc — lý do `v1.0.0`/`v1.1.0` chưa chạy release). Còn lại:
+backlog cuối Phase 8.
+
 **Cập nhật 2026-10-05 (`P8-LEDGER-RECONCILE`, `P8-1.1`):** Phase 0–8 đã đóng theo
 ledger; `1.0.0` là bản phát hành đầu tiên (2026-10-04) và `1.1.0` bản thứ hai
 (2026-10-05), cả hai tag tạo local, push là quyết định của người dùng. Việc còn
@@ -1294,7 +1300,7 @@ row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong 
   needle `helm push`/`oci://`/`cosign sign` cho chart; `test_book.py` link.
   Giới hạn ghi rõ: push OCI và cosign chart chỉ chạy khi có tag được push —
   cùng trạng thái với phần còn lại của `release.yml`.
-- [ ] **P10-1.2** (S, quyết định của người dùng): bump `1.2.0` như `P8-1.1`
+- [x] ~~**P10-1.2**~~ (xong) (S, quyết định của người dùng): bump `1.2.0` như `P8-1.1`
   (workspace, path deps, `Chart.yaml` `version`/`appVersion`, fixture
   `system-versions.json`, `fuzz/Cargo.lock`, `scripts/tests/test_version.py`),
   `CHANGELOG.md` `## [1.2.0] - <ngày>`, bảng phase ledger đóng Phase 10, tag
