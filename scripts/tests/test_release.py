@@ -59,10 +59,11 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("name: listmngr", (CHART / "Chart.yaml").read_text(encoding="utf-8"))
         if shutil.which("helm") is None:
             self.skipTest("helm is not installed here; CI's helm job lints")
-        lint = subprocess.run(["helm", "lint", str(CHART)], capture_output=True, text=True)
+        password = ["--set", "postgresql.auth.password=lint-only"]  # required since P10-HELM-DB
+        lint = subprocess.run(["helm", "lint", str(CHART), *password], capture_output=True, text=True)
         self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
         for extra in ([], ["--set", "secretFiles.dkim\\.pem=KEY", "--set", "ingress.enabled=true"]):
-            rendered = subprocess.run(["helm", "template", "t", str(CHART), *extra], capture_output=True, text=True)
+            rendered = subprocess.run(["helm", "template", "t", str(CHART), *password, *extra], capture_output=True, text=True)
             self.assertEqual(rendered.returncode, 0, rendered.stdout + rendered.stderr)
 
     def test_ci_lints_the_chart_on_every_push(self):

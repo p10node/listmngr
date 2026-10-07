@@ -63,6 +63,16 @@ one replica and `Recreate`, so a rollout is the sequence above; `helm
 rollback` alone does not roll the schema back — restore a backup as
 above. Keep the database's own backups beside `listmngr backup`.
 
+The chart's own PostgreSQL (`postgresql.enabled`) is pinned to one image
+digest of major version 17; a chart release never changes that major on
+its own, because PostgreSQL's data directory is tied to it. Moving to a
+later major is an operator's step: `pg_dump` from the running
+StatefulSet, change `postgresql.image`, delete the StatefulSet's volume
+claim, `helm upgrade`, restore the dump, then `listmngr doctor`. The
+database password is read at the server's first start; a changed
+`postgresql.auth.password` changes the application's URL only, so
+`ALTER ROLE … PASSWORD` first, then upgrade.
+
 ## The master key and restores
 
 A backup carries sealed TOTP secrets as they are. Restore it on a node

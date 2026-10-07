@@ -82,6 +82,16 @@ What they say for sizing:
 
 ## Keeping the data
 
+On Kubernetes with the chart's PostgreSQL, the two backups are
+`kubectl exec deploy/<release>-listmngr -c listmngr -- /listmngr --config
+/etc/listmngr/listmngr.toml backup /var/lib/listmngr/backup/<date>` (on
+the application's volume; copy it out with `kubectl cp`) and `kubectl exec
+statefulset/<release>-listmngr-postgresql -- pg_dump -U listmngr listmngr >
+<date>.sql`. `helm uninstall` removes the application's volume claim with
+the release; the StatefulSet's claim (`data-<release>-listmngr-postgresql-0`)
+stays until deleted by hand, so a reinstall under the same release name
+finds the database again.
+
 - `listmngr backup <dir>` and `listmngr restore <dir>` move the whole
   database, message bytes included, between any two backends of the
   same version.

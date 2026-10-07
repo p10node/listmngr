@@ -107,14 +107,23 @@ The chart's `values.schema.json` refuses an unknown or mistyped value at
 install, the release gets a ServiceAccount of its own with no API token
 mounted, and `helm test <release>` asks the Service for `/healthz` and
 `/readyz`. The image is `scratch` — no shell, no `PATH` — so `kubectl
-exec` names the binary as `/listmngr`. The database is not in the chart
-yet: point `secrets.LISTMNGR__DATABASE__URL` at PostgreSQL. In the repository,
-`scripts/test-helm.sh` installs the chart on a disposable kind cluster
-and exercises it end to end; CI runs it on every push.
+exec` names the binary as `/listmngr`.
+
+PostgreSQL is in the chart by default (`postgresql.enabled`): a
+one-replica StatefulSet from the same pinned `postgres:17-alpine` image
+Compose uses, with its own volume; the chart assembles the application's
+`LISTMNGR__DATABASE__URL` from `postgresql.auth` and holds `migrate`
+until the server answers. `postgresql.auth.password` is required (or
+`postgresql.auth.existingSecret`, a Secret with a `password` key) and
+must be URL-safe — letters, digits and `._~-`; PostgreSQL reads it at
+its first start only. For a database elsewhere, set
+`postgresql.enabled=false` and `secrets.LISTMNGR__DATABASE__URL`. In the
+repository, `scripts/test-helm.sh` installs the chart on a disposable
+kind cluster and exercises it end to end; CI runs it on every push.
 
 ```sh
-helm install lists deploy/helm/listmngr \
-  --set secrets.LISTMNGR__DATABASE__URL='postgres://listmngr:…@postgresql:5432/listmngr' \
+helm install lists deploy/helm/listmngr --wait \
+  --set postgresql.auth.password="$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)" \
   --set-file 'secretFiles.dkim-example\.com\.pem=dkim.pem'
 kubectl exec -i deploy/lists-listmngr -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml \
   user create admin@example.com --display-name Admin --server-owner --password-stdin < password

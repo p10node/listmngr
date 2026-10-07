@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- PostgreSQL in the Helm chart (`P10-HELM-DB`): `postgresql.enabled` (the default) renders a one-replica StatefulSet from the pinned `postgres:17-alpine` digest Compose and CI use, with its own volume, `pg_isready` probes, UID 70, a read-only root and no capabilities; the chart assembles `LISTMNGR__DATABASE__URL` from `postgresql.auth` (the password is required, URL-safe, or comes from `postgresql.auth.existingSecret`) and holds `migrate` behind a `wait-db` init container; a changed secret replaces the application pod (`checksum/secrets`); `networkPolicy.enabled` fences the database to the application pod and the application to its web port, DNS and the database. Without PostgreSQL the chart now refuses to render with no database URL. The kind harness installs with PostgreSQL by default (`--sqlite` for the old path) and checks the account in `users` after the upgrade.
 - The Helm chart installs for real (`P10-HELM-TEST`): `values.schema.json` refuses an unknown or mistyped value, a ServiceAccount of its own with no API token mounted, a `helm test` hook that asks the Service for `/healthz` and `/readyz`, and `scripts/test-helm.sh`, which builds the image, installs the chart on a disposable kind cluster, runs `helm test`, creates the first server owner, checks the web endpoints, upgrades with a changed configuration and uninstalls; CI's `helm` job lints strictly, renders every documented variant and runs the harness on every push. `deploy/README.md` gains its Helm section.
 
 ### Fixed

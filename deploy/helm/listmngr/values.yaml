@@ -30,10 +30,56 @@ config: |
   [mta]
   enabled = false
 
+# PostgreSQL in the release: a one-replica StatefulSet from the image and
+# digest Compose and CI use, a headless Service, a volume claim, `pg_isready`
+# probes, UID/GID 70 (Alpine's postgres), a read-only root and no
+# capabilities. The application's `LISTMNGR__DATABASE__URL` is assembled from
+# `auth` and the Service name. The password is read by PostgreSQL at its
+# first start only (change it in SQL afterwards) and is written into the URL
+# unescaped, so it must be URL-safe: letters, digits and `._~-`. It is
+# required when `enabled` — `helm install` fails early without it, like
+# Compose's `POSTGRES_PASSWORD:?` — unless `auth.existingSecret` names a
+# Secret with a `password` key.
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: 17-alpine
+    digest: sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    pullPolicy: IfNotPresent
+  auth:
+    username: listmngr
+    password: ""
+    database: listmngr
+    existingSecret: ""
+  persistence:
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
 # Environment variables (`LISTMNGR__SECTION__KEY`) kept in a Secret and given
-# to the migrate and serve containers. The value below is a placeholder.
-secrets:
-  LISTMNGR__DATABASE__URL: "postgres://listmngr:change-me@postgresql:5432/listmngr"
+# to the migrate and serve containers. With `postgresql.enabled` the database
+# URL is assembled by the chart and must not be set here; without it,
+# `LISTMNGR__DATABASE__URL` is required (PostgreSQL elsewhere, or SQLite on the
+# volume for a trial: `sqlite:///var/lib/listmngr/listmngr.db?mode=rwc`).
+secrets: {}
 
 # An existing Secret with the same keys, instead of `secrets`.
 existingSecret: ""
@@ -113,6 +159,18 @@ serviceAccount:
 
 nameOverride: ""
 fullnameOverride: ""
+
+# NetworkPolicies (the CNI must enforce them): PostgreSQL accepts 5432 from
+# the application pod only; the application accepts its web port from
+# `webFrom` (NetworkPolicy peers, e.g. the ingress controller's namespace;
+# empty = from anywhere) and may reach DNS, PostgreSQL and `extraEgress`.
+networkPolicy:
+  enabled: false
+  webFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: ingress-nginx
+  extraEgress: []
 
 nodeSelector: {}
 tolerations: []

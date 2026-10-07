@@ -10,6 +10,41 @@ Until 2026-10-06 this file was the repository `README.md`. It moved here so the
 README could introduce the project; the text is unchanged apart from this
 note and the relative links, which now resolve from `docs/`.
 
+## PostgreSQL in the chart (`P10-HELM-DB`) — bounded local acceptance verified
+
+`helm install` now brings its own database: `postgresql.enabled` (the
+default) renders a one-replica StatefulSet from the `postgres:17-alpine`
+digest Compose and CI use, with its own volume claim, `pg_isready` probes,
+UID 70, a read-only root and no capabilities; the chart assembles the
+application's `LISTMNGR__DATABASE__URL` from `postgresql.auth` and the
+Service name, holds `migrate` behind a `wait-db` init container, and
+replaces the application pod when a secret changes. The password is
+required (or `postgresql.auth.existingSecret`), URL-safe by schema, and
+read by PostgreSQL at its first start only; with `postgresql.enabled=false`
+the chart refuses to render without a database URL. `networkPolicy.enabled`
+fences the database to the application pod and the application to its web
+port, DNS and the database. The harness's first run found the Deployment's
+selector matching the database pod (name + instance only), so the selectors
+now carry `app.kubernetes.io/component`. Harness, PostgreSQL path: 72 s on
+this laptop, install ready in 24 s, `helm test` `Succeeded`, the account
+still one row in `users` after the upgrade; SQLite path (`--sqlite`): 53 s.
+
+```sh
+python3 -m unittest discover -s scripts/tests                  # 22 tests
+helm template t deploy/helm/listmngr                           # refused: postgresql.auth.password is required
+helm template t deploy/helm/listmngr --set postgresql.enabled=false   # refused: no database
+scripts/test-helm.sh --image listmngr:helm-test                # helm harness: OK in 72s (PostgreSQL)
+scripts/test-helm.sh --image listmngr:helm-test --sqlite       # helm harness: OK in 53s
+```
+
+Limits: one kind node whose default CNI does not enforce NetworkPolicies
+(they render and pass the schema; their effect is unverified); no live
+`existingSecret`, major upgrade or restore; the database image is pulled
+from Docker Hub by the node; the Deployment selector changed, so a release
+from the chart as packaged at `1.1.0` must be uninstalled before this one
+(no release workflow has produced that package yet); the chart `version`
+stays `1.1.0` until `P10-1.2`.
+
 ## Helm as a real install (`P10-HELM-TEST`) — bounded local acceptance verified
 
 The chart from the release work had been linted and rendered, never
