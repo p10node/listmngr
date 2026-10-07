@@ -3,7 +3,10 @@ listmngr {{ default .Chart.AppVersion .Values.image.tag }} is deployed as {{ inc
 The web interface answers on the Service port {{ .Values.service.port }} (`/healthz`, `/readyz`, `/web`).
 Create the first server owner from inside the pod:
 
-  kubectl exec deploy/{{ include "listmngr.fullname" . }} -- listmngr --config /etc/listmngr/listmngr.toml \
+  kubectl exec -i deploy/{{ include "listmngr.fullname" . }} -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml \
       user create admin@example.com --display-name Admin --server-owner --password-stdin < password
+
+(The image is `scratch`: no shell and no PATH, so the binary is named by its path, `/listmngr`.)
+Check the install: `helm test {{ .Release.Name }}`.
 
 Mail needs `[mta] enabled = true` in `config`, `service.lmtp.enabled`, and an MTA that delivers over LMTP to this Service.

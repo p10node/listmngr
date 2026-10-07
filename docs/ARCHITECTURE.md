@@ -1,5 +1,30 @@
 # Architecture
 
+## Helm as a real install — bounded local acceptance verified
+
+The chart `deploy/helm/listmngr` (from the release work) now carries what
+an install needs beyond rendering: `values.schema.json` describes every
+value and refuses an unknown key at any level, so a misspelled setting
+fails `helm install` instead of being ignored; a ServiceAccount of the
+release's own (`serviceAccount.create`, `automountServiceAccountToken:
+false` on the account and the pod — the process never talks to the
+Kubernetes API); and a `helm test` hook, `templates/tests/test-ready.yaml`,
+a pod from the pinned busybox that asks the Service for `/healthz` and
+`/readyz` under the same security contexts as the application. The
+Deployment, Service, ConfigMap, Secrets, PVC and Ingress are unchanged;
+`nameOverride`/`fullnameOverride` are declared values now.
+`scripts/test-helm.sh` is the install harness: it builds the image from
+`deploy/Dockerfile`, loads it into a disposable kind cluster (the node
+image pinned by digest), installs with `--wait` and SQLite on the
+cluster's default storage class, runs `helm test`, the in-image `listmngr
+status`, the first server owner through `kubectl exec`, the web endpoints
+through a port-forward, `helm upgrade` with a changed `config` (the
+`checksum/config` annotation replaces the pod; `user export` shows the
+account on the volume survived) and `helm uninstall`. CI's `helm` job
+(replacing `chart`) lints with `--strict`, renders four variants and runs
+the harness on every push; the database and the front MTA stay outside the
+chart until `P10-HELM-DB` and `P10-HELM-MTA`.
+
 ## 1.1.0 — bounded local acceptance verified
 
 The version is `[workspace.package] version` and the `version` beside

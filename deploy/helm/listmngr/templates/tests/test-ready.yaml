@@ -1,0 +1,32 @@
+# `helm test <release>`: a pod from the pinned busybox asks the Service for
+# `/healthz` and `/readyz`; a non-2xx answer or no answer within 5 s fails.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "listmngr.fullname" . }}-test-ready
+  labels:
+    {{- include "listmngr.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: ready
+      image: {{ .Values.secretFilesImage }}
+      command: ["sh", "-c"]
+      args:
+        - >-
+          wget --spider -T 5 "http://{{ include "listmngr.fullname" . }}:{{ .Values.service.port }}/healthz"
+          && wget --spider -T 5 "http://{{ include "listmngr.fullname" . }}:{{ .Values.service.port }}/readyz"
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 32Mi

@@ -1177,7 +1177,7 @@ Tách thành work package (kế hoạch 2026-10-07, một ID một nhánh, làm 
 tự này — harness trước để mỗi ID sau có vòng lặp kind thật; mỗi ID có ledger
 row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong CI/release):
 
-- [ ] **P10-HELM-TEST** (M): harness cài thật + nền chart. `scripts/test-helm.sh
+- [x] ~~**P10-HELM-TEST**~~ (xong) (M): harness cài thật + nền chart. `scripts/test-helm.sh
   [--mta]`: yêu cầu `kind`, `kubectl`, `helm`, `docker`; `kind create cluster
   --name listmngr-helm --image kindest/node:<tag>@sha256:<digest>` (pin như
   image khác); `docker build -f deploy/Dockerfile -t listmngr:helm-test .` rồi
@@ -1197,8 +1197,8 @@ row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong 
   (`serviceAccount.create`, `automountServiceAccountToken: false`);
   `podSecurityContext`/`securityContext` giữ nguyên; `Chart.yaml` thêm
   `keywords`, `maintainers` (lint INFO `icon` ghi là bỏ qua có chủ ý, không
-  có asset). CI: job `helm` mới dùng `helm/kind-action@99576bfa6ddf9a8e612d83b513da5a75875caced # v1.9.0`
-  (SHA tra `git ls-remote --tags` 2026-10-07) chạy `scripts/test-helm.sh`;
+  có asset). CI: job `helm` mới dùng `helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1`
+  (SHA tra `git ls-remote --tags` 2026-10-08, `install_only` + kind `v0.33.0`) chạy `scripts/test-helm.sh`;
   job `chart` cũ gộp vào (lint `--strict` + ma trận template: mặc định,
   `secretFiles`+`ingress`, `existingSecret`, `persistence.enabled=false`).
   Test: `scripts/tests/test_helm.py` (chart có hook test, schema, SA; script

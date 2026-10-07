@@ -42,3 +42,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "listmngr.hasSecretFiles" -}}
 {{- if or .Values.secretFiles .Values.existingFilesSecret -}}true{{- end -}}
 {{- end -}}
+
+{{- define "listmngr.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "listmngr.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}

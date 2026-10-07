@@ -10,6 +10,39 @@ Until 2026-10-06 this file was the repository `README.md`. It moved here so the
 README could introduce the project; the text is unchanged apart from this
 note and the relative links, which now resolve from `docs/`.
 
+## Helm as a real install (`P10-HELM-TEST`) — bounded local acceptance verified
+
+The chart from the release work had been linted and rendered, never
+installed. It now carries a `values.schema.json` that refuses an unknown or
+mistyped value at any level, a ServiceAccount of its own with no API token
+mounted, and a `helm test` hook that asks the Service for `/healthz` and
+`/readyz`; `scripts/test-helm.sh` installs it on a disposable kind cluster
+from an image built here and does what an operator does — `helm install
+--wait`, `helm test`, the in-image `listmngr status`, the first server owner
+through `kubectl exec`, the web endpoints through a port-forward, `helm
+upgrade` with a changed configuration (the pod is replaced and the account
+on the volume survives), `helm uninstall` — and CI's `helm` job (replacing
+`chart`) runs it on every push after `helm lint --strict` and four rendered
+variants. The first run found the chart's own notes wrong: the image is
+`scratch`, so `kubectl exec … -- listmngr` fails with "executable file not
+found in $PATH"; the notes, the book and `deploy/README.md` now say
+`/listmngr`. Harness, 60 s on this laptop: cluster Ready after 18 s, install
+ready in 6 s, `helm test` `Succeeded`, `/web/login` 200, upgrade ready in
+3 s; the image build itself took 22 min on a cold cache.
+
+```sh
+python3 -m unittest discover -s scripts/tests          # 20 tests, test_helm.py among them
+helm lint --strict deploy/helm/listmngr
+helm template t deploy/helm/listmngr --set replicas=2  # refused by the schema
+docker build -f deploy/Dockerfile -t listmngr:helm-test .
+scripts/test-helm.sh --image listmngr:helm-test        # helm harness: OK in 60s
+```
+
+Limits: one kind node with SQLite on a local-path volume — no PostgreSQL in
+the chart (`P10-HELM-DB`), no Ingress controller, no TLS, no mail
+(`P10-HELM-MTA`); the `helm` job exists only in CI until the branch is pushed;
+the chart `version` stays `1.1.0` until `P10-1.2`.
+
 ## The first account signs in (`P9-CLI-USER-VERIFIED`) — bounded local acceptance verified
 
 `listmngr user create` vouches for the address it is given: the account's

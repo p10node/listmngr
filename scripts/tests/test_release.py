@@ -30,7 +30,7 @@ class ReleaseTest(unittest.TestCase):
             "cargo deb", "cargo generate-rpm", "cargo cyclonedx",
             "platforms: linux/amd64,linux/arm64", "file: deploy/Dockerfile",
             "cosign sign --yes", "cosign sign-blob --yes", "SHA256SUMS",
-            "helm lint deploy/helm/listmngr", "helm package deploy/helm/listmngr",
+            "helm lint --strict deploy/helm/listmngr", "helm package deploy/helm/listmngr",
         ]:
             with self.subTest(needle=needle):
                 self.assertIn(needle, workflow)
@@ -58,7 +58,7 @@ class ReleaseTest(unittest.TestCase):
                 self.assertIn(needle, deployment)
         self.assertIn("name: listmngr", (CHART / "Chart.yaml").read_text(encoding="utf-8"))
         if shutil.which("helm") is None:
-            self.skipTest("helm is not installed here; CI's chart job lints")
+            self.skipTest("helm is not installed here; CI's helm job lints")
         lint = subprocess.run(["helm", "lint", str(CHART)], capture_output=True, text=True)
         self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
         for extra in ([], ["--set", "secretFiles.dkim\\.pem=KEY", "--set", "ingress.enabled=true"]):
@@ -67,7 +67,7 @@ class ReleaseTest(unittest.TestCase):
 
     def test_ci_lints_the_chart_on_every_push(self):
         workflow = read(".github/workflows/ci.yml")
-        self.assertIn("helm lint deploy/helm/listmngr", workflow)
+        self.assertIn("helm lint --strict deploy/helm/listmngr", workflow)
         self.assertIn("helm template", workflow)
 
     def test_the_upgrade_policy_is_written(self):

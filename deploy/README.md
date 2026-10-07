@@ -41,6 +41,51 @@ sudo systemctl enable --now listmngr.service
 
 The syscall filter uses systemd's `@system-service` allowlist. Verify it on the target Linux distribution; if a legitimate syscall is blocked, document the exact denial and narrowly amend the allowlist rather than removing hardening.
 
+## Helm
+
+[`helm/listmngr`](helm/listmngr) is the chart: one Deployment (one replica,
+`Recreate`; the mail role and the runners are one process over one database),
+its Service and a ServiceAccount of its own with no API token mounted, the
+configuration file as a value (`config`), plain-key secrets as environment
+variables in a Secret (`secrets`, or `existingSecret`), file-only secrets
+copied at start into an in-memory volume with mode `0400` (`secretFiles`, or
+`existingFilesSecret`), a PersistentVolumeClaim for the state directory, an
+optional Ingress, and a `helm test` hook that asks the Service for `/healthz`
+and `/readyz`. `values.schema.json` describes every value, so a misspelled or
+mistyped key fails `helm install` instead of being ignored. The pod runs as
+UID 1000 with a read-only root, no capabilities and the runtime seccomp
+profile; `migrate` runs in an init container before every start. The image
+is `scratch` — no shell, no `PATH` — so `kubectl exec` names the binary as
+`/listmngr` (a bare `listmngr` fails with "executable file not found in
+$PATH"; the chart's notes said that until the harness ran).
+
+The database is not in the chart yet (`P10-HELM-DB` in `docs/PLAN.md`): point
+`secrets.LISTMNGR__DATABASE__URL` at PostgreSQL, or at SQLite on the volume
+for a trial. The mail role needs an MTA that reaches the LMTP Service
+(`P10-HELM-MTA`).
+
+```sh
+helm lint --strict deploy/helm/listmngr
+helm install lists deploy/helm/listmngr --wait \
+  --set secrets.LISTMNGR__DATABASE__URL='postgres://listmngr:…@postgresql:5432/listmngr' \
+  --set-file 'secretFiles.dkim-example\.com\.pem=dkim.pem'
+helm test lists --logs
+kubectl exec -i deploy/lists-listmngr -c listmngr -- /listmngr --config /etc/listmngr/listmngr.toml \
+  user create admin@example.com --display-name Admin --server-owner --password-stdin < password
+```
+
+`scripts/test-helm.sh` installs the chart on a disposable kind cluster from
+an image built here and exercises it as an operator would: install with
+`--wait`, `helm test`, the in-image `listmngr status` probe, the first server
+owner through `kubectl exec`, `/healthz`, `/readyz` and `/web/login` through a
+port-forward, a configuration change through `helm upgrade` that replaces the
+pod (`checksum/config`) while the data on the volume stays, then uninstall.
+CI's `helm` job runs it on every push. It needs Docker, kind, kubectl and
+helm; `--keep` leaves the cluster for inspection and `--image NAME:TAG` skips
+the build. This is a kind cluster with SQLite on a local-path volume, not a
+production cluster: Ingress, TLS, the storage class and mail delivery remain
+the operator's acceptance.
+
 ## REQUIRED outbound STARTTLS configuration
 
 See [`starttls.example.toml`](starttls.example.toml) for a deliberately non-live

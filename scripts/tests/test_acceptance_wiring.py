@@ -17,6 +17,7 @@ class AcceptanceWiringTest(unittest.TestCase):
             "python3 scripts/test-mailmanclient.py",
             "scripts/test-postgres.sh",
             "systemd-analyze verify deploy/systemd/listmngr.service",
+            "scripts/test-helm.sh",
         ]:
             with self.subTest(command=command):
                 self.assertIn(command, workflow)
