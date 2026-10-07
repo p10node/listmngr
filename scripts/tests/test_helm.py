@@ -193,12 +193,14 @@ class HelmTest(unittest.TestCase):
             "helm upgrade", "checksum", "helm uninstall", "kind delete cluster",
             "--sqlite", "postgresql.auth.password", "pg_isready", "postgres:17-alpine@sha256:",
             "--mta", "deploy/postfix/Dockerfile", "mta.enabled=true", "postfix status", "RCPT TO", "550", "554",
+            "--oci", "helm package", "registry:3@sha256:", "helm push", "oci://127.0.0.1:", "--plain-http",
         ]:
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
         workflow = read(".github/workflows/ci.yml")
         self.assertIn("scripts/test-helm.sh", workflow)
         self.assertIn("scripts/test-helm.sh --mta", workflow)
+        self.assertIn("scripts/test-helm.sh --oci", workflow)
         self.assertIn("helm lint --strict deploy/helm/listmngr", workflow)
         self.assertRegex(workflow, r"uses: helm/kind-action@[0-9a-f]{40} # v\d", "kind-action pinned by commit")
 
@@ -207,6 +209,15 @@ class HelmTest(unittest.TestCase):
         self.assertIn("## Helm", readme)
         self.assertIn("scripts/test-helm.sh", readme)
         self.assertIn("helm test", readme)
+        self.assertIn("oci://ghcr.io/p10node/charts/listmngr", readme)
+
+    def test_the_chart_is_installed_from_the_registry_in_the_book(self):
+        install = read("docs/book/src/install.md")
+        for needle in ["oci://ghcr.io/p10node/charts/listmngr", "--version", "helm show values", "cosign verify", "helm upgrade"]:
+            with self.subTest(needle=needle):
+                self.assertIn(needle, install)
+        self.assertIn("oci://ghcr.io/p10node/charts/listmngr", read("README.md"))
+        self.assertIn("oci://ghcr.io/p10node/charts/listmngr", read("docs/book/src/release.md"))
 
 
 if __name__ == "__main__":

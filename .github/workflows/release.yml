@@ -157,14 +157,33 @@ jobs:
           cosign sign --yes "ghcr.io/${{ github.repository }}-postfix@${{ steps.push_postfix.outputs.digest }}"
 
   chart:
-    # The Helm chart, linted and rendered, packaged with the release.
+    # The Helm chart, linted strictly and rendered, packaged with the release,
+    # pushed to GHCR as an OCI artifact and signed keyless with cosign.
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
       - run: helm lint --strict deploy/helm/listmngr --set postgresql.auth.password=lint-only
       - run: helm template listmngr deploy/helm/listmngr --set postgresql.auth.password=lint-only --set image.tag=${GITHUB_REF_NAME#v} > /dev/null
       - run: mkdir -p dist && helm package deploy/helm/listmngr --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}" -d dist
+      - name: Push the chart to GHCR as an OCI artifact
+        id: push
+        run: |
+          set -eu
+          printf '%s' "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          helm push "dist/listmngr-${GITHUB_REF_NAME#v}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts" 2>&1 | tee push.log
+          digest=$(sed -n 's/^Digest: //p' push.log)
+          test -n "$digest"
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Sign the chart by digest (keyless, OIDC)
+        run: cosign sign --yes "ghcr.io/${{ github.repository_owner }}/charts/listmngr@${{ steps.push.outputs.digest }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: chart
@@ -194,6 +213,7 @@ jobs:
           cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
           printf 'Image: ghcr.io/%s@%s\n' "${{ github.repository }}" "${{ needs.image.outputs.digest }}" > IMAGE_DIGEST.txt
           printf 'Postfix image: ghcr.io/%s-postfix@%s\n' "${{ github.repository }}" "${{ needs.image.outputs.postfix_digest }}" >> IMAGE_DIGEST.txt
+          printf 'Chart: oci://ghcr.io/%s/charts/listmngr:%s@%s\n' "${{ github.repository_owner }}" "${GITHUB_REF_NAME#v}" "${{ needs.chart.outputs.digest }}" >> IMAGE_DIGEST.txt
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/*

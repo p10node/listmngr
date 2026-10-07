@@ -57,11 +57,14 @@ it.
 
 ## Containers and Helm
 
-The image tag is the version. `helm upgrade` with the new `image.tag`
-runs `migrate` in an init container before the new pod starts, with
-one replica and `Recreate`, so a rollout is the sequence above; `helm
-rollback` alone does not roll the schema back — restore a backup as
-above. Keep the database's own backups beside `listmngr backup`.
+The image tag is the version, and so is the chart's: `helm upgrade
+lists oci://ghcr.io/p10node/charts/listmngr --version <new> -f
+values.yaml` moves both together (a chart installed from a checkout
+deploys its `appVersion` unless `image.tag` says otherwise). The
+upgrade runs `migrate` in an init container before the new pod starts,
+with one replica and `Recreate`, so a rollout is the sequence above;
+`helm rollback` alone does not roll the schema back — restore a backup
+as above. Keep the database's own backups beside `listmngr backup`.
 
 The chart's own PostgreSQL (`postgresql.enabled`) is pinned to one image
 digest of major version 17; a chart release never changes that major on

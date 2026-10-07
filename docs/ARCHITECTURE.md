@@ -1,5 +1,25 @@
 # Architecture
 
+## The chart on a registry — bounded local acceptance verified
+
+`release.yml`'s `chart` job, after `helm lint --strict`, `helm template`
+and `helm package`, logs in to GHCR with the workflow's token (`helm
+registry login`, `packages: write`), pushes the `.tgz` to
+`oci://ghcr.io/<owner>/charts` (`helm push`; the chart is
+`ghcr.io/<owner>/charts/listmngr:<version>`), takes the digest from the
+push output and signs it keyless with cosign (`id-token: write`); the
+digest joins the images' in the release notes and the `.tgz` stays a
+release asset. The book's Install chapter is the runbook from that
+artifact: `helm show values`, `cosign verify`, a values file with the
+chart's PostgreSQL behind an existing Secret, the Postfix sidecar and a
+cert-manager Ingress, `helm install … --version`, `helm test`, the first
+owner, and the upgrade as backup → `helm upgrade --version` → `doctor`.
+`scripts/test-helm.sh --oci` is the local proof of the path a release
+takes: `helm package`, a disposable `registry:3` (pinned by digest) on a
+loopback port, `helm push --plain-http`, `helm show chart` from the
+registry, then `helm install` and `helm upgrade` from `oci://…` with
+`--version` instead of from the directory; CI runs it as a third pass.
+
 ## The front MTA in the chart — bounded local acceptance verified
 
 `mta.enabled` adds to the application pod the Postfix of

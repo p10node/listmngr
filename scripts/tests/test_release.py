@@ -31,6 +31,8 @@ class ReleaseTest(unittest.TestCase):
             "platforms: linux/amd64,linux/arm64", "file: deploy/Dockerfile",
             "file: deploy/postfix/Dockerfile", "ghcr.io/${{ github.repository }}-postfix",
             "cosign sign --yes", "cosign sign-blob --yes", "SHA256SUMS",
+            "helm registry login ghcr.io", "helm push", "oci://ghcr.io/${{ github.repository_owner }}/charts",
+            'cosign sign --yes "ghcr.io/${{ github.repository_owner }}/charts/listmngr@',
             "helm lint --strict deploy/helm/listmngr", "helm package deploy/helm/listmngr",
         ]:
             with self.subTest(needle=needle):

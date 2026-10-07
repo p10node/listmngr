@@ -18,9 +18,12 @@
 # a list through the CLI, the maps on the shared volume, then from a probe pod
 # outside `mynetworks` the RCPT matrix (list address 250, unknown 550, relay
 # 554) and one message to the list, which Postfix must hand to LMTP on
-# loopback (`status=sent`). Delivery to the internet is not attempted.
+# loopback (`status=sent`). Delivery to the internet is not attempted. --oci
+# packages the chart, pushes it to a disposable local OCI registry
+# (`registry:3`, pinned) and installs and upgrades from `oci://` — the way
+# a release is consumed — instead of from the directory.
 #
-#   scripts/test-helm.sh [--keep] [--sqlite] [--mta] [--image NAME:TAG] [--mta-image NAME:TAG]
+#   scripts/test-helm.sh [--keep] [--sqlite] [--mta] [--oci] [--image NAME:TAG] [--mta-image NAME:TAG]
 #   (--image / --mta-image skip the builds)
 set -eu
 
@@ -36,8 +39,11 @@ deploy=$release-listmngr
 keep=0
 sqlite=0
 mta=0
+oci=0
 image=
 mta_image=
+registry_image=registry:3@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
+registry_name=${KIND_CLUSTER:-listmngr-helm}-registry
 # The chart's own pinned busybox (`secretFilesImage`), already on the node for `helm test`.
 probe_image=busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
 while [ $# -gt 0 ]; do
@@ -45,9 +51,10 @@ while [ $# -gt 0 ]; do
     --keep) keep=1 ;;
     --sqlite) sqlite=1 ;;
     --mta) mta=1 ;;
+    --oci) oci=1 ;;
     --image) shift; image=${1:?--image needs NAME:TAG} ;;
     --mta-image) shift; mta_image=${1:?--mta-image needs NAME:TAG} ;;
-    *) printf 'usage: %s [--keep] [--sqlite] [--mta] [--image NAME:TAG] [--mta-image NAME:TAG]\n' "$0" >&2; exit 2 ;;
+    *) printf 'usage: %s [--keep] [--sqlite] [--mta] [--oci] [--image NAME:TAG] [--mta-image NAME:TAG]\n' "$0" >&2; exit 2 ;;
   esac
   shift
 done
@@ -72,6 +79,7 @@ cleanup() {
     k describe pod -l "app.kubernetes.io/instance=$release" 2>/dev/null | tail -40 || true
     k logs "deploy/$deploy" --all-containers --tail=40 2>/dev/null || true
   fi
+  docker rm -f "$registry_name" >/dev/null 2>&1 || true
   if [ "$keep" -eq 0 ]; then
     kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
   else
@@ -106,14 +114,37 @@ if [ "$mta" -eq 1 ]; then
   kind load docker-image "$mta_image" --name "$cluster"
 fi
 
+# Where the chart comes from: the directory, or a registry it was pushed to.
+chart_ref=$chart
+if [ "$oci" -eq 1 ]; then
+  step "helm package, push to a disposable OCI registry, show"
+  chart_version=$(sed -n 's/^version: //p' "$chart/Chart.yaml")
+  helm package "$chart" -d "$work" > /dev/null
+  docker rm -f "$registry_name" >/dev/null 2>&1 || true
+  docker run -d --name "$registry_name" -p 127.0.0.1:0:5000 "$registry_image" > /dev/null
+  port=$(docker port "$registry_name" 5000/tcp | sed -n 's/.*://p' | head -1)
+  i=0
+  until curl -fsS "http://127.0.0.1:$port/v2/" > /dev/null 2>&1; do
+    i=$((i + 1)); [ "$i" -lt 30 ] || fail "the registry never answered on 127.0.0.1:$port"
+    sleep 1
+  done
+  helm push "$work/listmngr-$chart_version.tgz" "oci://127.0.0.1:$port/charts" --plain-http
+  chart_ref="oci://127.0.0.1:$port/charts/listmngr"
+  helm show chart "$chart_ref" --version "$chart_version" --plain-http | grep -E '^(name|version|appVersion):'
+  set -- --version "$chart_version" --plain-http
+else
+  set --
+fi
+chart_flags=$*
+
 step "helm install $release --wait"
 if [ "$sqlite" -eq 1 ]; then
-  set -- --set postgresql.enabled=false \
+  set -- "$@" --set postgresql.enabled=false \
     --set-string 'secrets.LISTMNGR__DATABASE__URL=sqlite:///var/lib/listmngr/listmngr.db?mode=rwc'
 else
   # URL-unreserved characters only: the chart writes it into the URL as is.
   password=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)
-  set -- --set "postgresql.auth.password=$password"
+  set -- "$@" --set "postgresql.auth.password=$password"
 fi
 if [ "$mta" -eq 1 ]; then
   set -- "$@" --set mta.enabled=true --set mta.hostname=lists.example.invalid \
@@ -121,7 +152,7 @@ if [ "$mta" -eq 1 ]; then
     --set mta.image.pullPolicy=Never --set mta.service.type=ClusterIP
 fi
 t0=$(date +%s)
-h install "$release" "$chart" --wait --timeout 5m \
+h install "$release" "$chart_ref" --wait --timeout 5m \
   --set "image.repository=$repository" --set "image.tag=$tag" --set image.pullPolicy=Never "$@"
 printf 'installed and ready in %ss\n' "$(( $(date +%s) - t0 ))"
 k get pods,pvc,svc,sa,statefulset -l "app.kubernetes.io/instance=$release"
@@ -205,7 +236,8 @@ sed -n '/^config: |/,/^[a-z]/p' "$work/values.yaml" | sed '1d;$d' | sed 's/^  //
 grep -q '^\[site\]' "$work/config.toml" || fail "could not read the installed config back"
 sed -i.bak 's/^name = .*/name = "Example Lists, upgraded"/' "$work/config.toml"
 t0=$(date +%s)
-h upgrade "$release" "$chart" --reuse-values --set-file "config=$work/config.toml" --wait --timeout 5m
+# shellcheck disable=SC2086  # $chart_flags is a flag list on purpose (empty, or --version X --plain-http)
+h upgrade "$release" "$chart_ref" $chart_flags --reuse-values --set-file "config=$work/config.toml" --wait --timeout 5m
 printf 'upgraded and ready in %ss\n' "$(( $(date +%s) - t0 ))"
 pod_after=$(k get pod -l "$app" -o jsonpath='{.items[0].metadata.name}')
 checksum_after=$(k get deploy "$deploy" -o jsonpath="{.spec.template.metadata.annotations['checksum/config']}")
