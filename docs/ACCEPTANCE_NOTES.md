@@ -41,7 +41,13 @@ there is no GitHub release yet. The `chart` job now logs in with
 `docker/login-action` before `cosign sign` (`[Unreleased]`; every gate of
 the contributor guide green on that fix, PostgreSQL included: 1191 and 101
 passed). The tag's CI run failed only the browser journey, after
-`JOURNEY PASS`, on a `sqlite::memory:` reconnect; its fix is separate.
+`JOURNEY PASS`, on a `sqlite::memory:` reconnect: the pool of one
+connection reconnects to an empty in-memory database when the task holding
+it is dropped. The journey's database is now a file in the evidence
+directory (`[Unreleased]`); locally, with the pinned Playwright, Chromium
+140, axe-core and Lighthouse, `cargo test --locked -p listmngr-api --test
+webui chromium_acceptance_journey -- --ignored` printed `JOURNEY PASS` and
+`JOURNEY DB PASS` in 56.8 s and removed the file.
 
 ```sh
 python3 -m unittest scripts.tests.test_version      # RED with VERSION = "1.2.0" before the bump, green after

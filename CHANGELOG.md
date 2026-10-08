@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- The browser journey test keeps its database: `chromium_acceptance_journey` ran on `sqlite::memory:` with a pool of one connection, and when the task holding that connection was dropped (the bridge task under `select!`, the aborted server) the pool reconnected to an empty in-memory database — "no such table: addresses" after `JOURNEY PASS` on CI for `v1.2.0`; the journey's database is now a file in the evidence directory, removed at the end.
 - The release workflow signs the chart: its `chart` job now logs in to GHCR with `docker/login-action` before `cosign sign`, because cosign pushes the signature with Docker's credentials and `helm registry login` provides only Helm's; the first run of the workflow (`v1.2.0`) pushed `ghcr.io/p10node/charts/listmngr:1.2.0` and then failed at the signature, so no GitHub release was published.
 
 ## [1.2.0] - 2026-10-08
