@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- The release workflow signs the chart: its `chart` job now logs in to GHCR with `docker/login-action` before `cosign sign`, because cosign pushes the signature with Docker's credentials and `helm registry login` provides only Helm's; the first run of the workflow (`v1.2.0`) pushed `ghcr.io/p10node/charts/listmngr:1.2.0` and then failed at the signature, so no GitHub release was published.
+
 ## [1.2.0] - 2026-10-08
 
 Phase 10 of `docs/PLAN.md` closed: the Helm chart installs for real — on a disposable kind cluster in CI, with PostgreSQL and the Postfix front MTA inside the chart, published to GHCR as a signed OCI artifact with a runbook — together with the fixes after `1.1.0` (the first account signs in; the CI gates). No schema change: a `1.1.0` database is a `1.2.0` database.

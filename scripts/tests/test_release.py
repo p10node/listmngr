@@ -38,6 +38,14 @@ class ReleaseTest(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, workflow)
 
+    def test_the_chart_job_logs_in_to_the_registry_before_cosign_signs(self):
+        workflow = read(".github/workflows/release.yml")
+        chart = workflow[workflow.index("  chart:\n"):workflow.index("  publish:\n")]
+        # cosign reads Docker's credential store, not Helm's registry config:
+        # without this login the signature push was refused on the first run.
+        self.assertLess(chart.index("docker/login-action@"), chart.index("cosign sign --yes"))
+        self.assertIn("registry: ghcr.io", chart)
+
     def test_the_packages_carry_the_unit_the_account_and_the_directories(self):
         manifest = read("crates/cli/Cargo.toml")
         self.assertIn("[package.metadata.deb]", manifest)
