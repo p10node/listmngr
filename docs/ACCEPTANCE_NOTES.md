@@ -32,6 +32,22 @@ event when more than three refs arrive at once, which is why the five tags
 pushed together earlier (`v1.0.0`, `v1.1.0` among them) never ran
 `release.yml`; `v1.2.0` would be its first run.
 
+CI on `main` after those fixes (run `37800043698` on `25dc7bb`) found a
+real crash with the `mime_filter` fuzz target: a message whose
+`Content-Type: multipart/alternative` carries no `boundary` is a leaf to
+the parser, and `mime_delete::apply` with `collapse_alternatives` hit
+`unreachable!("an alternative part is multipart")`. `is_alternative` now
+requires a multipart body, so the part is left as it is; the input is
+`fuzz/corpus/mime_filter/alternative-without-boundary.eml` (sha1
+`6def9065…`, the artifact's name) and the regression test
+`an_alternative_type_without_a_boundary_is_a_leaf_not_a_panic`, outermost
+and nested, failed with that panic before the fix and passes after it;
+the fuzz target replays the crash file and the 14 seeds without a finding,
+and `scripts/fuzz.sh 60` (CI's pass: eight targets, 60 s each) found
+nothing — `mime_filter` 48,739 runs; every gate of the contributor guide
+green on the fix, PostgreSQL included (1192 and 101 passed)
+(`[Unreleased]`).
+
 The one failure of the first `test-postgres-all.sh` run above,
 `archive_post::postgres_archive_post_contract`, is fixed on `main` after
 this release: the test's `injected()` helper leases the job it reads for
