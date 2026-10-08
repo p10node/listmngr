@@ -10,6 +10,31 @@ Until 2026-10-06 this file was the repository `README.md`. It moved here so the
 README could introduce the project; the text is unchanged apart from this
 note and the relative links, which now resolve from `docs/`.
 
+## 1.2.1 (`P10-1.2.1`) — bounded local acceptance verified
+
+The patch after `1.2.0`. `1.2.0`'s tag was pushed alone twice (once at the
+release commit, once moved to the commit that fixed the chart's signature)
+and both runs ended without a GitHub release — the first at the chart's
+signature, the second, after three hours and twenty-one minutes of
+emulated arm64 build, in publish's artifact download — while its images
+and chart reached GHCR, signed. `main` had meanwhile gained a production
+fix (`mime_delete`) that `1.2.0`'s changelog does not list, so the tag is
+not moved a third time: every workspace package, both locks, the chart,
+the fixture and the version test are `1.2.1`; `CHANGELOG.md` has
+`[1.2.1] - 2026-10-09` gathering the native per-architecture image build,
+publish's named downloads, the chart-signature login, the two test fixes
+and the fuzz find; `docs/SECURITY.md` names `1.2.1` the supported release
+and `1.2.0` what it is. No migration was added. The annotated tag `v1.2.1`
+is created locally on the merge commit; pushing it alone is the
+maintainer's decision and the first run of the rebuilt pipeline.
+
+```sh
+python3 -m unittest scripts.tests.test_version      # RED with VERSION = "1.2.1" before the bump, green after
+cargo update --workspace && cargo metadata --locked > /dev/null
+(cd fuzz && cargo metadata --locked --format-version 1 > /dev/null)
+git tag -a v1.2.1 -m 'listmngr 1.2.1'
+```
+
 ## Images built natively per architecture (`P10-IMAGE-NATIVE`) — bounded local acceptance verified
 
 The first real release run built the arm64 image under QEMU in 138

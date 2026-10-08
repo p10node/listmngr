@@ -5,6 +5,12 @@
 
 ## Trạng thái triển khai (2026-09-14) — thay cho các checkpoint 2026-09-06/07
 
+**Cập nhật 2026-10-09 (`P10-1.2.1`):** `v1.2.0` đã push (tag một mình) nhưng release
+run chưa hoàn tất (`publish` fail; image/chart 1.2.0 có trên GHCR, không có GitHub
+release); pipeline sửa (`P10-IMAGE-NATIVE`: build native mỗi kiến trúc, publish chỉ
+tải artifact tên rõ) + fix crash fuzz `mime_delete` → bản vá `1.2.1`, tag local, push
+một mình. Còn lại: backlog cuối Phase 8.
+
 **Cập nhật 2026-10-08 (`P10-1.2`):** Phase 9–10 đóng; `1.2.0` là bản phát hành thứ ba
 (chart Helm cài thật trên kind trong CI, PostgreSQL + Postfix sidecar trong chart,
 publish OCI lên GHCR); tag `v1.2.0` tạo local, push **một mình** (GitHub bỏ qua event
@@ -1313,6 +1319,16 @@ row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong 
   `registry:3` dùng một lần, image arm64 có sẵn); bước `push-by-digest` cần
   driver `docker-container` như `setup-buildx-action` trên CI → bằng chứng thật
   là lần push tag kế tiếp. Docs: book Releases, ARCHITECTURE, CHANGELOG.
+- [x] ~~**P10-1.2.1**~~ (xong) (S): bản vá sau `v1.2.0` — release run của tag 1.2.0
+  chưa bao giờ hoàn tất (`publish` fail hai lần: cosign chart không login, rồi
+  `download-artifact` vướng hai artifact `.dockerbuild`), image arm64 qua QEMU
+  3 h 21 min; `30767bb` còn chứa fix code (`mime_delete`) chưa có trong changelog
+  1.2.0 → không move tag lần nữa, cắt `1.2.1`: bump như `P10-1.2` (44 dòng
+  manifest, lock, `Chart.yaml`, fixture, fuzz lock, `test_version.py`), CHANGELOG
+  `## [1.2.1] - 2026-10-09` gom `[Unreleased]` (IMAGE-NATIVE, 4 fix), SECURITY/
+  README/book, ledger; tag `v1.2.1` local, push một mình (lần chạy đầu của pipeline
+  mới); `v1.2.0` giữ nguyên trỏ `25dc7bb` (có image/chart trên GHCR, không có
+  release page) và ghi rõ ở SECURITY/ledger.
 - [x] ~~**P10-1.2**~~ (xong) (S, quyết định của người dùng): bump `1.2.0` như `P8-1.1`
   (workspace, path deps, `Chart.yaml` `version`/`appVersion`, fixture
   `system-versions.json`, `fuzz/Cargo.lock`, `scripts/tests/test_version.py`),

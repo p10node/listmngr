@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 
 def read(path: str) -> str:
