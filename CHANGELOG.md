@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-09
+
+The release pipeline as it should have been for `1.2.0`, and one crash the fuzzer found: `1.2.0`'s tag has its images and chart on GHCR but no GitHub release, because its `publish` job failed twice (the chart's signature, then the artifact download) and its arm64 image took over three hours under emulation. This release builds the images natively per architecture, downloads only what it publishes, fixes a `multipart/alternative`-without-boundary panic in content filtering and two racy tests. No schema change: a `1.2.0` database is a `1.2.1` database.
+
 ### Changed
 - The release builds each container image natively per architecture (`P10-IMAGE-NATIVE`): an `ubuntu-24.04` and an `ubuntu-24.04-arm` runner each build `deploy/Dockerfile` and `deploy/postfix/Dockerfile` for their own platform and push by digest, and a manifest job joins the digests into one manifest list per image under `<version>`, `<major>.<minor>` and `latest`, signs the lists with cosign and hands their digests to the release notes; the arm64 image built under QEMU had taken 138 minutes.
 

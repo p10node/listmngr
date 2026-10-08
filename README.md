@@ -40,7 +40,7 @@ Every behaviour above has a recorded acceptance in
 
 ## Install
 
-The current release is `1.2.0`. A tagged release publishes, under
+The current release is `1.2.1`. A tagged release publishes, under
 [Releases](https://github.com/p10node/listmngr/releases):
 
 - a `.tar.gz` per platform (x86_64 and aarch64 Linux as static musl
@@ -57,7 +57,7 @@ The current release is `1.2.0`. A tagged release publishes, under
   SBOM.
 
 ```sh
-apt install ./listmngr_1.2.0-1_amd64.deb      # or: dnf install ./listmngr-1.2.0-1.x86_64.rpm
+apt install ./listmngr_1.2.1-1_amd64.deb      # or: dnf install ./listmngr-1.2.1-1.x86_64.rpm
 ```
 
 From source, with the Rust toolchain pinned in `rust-toolchain.toml`:

@@ -1,5 +1,13 @@
 # Architecture
 
+## 1.2.1 — bounded local acceptance verified
+
+The version is `[workspace.package] version` and the `version` beside
+every `path` dependency, as before; `scripts/tests/test_version.py` holds
+`1.2.1`. Nothing in the architecture moved for the patch beyond the
+sections above (the release pipeline's native image builds, the
+content-filter guard); the schema is unchanged since `1.1.0`.
+
 ## 1.2.0 — bounded local acceptance verified
 
 The version is `[workspace.package] version` and the `version` beside
