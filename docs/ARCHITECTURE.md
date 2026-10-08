@@ -10,6 +10,27 @@ and `scripts/tests/test_helm.py` now reads the chart's version from
 moved for the release: Phase 10's chart is described in the four sections
 below, and the schema is unchanged since `1.1.0`.
 
+## Images built natively per architecture — bounded local acceptance verified
+
+`release.yml`'s `image` job is a matrix of one runner per architecture —
+`linux/amd64` on `ubuntu-24.04`, `linux/arm64` on `ubuntu-24.04-arm` —
+each building `deploy/Dockerfile` and `deploy/postfix/Dockerfile` for its
+own platform with `docker/build-push-action` and the output
+`type=image,push-by-digest=true,name-canonical=true,push=true`, so GHCR
+receives one untagged per-architecture manifest per image, and uploading
+the two digests as a one-day artifact (`digests-linux-amd64`,
+`digests-linux-arm64`, each `app/<digest>` and `postfix/<digest>`). The
+`image-manifest` job downloads them (`merge-multiple`), requires two per
+image, runs `docker buildx imagetools create -t <name>:<version> -t
+<name>:<major>.<minor> -t <name>:latest <name>@sha256:… <name>@sha256:…`
+for `ghcr.io/<repo>` and `ghcr.io/<repo>-postfix`, reads the manifest
+list's digest with `imagetools inspect --format '{{json
+.Manifest.Digest}}'`, exports both as outputs, and signs the two lists
+keyless with cosign; `publish` takes the digests from this job for the
+release notes. `setup-qemu-action` is gone: the arm64 image built under
+emulation took 138 minutes in the first release run. The OCI labels
+`source`, `version` and `revision` are set on both images.
+
 ## The chart on a registry — bounded local acceptance verified
 
 `release.yml`'s `chart` job, after `helm lint --strict`, `helm template`

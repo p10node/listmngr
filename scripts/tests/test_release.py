@@ -28,7 +28,7 @@ class ReleaseTest(unittest.TestCase):
             "aarch64-apple-darwin", "x86_64-apple-darwin",
             "cargo build --locked --release -p listmngr --target",
             "cargo deb", "cargo generate-rpm", "cargo cyclonedx",
-            "platforms: linux/amd64,linux/arm64", "file: deploy/Dockerfile",
+            "file: deploy/Dockerfile",
             "file: deploy/postfix/Dockerfile", "ghcr.io/${{ github.repository }}-postfix",
             "cosign sign --yes", "cosign sign-blob --yes", "SHA256SUMS",
             "helm registry login ghcr.io", "helm push", "oci://ghcr.io/${{ github.repository_owner }}/charts",
@@ -37,6 +37,32 @@ class ReleaseTest(unittest.TestCase):
         ]:
             with self.subTest(needle=needle):
                 self.assertIn(needle, workflow)
+
+    def test_images_are_built_natively_per_architecture_and_joined_into_one_manifest(self):
+        workflow = read(".github/workflows/release.yml")
+        image = workflow[workflow.index("  image:\n"):workflow.index("  image-manifest:\n")]
+        manifest = workflow[workflow.index("  image-manifest:\n"):workflow.index("  chart:\n")]
+        # One native runner per architecture, each pushing by digest.
+        for needle in ["platform: linux/amd64", "runner: ubuntu-24.04", "platform: linux/arm64", "runner: ubuntu-24.04-arm",
+                       "runs-on: ${{ matrix.runner }}", "push-by-digest=true", "name-canonical=true", "upload-artifact@"]:
+            with self.subTest(needle=needle):
+                self.assertIn(needle, image)
+        self.assertNotIn("setup-qemu-action", workflow, "no emulation: the arm64 build took 138 minutes under QEMU")
+        self.assertNotIn("platforms: linux/amd64,linux/arm64", workflow)
+        # The manifest job joins the digests under the version tags and signs the lists.
+        for needle in ["needs: image", "download-artifact@", "docker buildx imagetools create", "imagetools inspect",
+                       "cosign sign --yes", "-postfix@"]:
+            with self.subTest(needle=needle):
+                self.assertIn(needle, manifest)
+        self.assertIn("needs: [binaries, packages, sbom, image-manifest, chart]", workflow)
+        # The build steps upload no `.dockerbuild` record artifacts, and publish
+        # downloads only the artifacts it names: the first release run's publish
+        # failed in download-artifact with two such records among the artifacts.
+        self.assertIn('DOCKER_BUILD_RECORD_UPLOAD: "false"', image)
+        publish = workflow[workflow.index("  publish:\n"):]
+        self.assertIn('pattern: "{binary-*,packages,sbom,chart}"', publish)
+        self.assertIn("needs.image-manifest.outputs.digest", workflow)
+        self.assertIn("needs.image-manifest.outputs.postfix_digest", workflow)
 
     def test_the_chart_job_logs_in_to_the_registry_before_cosign_signs(self):
         workflow = read(".github/workflows/release.yml")

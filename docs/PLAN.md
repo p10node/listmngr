@@ -1300,6 +1300,19 @@ row với lệnh và số liệu thật, ghi rõ phần chỉ tồn tại trong 
   needle `helm push`/`oci://`/`cosign sign` cho chart; `test_book.py` link.
   Giới hạn ghi rõ: push OCI và cosign chart chỉ chạy khi có tag được push —
   cùng trạng thái với phần còn lại của `release.yml`.
+- [x] ~~**P10-IMAGE-NATIVE**~~ (xong) (S): sau release `v1.2.0` thật (2026-10-08) job
+  `image` build arm64 qua QEMU mất 138 phút. `release.yml`: job `image` thành
+  matrix `linux/amd64` trên `ubuntu-24.04` + `linux/arm64` trên `ubuntu-24.04-arm`
+  (mỗi runner build native cả hai image, `push-by-digest`, upload digest làm
+  artifact), job `image-manifest` tải digest về, `docker buildx imagetools create`
+  ghép manifest list dưới `<version>`, `<major>.<minor>`, `latest` cho cả
+  `listmngr` và `listmngr-postfix`, đọc digest list bằng `imagetools inspect
+  --format`, cosign sign theo digest, `publish` lấy digest từ job này; bỏ
+  `setup-qemu-action`. Test: `test_release.py` (matrix, runner arm, không QEMU,
+  bước ghép + ký, `publish` needs). Local chỉ diễn tập được bước ghép (registry
+  `registry:3` dùng một lần, image arm64 có sẵn); bước `push-by-digest` cần
+  driver `docker-container` như `setup-buildx-action` trên CI → bằng chứng thật
+  là lần push tag kế tiếp. Docs: book Releases, ARCHITECTURE, CHANGELOG.
 - [x] ~~**P10-1.2**~~ (xong) (S, quyết định của người dùng): bump `1.2.0` như `P8-1.1`
   (workspace, path deps, `Chart.yaml` `version`/`appVersion`, fixture
   `system-versions.json`, `fuzz/Cargo.lock`, `scripts/tests/test_version.py`),

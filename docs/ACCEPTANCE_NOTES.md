@@ -10,6 +10,38 @@ Until 2026-10-06 this file was the repository `README.md`. It moved here so the
 README could introduce the project; the text is unchanged apart from this
 note and the relative links, which now resolve from `docs/`.
 
+## Images built natively per architecture (`P10-IMAGE-NATIVE`) — bounded local acceptance verified
+
+The first real release run built the arm64 image under QEMU in 138
+minutes. `release.yml` now builds each image natively on an x86-64 and an
+arm64 runner, pushes the per-architecture manifests by digest, and a
+manifest job joins them into one list per image under `<version>`,
+`<major>.<minor>` and `latest`, signs the lists with cosign and passes
+their digests to the release notes; `setup-qemu-action` is gone. The
+release test asserts the matrix, the absence of emulation, the join and
+the signatures. The run that motivated it ended as it was written: the
+QEMU image build took 3 h 21 min and then `publish` failed at
+`download-artifact`, the run holding two `.dockerbuild` build-record
+artifacts beside the seven expected — so the matrix job uploads no records
+(`DOCKER_BUILD_RECORD_UPLOAD: "false"`) and publish downloads only the
+named artifacts (`pattern: "{binary-*,packages,sbom,chart}"`); the
+`1.2.0` GitHub release still needs that job to run on the fixed workflow.
+The join step was rehearsed against a disposable
+`registry:3` with the arm64 image built here: `imagetools create` under
+the three tags, `inspect --format '{{json .Manifest.Digest}}'` returning
+the index digest, the registry listing `1.2`, `1.2.0` and `latest`.
+
+```sh
+python3 -m unittest discover -s scripts/tests          # 24 tests, the matrix and the manifest job among them
+ruby -ryaml -e 'YAML.load_file(".github/workflows/release.yml")'
+```
+
+Limits: `push-by-digest` needs buildx's `docker-container` driver, which
+CI's `setup-buildx-action` provides and the local Docker driver refuses,
+so the per-architecture build was not rehearsed here and the join only
+with the one architecture this laptop builds; the proof is the next tag's
+release run.
+
 ## 1.2.0 (`P10-1.2`) — bounded local acceptance verified
 
 Every workspace package, the path dependencies between them, `Cargo.lock`
