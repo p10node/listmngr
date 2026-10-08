@@ -93,7 +93,10 @@ async fn archived(db: &Database, id: &str, subject: &str, body: &str) -> String 
     listmngr_mail::message_id_hash(id).unwrap()
 }
 
-/// The next `in` job: its raw message and its context.
+/// The next `in` job: its raw message and its context. The lease outlives
+/// the test, so a job read here is never handed back to a later call: with
+/// a one-second lease, a slow run let the reply assertion read the first
+/// web post again.
 async fn injected(db: &Database) -> (String, serde_json::Value) {
     let lease = db
         .mail_queue()
@@ -101,7 +104,7 @@ async fn injected(db: &Database) -> (String, serde_json::Value) {
             Queue::In,
             "test",
             chrono::Utc::now().timestamp_millis(),
-            1000,
+            600_000,
         )
         .await
         .unwrap()

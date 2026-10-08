@@ -32,6 +32,13 @@ event when more than three refs arrive at once, which is why the five tags
 pushed together earlier (`v1.0.0`, `v1.1.0` among them) never ran
 `release.yml`; `v1.2.0` would be its first run.
 
+The one failure of the first `test-postgres-all.sh` run above,
+`archive_post::postgres_archive_post_contract`, is fixed on `main` after
+this release: the test's `injected()` helper leases the job it reads for
+the test's lifetime instead of one second, so a slow run can no longer be
+handed the earlier job back (`[Unreleased]`; the PostgreSQL variant ran
+three times in a row on a disposable role, the SQLite variant once).
+
 The user pushed `v1.2.0` alone on 2026-10-08 and the workflow ran for the
 first time: binaries, packages, SBOM and both images (signed) succeeded;
 the chart was pushed to `ghcr.io/p10node/charts/listmngr:1.2.0` and its
