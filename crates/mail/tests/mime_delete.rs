@@ -300,3 +300,25 @@ fn html_to_text_survives_hostile_and_multibyte_input() {
         "tag attr with quote z <x>y>"
     );
 }
+
+/// The `mime_filter` fuzz target's find on CI (2026-10-08): a part whose
+/// type says `multipart/alternative` but carries no `boundary` is a leaf
+/// to the parser, so collapsing alternatives has nothing to choose from
+/// and must leave it as it is — outermost or nested — instead of assuming
+/// a multipart body.
+const ALTERNATIVE_WITHOUT_BOUNDARY: &[u8] = b"From: MAILER]-DAEMON@mx.example.net\r\nTo: dev-bounces@examsage-ID: <b@mx.example.net>\r\nSubject: Undelivered Mail Returned to Sender\r\nContent-Type: multipart/alternative ;p-type=del=very-statent-Type: message/delivery-status\r\n\r\nReporting-MTA: dns; mx.example.net\r\n\r\nFinal-Recipient: rfc822; nina@example.net\r\nAction: failed\r\nStatus: 5.1.1\r\n--r--\r\n";
+
+#[test]
+fn an_alternative_type_without_a_boundary_is_a_leaf_not_a_panic() {
+    let collapse = AlterMessages {
+        filter_content: true,
+        collapse_alternatives: true,
+        ..AlterMessages::default()
+    };
+    let verdict = apply(ALTERNATIVE_WITHOUT_BOUNDARY, &collapse).unwrap();
+    assert!(matches!(verdict, Verdict::Unchanged), "{verdict:?}");
+
+    let nested = b"From: a@example.invalid\r\nSubject: x\r\nMessage-ID: <n@example.invalid>\r\nContent-Type: multipart/mixed; boundary=\"outer\"\r\n\r\n--outer\r\nContent-Type: multipart/alternative\r\n\r\nNo boundary, so this is one leaf.\r\n--outer\r\nContent-Type: text/plain\r\n\r\nSecond part.\r\n--outer--\r\n";
+    let verdict = apply(nested, &collapse).unwrap();
+    assert!(matches!(verdict, Verdict::Unchanged), "{verdict:?}");
+}

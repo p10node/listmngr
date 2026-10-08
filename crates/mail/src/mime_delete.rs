@@ -61,8 +61,12 @@ impl Part {
         self.ctype.split('/').next().unwrap_or_default()
     }
 
+    /// `multipart/alternative` with a multipart body. A part whose type
+    /// says so but carries no `boundary` parses as a leaf: collapsing has
+    /// nothing to choose from and leaves it as it is (a fuzz find; the
+    /// `unreachable!` branches below rely on this check).
     fn is_alternative(&self) -> bool {
-        self.ctype == "multipart/alternative"
+        self.ctype == "multipart/alternative" && matches!(self.body, Body::Multipart { .. })
     }
 
     fn children(&self) -> Option<&[Self]> {
