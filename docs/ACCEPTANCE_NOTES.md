@@ -32,6 +32,17 @@ event when more than three refs arrive at once, which is why the five tags
 pushed together earlier (`v1.0.0`, `v1.1.0` among them) never ran
 `release.yml`; `v1.2.0` would be its first run.
 
+The user pushed `v1.2.0` alone on 2026-10-08 and the workflow ran for the
+first time: binaries, packages, SBOM and both images (signed) succeeded;
+the chart was pushed to `ghcr.io/p10node/charts/listmngr:1.2.0` and its
+signature failed — cosign had no registry login, since `helm registry
+login` fills Helm's config and not Docker's — so `publish` was skipped and
+there is no GitHub release yet. The `chart` job now logs in with
+`docker/login-action` before `cosign sign` (`[Unreleased]`; every gate of
+the contributor guide green on that fix, PostgreSQL included: 1191 and 101
+passed). The tag's CI run failed only the browser journey, after
+`JOURNEY PASS`, on a `sqlite::memory:` reconnect; its fix is separate.
+
 ```sh
 python3 -m unittest scripts.tests.test_version      # RED with VERSION = "1.2.0" before the bump, green after
 cargo update --workspace && cargo metadata --locked > /dev/null
