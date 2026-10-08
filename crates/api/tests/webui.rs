@@ -2782,7 +2782,17 @@ async fn chromium_acceptance_journey() {
     let bridge = std::path::Path::new(&output).join(".journey");
     let _ = std::fs::remove_dir_all(&bridge);
     std::fs::create_dir_all(&bridge).unwrap();
-    let (db, _) = fixture().await;
+    // A file, not `sqlite::memory:`: the pool's one connection is dropped
+    // with whichever task holds it when `select!` abandons the bridge or
+    // the server is aborted, and a reconnect to an in-memory database is
+    // an empty database ("no such table" after JOURNEY PASS, on CI).
+    let database_file = std::path::Path::new(&output).join(".journey.db");
+    let _ = std::fs::remove_file(&database_file);
+    let db = Database::connect(&format!("sqlite://{}?mode=rwc", database_file.display()), 1)
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let (db, _) = seeded_fixture(db).await;
     user(&db, "browser@example.com", true).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -2830,6 +2840,8 @@ async fn chromium_acceptance_journey() {
     server.abort();
     assert!(result.unwrap().success(), "journey assertions failed");
     journey_database_state(&db).await;
+    drop(db);
+    let _ = std::fs::remove_file(&database_file);
 }
 
 /// What the browser claimed, checked in the database after the journey.
