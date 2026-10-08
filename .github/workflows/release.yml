@@ -96,65 +96,129 @@ jobs:
           if-no-files-found: error
 
   image:
-    # The multi-architecture container image from deploy/Dockerfile, pushed
-    # to GHCR and signed keyless with cosign.
-    runs-on: ubuntu-24.04
+    # The container images from deploy/Dockerfile and deploy/postfix, built
+    # natively on one runner per architecture (the arm64 build took 138
+    # minutes under QEMU) and pushed to GHCR by digest; image-manifest joins
+    # them under the version tags and signs them.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            name: linux-amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            name: linux-arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-      id-token: write
-    outputs:
-      digest: ${{ steps.push.outputs.digest }}
-      postfix_digest: ${{ steps.push_postfix.outputs.digest }}
+    env:
+      # No `.dockerbuild` build-record artifacts: the first release run's
+      # publish job failed downloading the run's artifacts with two of them
+      # among the binaries, packages, SBOM and chart.
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+      DOCKER_BUILD_SUMMARY: "false"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-      - id: push
+      - id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: deploy/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
           provenance: false
-      # The front MTA for the Helm chart's sidecar (deploy/postfix), the same way.
-      - id: meta_postfix
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
-        with:
-          images: ghcr.io/${{ github.repository }}-postfix
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-      - id: push_postfix
+      - id: build_postfix
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: deploy/postfix/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta_postfix.outputs.tags }}
-          labels: ${{ steps.meta_postfix.outputs.labels }}
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=ghcr.io/${{ github.repository }}-postfix,push-by-digest=true,name-canonical=true,push=true
           provenance: false
-      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
-      - name: Sign both images by digest (keyless, OIDC)
+      - name: Record the digests
+        env:
+          APP: ${{ steps.build.outputs.digest }}
+          POSTFIX: ${{ steps.build_postfix.outputs.digest }}
         run: |
-          cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}"
-          cosign sign --yes "ghcr.io/${{ github.repository }}-postfix@${{ steps.push_postfix.outputs.digest }}"
+          set -eu
+          mkdir -p digests/app digests/postfix
+          touch "digests/app/${APP#sha256:}" "digests/postfix/${POSTFIX#sha256:}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digests-${{ matrix.name }}
+          path: digests
+          if-no-files-found: error
+          retention-days: 1
+
+  image-manifest:
+    # One manifest list per image under <version>, <major>.<minor> and
+    # latest, from the two architectures' digests, signed keyless with
+    # cosign by digest.
+    needs: image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.join.outputs.digest }}
+      postfix_digest: ${{ steps.join.outputs.postfix_digest }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digests-*
+          path: digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: join
+        name: Join the digests under the version tags
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          minor="${version%.*}"
+          for image in app postfix; do
+            case "$image" in
+              app) name="ghcr.io/${{ github.repository }}" ;;
+              postfix) name="ghcr.io/${{ github.repository }}-postfix" ;;
+            esac
+            test "$(ls "digests/$image" | wc -l)" -eq 2
+            refs=$(for d in "digests/$image"/*; do printf '%s@sha256:%s ' "$name" "$(basename "$d")"; done)
+            # shellcheck disable=SC2086
+            docker buildx imagetools create -t "$name:$version" -t "$name:$minor" -t "$name:latest" $refs
+            docker buildx imagetools inspect "$name:$version"
+            digest=$(docker buildx imagetools inspect "$name:$version" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            case "$image" in
+              app) printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT" ;;
+              postfix) printf 'postfix_digest=%s\n' "$digest" >> "$GITHUB_OUTPUT" ;;
+            esac
+          done
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Sign both manifest lists by digest (keyless, OIDC)
+        run: |
+          cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.join.outputs.digest }}"
+          cosign sign --yes "ghcr.io/${{ github.repository }}-postfix@${{ steps.join.outputs.postfix_digest }}"
 
   chart:
     # The Helm chart, linted strictly and rendered, packaged with the release,
@@ -201,7 +265,7 @@ jobs:
   publish:
     # Everything above on the GitHub release, with one SHA256SUMS signed
     # keyless with cosign; the image digest in the notes.
-    needs: [binaries, packages, sbom, image, chart]
+    needs: [binaries, packages, sbom, image-manifest, chart]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -209,6 +273,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          # Only what goes on the release, by name.
+          pattern: "{binary-*,packages,sbom,chart}"
           path: dist
           merge-multiple: true
       - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
@@ -219,8 +285,8 @@ jobs:
           rm -f *.sha256
           shasum -a 256 * > SHA256SUMS
           cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
-          printf 'Image: ghcr.io/%s@%s\n' "${{ github.repository }}" "${{ needs.image.outputs.digest }}" > IMAGE_DIGEST.txt
-          printf 'Postfix image: ghcr.io/%s-postfix@%s\n' "${{ github.repository }}" "${{ needs.image.outputs.postfix_digest }}" >> IMAGE_DIGEST.txt
+          printf 'Image: ghcr.io/%s@%s\n' "${{ github.repository }}" "${{ needs.image-manifest.outputs.digest }}" > IMAGE_DIGEST.txt
+          printf 'Postfix image: ghcr.io/%s-postfix@%s\n' "${{ github.repository }}" "${{ needs.image-manifest.outputs.postfix_digest }}" >> IMAGE_DIGEST.txt
           printf 'Chart: oci://ghcr.io/%s/charts/listmngr:%s@%s\n' "${{ github.repository_owner }}" "${GITHUB_REF_NAME#v}" "${{ needs.chart.outputs.digest }}" >> IMAGE_DIGEST.txt
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

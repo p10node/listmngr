@@ -12,9 +12,12 @@ pinned by commit:
   (`cargo-generate-rpm`) for x86_64 Linux from the musl binary; both
   install `/usr/bin/listmngr`, the unit (disabled), the `listmngr`
   account, `/etc/listmngr` and `/var/lib/listmngr`.
-- **Image**: `deploy/Dockerfile` built for `linux/amd64` and
-  `linux/arm64`, pushed to GHCR as `<version>` and `<major>.<minor>`,
-  signed keyless with cosign by digest.
+- **Images**: `deploy/Dockerfile` and `deploy/postfix/Dockerfile`, each
+  built natively on an x86-64 and an arm64 runner (no emulation), pushed
+  to GHCR by digest and joined into one manifest list per image under
+  `<version>`, `<major>.<minor>` and `latest`
+  (`ghcr.io/p10node/listmngr`, `ghcr.io/p10node/listmngr-postfix`),
+  signed keyless with cosign by the list's digest.
 - **Chart**: `deploy/helm/listmngr`, linted strictly, rendered and
   packaged with the release, pushed to
   `oci://ghcr.io/p10node/charts/listmngr` as `<version>` and signed

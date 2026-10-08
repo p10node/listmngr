@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- The release builds each container image natively per architecture (`P10-IMAGE-NATIVE`): an `ubuntu-24.04` and an `ubuntu-24.04-arm` runner each build `deploy/Dockerfile` and `deploy/postfix/Dockerfile` for their own platform and push by digest, and a manifest job joins the digests into one manifest list per image under `<version>`, `<major>.<minor>` and `latest`, signs the lists with cosign and hands their digests to the release notes; the arm64 image built under QEMU had taken 138 minutes.
+
 ### Fixed
+- The release's `publish` job downloads only the named artifacts (`{binary-*,packages,sbom,chart}`) and the image builds upload no `.dockerbuild` build records: the first complete release run failed in `download-artifact` with two such records among the run's artifacts, so no GitHub release was published.
 - Content filtering no longer panics on a `multipart/alternative` part without a `boundary` (found by the `mime_filter` fuzz target on CI, 2026-10-08): such a part parses as a leaf, and collapsing alternatives assumed a multipart body (`unreachable!`); `is_alternative` now requires one, so the part stays as it is, outermost or nested. The input is a committed fuzz seed and a regression test in `crates/mail/tests/mime_delete.rs`.
 - The web-posting test no longer races its own queue: `archive_post`'s helper leased the `in` job it read for one second, so on a slow run the earlier job's lease had expired by the time the reply was posted and `claim` handed that older job back — the reply assertion read the first web post once in `scripts/test-postgres-all.sh`; the lease now outlives the test.
 - The browser journey test keeps its database: `chromium_acceptance_journey` ran on `sqlite::memory:` with a pool of one connection, and when the task holding that connection was dropped (the bridge task under `select!`, the aborted server) the pool reconnected to an empty in-memory database — "no such table: addresses" after `JOURNEY PASS` on CI for `v1.2.0`; the journey's database is now a file in the evidence directory, removed at the end.
