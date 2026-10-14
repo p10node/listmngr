@@ -52,7 +52,7 @@ tower = { version = "0.5.2", features = ["util"] }
 tower-http = { version = "0.6.6", features = ["cors", "trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
-utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }
+utoipa = { version = "6.0.0", features = ["axum_extras", "chrono", "uuid"] }
 uuid = { version = "1.18.1", features = ["v7", "serde"] }
 webauthn_rp = { version = "=0.3.0", features = ["serde", "serde_relaxed", "serializable_server_state", "bin"] }
 zxcvbn = "3.1.0"
