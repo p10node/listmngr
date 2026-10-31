@@ -6,7 +6,16 @@ unmaintained = "workspace"
 # verifying RS256 passkey signatures with the credential's *public* key; no
 # RSA private key exists in listmngr. The same id is ignored in the
 # `cargo audit` gate (CLAUDE.md). Re-evaluate when `rsa` publishes a fix.
-ignore = [{ id = "RUSTSEC-2023-0071", reason = "public-key signature verification only (webauthn_rp); no RSA private-key operation in listmngr" }]
+# RUSTSEC-2026-0387 (`crypto-bigint` 0.5, timing variability in operations
+# meant to be constant-time): reached only through `webauthn_rp` 0.3.0, the
+# latest release, which pins `p256`/`p384` 0.13 and so `elliptic-curve` 0.13.
+# Both uses in this tree verify ECDSA signatures with a *public* key (passkey
+# assertions, OIDC ES256 tokens); no secret scalar is ever handled, so timing
+# leaks nothing. Re-evaluate when `webauthn_rp` moves to the 0.14 stack.
+ignore = [
+  { id = "RUSTSEC-2023-0071", reason = "public-key signature verification only (webauthn_rp); no RSA private-key operation in listmngr" },
+  { id = "RUSTSEC-2026-0387", reason = "public-key ECDSA verification only (webauthn_rp 0.3.0 pins p256/p384 0.13; OIDC ES256); no secret scalar in listmngr" },
+]
 
 [licenses]
 allow = [

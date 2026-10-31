@@ -152,7 +152,7 @@ cargo build --locked --workspace
 cargo test --locked --workspace --all-targets
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo deny check
-cargo audit --ignore RUSTSEC-2023-0071   # documented inactive SQLx/MySQL lock-only edge
+cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0387   # documented exceptions, see deny.toml
 python3 -m unittest discover -s scripts/tests
 python3 scripts/check-production-crates.py
 ```

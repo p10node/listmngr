@@ -60,7 +60,9 @@ jobs:
       # SQLx's disabled MySQL graph; `cargo tree --target all -i rsa` is empty.
       # cargo-deny still checks the active graph and this exception must be
       # removed when SQLx drops the lock-only edge or an rsa fix is published.
-      - run: cargo audit --ignore RUSTSEC-2023-0071
+      # RUSTSEC-2026-0387 is crypto-bigint 0.5 behind webauthn_rp 0.3.0's p256/p384
+      # 0.13 pins; only public-key ECDSA verification runs on it (deny.toml).
+      - run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0387
 
   browser:
     # P4-ACCEPTANCE: the Chromium harness (every browser slice) and the
