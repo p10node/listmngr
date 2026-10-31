@@ -19,7 +19,7 @@ cargo build --locked --workspace
 cargo test --locked --workspace --all-targets
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo deny check
-cargo audit --ignore RUSTSEC-2023-0071 # documented inactive SQLx/MySQL lock-only edge
+cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0387 # documented exceptions, see deny.toml
 ```
 
 PostgreSQL is a separate mandatory gate and may not silently fall back to SQLite. The first script is the chosen contract set; the second runs every `#[ignore]`d PostgreSQL test, each on its own schema of the same disposable server:

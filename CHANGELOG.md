@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Security
+- Dependency updates for the advisories published after `1.2.1`: `rustls` 0.23.46 (RUSTSEC-2026-0346, -0347, -0348, -0349), `rustls-webpki` 0.103.16 (RUSTSEC-2026-0382), `webpki-roots` and `webpki-root-certs` 1.0.11 (RUSTSEC-2026-0381, -0383), `quinn-proto` 0.11.19 (RUSTSEC-2026-0338, -0340, -0343), `pulldown-cmark` 0.13.6 (RUSTSEC-2026-0414), `tokio` 1.54.1 (RUSTSEC-2026-0386), `zstd-sys` 2.1.2 (RUSTSEC-2026-0410) and, through `tantivy` 0.27.0, `zstd` 0.14.3 with `zstd-safe` 8.2.0 (RUSTSEC-2026-0391, -0398, -0403); `fuzz/Cargo.lock` follows. RUSTSEC-2026-0387 (`crypto-bigint` 0.5, timing variability in operations meant to be constant-time) stays in the tree behind `webauthn_rp` 0.3.0's `p256`/`p384` 0.13 pins and becomes a recorded exception in `deny.toml`, the `cargo audit` gate and `docs/SECURITY.md`: both uses verify ECDSA signatures with a public key (passkey assertions, OpenID Connect ES256 tokens) and handle no secret scalar.
+
+### Changed
+- `tantivy` 0.27.0 for the archive search index. The on-disk format version is unchanged (7, oldest supported 4), so an existing `data/index/` opens as before; no reindex is needed.
+
 ## [1.2.1] - 2026-10-09
 
 The release pipeline as it should have been for `1.2.0`, and one crash the fuzzer found: `1.2.0`'s tag has its images and chart on GHCR but no GitHub release, because its `publish` job failed twice (the chart's signature, then the artifact download) and its arm64 image took over three hours under emulation. This release builds the images natively per architecture, downloads only what it publishes, fixes a `multipart/alternative`-without-boundary panic in content filtering and two racy tests. No schema change: a `1.2.0` database is a `1.2.1` database.

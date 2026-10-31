@@ -35,9 +35,12 @@ The systemd unit creates `/var/lib/listmngr` with `StateDirectory`, fixes its wo
 
 Base images, GitHub Actions, and CI tools are pinned. `Cargo.lock`, `cargo deny`, and `cargo audit` are blocking controls. Pinning reduces unintended drift but does not replace periodic reviewed upgrades.
 
-### Temporary audit exception
+### Audit exceptions
 
-`Cargo.lock` contains `rsa 0.9.10` through SQLx's disabled MySQL dependency graph. RUSTSEC-2023-0071 has no fixed release, while `cargo tree --locked --target all -i rsa` returns no active dependency path for this PostgreSQL/SQLite build. CI therefore runs `cargo audit --ignore RUSTSEC-2023-0071` with an inline explanation; all other advisories remain blocking, and `cargo deny check` evaluates the active graph without this exception. Remove the exception when SQLx no longer records the edge or a fixed `rsa` is available.
+Two advisories are recorded exceptions, each with its reason in `deny.toml`, and CI runs `cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0387` with the same two ids; every other advisory blocks.
+
+- RUSTSEC-2023-0071 (`rsa`, Marvin timing attack on RSA *private-key* operations) has no fixed release. The only `rsa` use in this tree is `webauthn_rp` verifying RS256 passkey signatures with the credential's *public* key; listmngr holds no RSA private key. Remove the exception when a fixed `rsa` is available.
+- RUSTSEC-2026-0387 (`crypto-bigint` 0.5, timing variability in operations meant to be constant-time) is reached only through `webauthn_rp` 0.3.0, the latest release, which pins `p256`/`p384` 0.13 and so `elliptic-curve` 0.13. Both uses verify ECDSA signatures with a *public* key (passkey assertions; OpenID Connect ES256 tokens, which share the `p256` 0.13 line); no secret scalar is handled, so timing leaks nothing. Remove the exception when `webauthn_rp` moves to the 0.14 stack.
 
 ### The chart's Postfix sidecar
 
