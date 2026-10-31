@@ -1775,7 +1775,7 @@ dependencies = [
 name = "listmngr-core"
 version = "1.2.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "figment",
  "hmac",
@@ -1798,7 +1798,7 @@ name = "listmngr-db"
 version = "1.2.1"
 dependencies = [
  "argon2",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "chrono-tz",
  "futures",
@@ -1871,7 +1871,7 @@ dependencies = [
 name = "listmngr-mail"
 version = "1.2.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "libc",
  "listmngr-core",
  "listmngr-i18n",
