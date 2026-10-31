@@ -1703,7 +1703,8 @@ async fn join_and_leave_by_mail_round_trip_their_confirmation_tokens() {
         "no member before the confirmation"
     );
 
-    // The reply to the challenge: membership, then the welcome.
+    // The reply to the challenge: membership, then the welcome and the
+    // receipt of the command (two notices, in either order).
     let seen = fixture.sink.deliveries().len();
     send_command(
         &fixture,
@@ -1719,6 +1720,7 @@ async fn join_and_leave_by_mail_round_trip_their_confirmation_tokens() {
         "Welcome to the \"Dev\" mailing list",
     )
     .await;
+    next_mail_to(&fixture, seen, newbie, "List join request completed").await;
     assert_eq!(roster(&fixture, "member").await, vec![newbie.to_owned()]);
     assert!(
         String::from_utf8_lossy(&welcome.data).contains("dev@e2e.example.invalid"),
@@ -1747,7 +1749,9 @@ async fn join_and_leave_by_mail_round_trip_their_confirmation_tokens() {
     assert_ne!(leave_token, join_token, "a new token for a new request");
     assert_eq!(roster(&fixture, "member").await, vec![newbie.to_owned()]);
 
-    // The reply: the membership ends, then the goodbye.
+    // The reply: the membership ends, then the goodbye and the receipt.
+    // Both are waited for: the replay check below counts every delivery
+    // from here on, and the receipt may land after the goodbye.
     let seen = fixture.sink.deliveries().len();
     send_command(
         &fixture,
@@ -1763,6 +1767,7 @@ async fn join_and_leave_by_mail_round_trip_their_confirmation_tokens() {
         "You have been unsubscribed from the Dev mailing list",
     )
     .await;
+    next_mail_to(&fixture, seen, newbie, "List leave request completed").await;
     assert!(roster(&fixture, "member").await.is_empty());
 
     // A replay of the spent join token: accepted at the socket (it is a

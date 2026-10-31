@@ -10,6 +10,9 @@
 - `tantivy` 0.27.0 for the archive search index. The on-disk format version is unchanged (7, oldest supported 4), so an existing `data/index/` opens as before; no reindex is needed.
 - `docs/PLAN.md`, the product contract and roadmap, is written in English (it was Vietnamese), as are the comments of the Vietnamese locale `crates/i18n/locales/vi.ftl` and the page chrome of `scripts/blueprint/build.py`; the Vietnamese product texts (locale messages, built-in templates, test fixtures) are unchanged. No behaviour changes.
 
+### Fixed
+- The mail-path end-to-end test `join_and_leave_by_mail_round_trip_their_confirmation_tokens` no longer races the leave receipt: a confirmed leave sends two notices, the goodbye and the `List leave request completed` receipt, and the test waited only for the goodbye before counting the deliveries that a replayed join token must not add to; on a slow runner (the CI `rust` job on `main`, 2026-10-31) the receipt arrived after the count and the test failed. The test now waits for both notices of the join and of the leave confirmation before counting. No behaviour change.
+
 ## [1.2.1] - 2026-10-09
 
 The release pipeline as it should have been for `1.2.0`, and one crash the fuzzer found: `1.2.0`'s tag has its images and chart on GHCR but no GitHub release, because its `publish` job failed twice (the chart's signature, then the artifact download) and its arm64 image took over three hours under emulation. This release builds the images natively per architecture, downloads only what it publishes, fixes a `multipart/alternative`-without-boundary panic in content filtering and two racy tests. No schema change: a `1.2.0` database is a `1.2.1` database.
