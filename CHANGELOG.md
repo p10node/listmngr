@@ -7,6 +7,7 @@
 
 ### Changed
 - `tantivy` 0.27.0 for the archive search index. The on-disk format version is unchanged (7, oldest supported 4), so an existing `data/index/` opens as before; no reindex is needed.
+- `docs/PLAN.md`, the product contract and roadmap, is written in English (it was Vietnamese), as are the comments of the Vietnamese locale `crates/i18n/locales/vi.ftl` and the page chrome of `scripts/blueprint/build.py`; the Vietnamese product texts (locale messages, built-in templates, test fixtures) are unchanged. No behaviour changes.
 
 ## [1.2.1] - 2026-10-09
 

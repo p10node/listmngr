@@ -1,4 +1,4 @@
-# Tiêu đề thông báo. Nội dung nằm trong catalog template (listmngr-mail).
+# Notice subjects. Bodies live in the template catalog (listmngr-mail).
 notice-welcome-subject = Chào mừng bạn đến với hộp thư chung "{ $display_name }"
 notice-goodbye-subject = Bạn đã rời khỏi hộp thư chung { $display_name }
 notice-autoresponse-subject = Trả lời tự động cho thư bạn gửi tới hộp thư chung "{ $display_name }"
@@ -35,7 +35,7 @@ content-filter-forward-body =
 # Mailman's `acknowledge` handler.
 notice-post-ack-subject = Xác nhận đã nhận bài gửi tới { $display_name }
 
-# Lệnh `notify` của Mailman: nhắc hằng ngày những gì người điều hành còn nợ.
+# Mailman's `notify`: the daily reminder of what moderators still owe.
 notice-pending-subject = Hộp thư { $listname } có { $count } yêu cầu đang chờ điều hành.
 notify-held-messages = Thư đang giữ:
 notify-held-subscriptions = Yêu cầu đăng ký đang chờ:
@@ -51,7 +51,7 @@ notice-admin-unsubscribe-subject = Thông báo huỷ đăng ký { $display_name 
 notice-forward-subject = Chuyển tiếp thư đang chờ duyệt
 forward-moderated-body = Một người duyệt của { $display_name } đã chuyển tiếp cho bạn thư đang chờ duyệt đính kèm.
 
-# Giao diện trình duyệt (P4-SHELL).
+# Browser interface (P4-SHELL).
 web-skip-to-content = Bỏ qua, đến nội dung chính
 web-nav-label = Điều hướng chính
 web-nav-lists = Danh sách thư
@@ -221,7 +221,7 @@ web-profile-save = Lưu hồ sơ
 web-language-en = English
 web-language-vi = Tiếng Việt
 
-# Thư mức site, không thuộc hộp thư chung nào (P4-SITE-NOTICES).
+# Mail the site sends outside any list (P4-SITE-NOTICES).
 notice-site-verify-subject = Xác nhận địa chỉ email của bạn cho { $site_name }
 notice-site-reset-subject = Đặt lại mật khẩu của bạn cho { $site_name }
 web-title-signup = Tạo tài khoản
@@ -978,7 +978,7 @@ web-archive-category-renamed = Đã đổi tên danh mục.
 web-archive-category-removed = Đã xoá danh mục.
 web-archive-category-refused = Không dùng được tên danh mục đó.
 
-# Webhook (P6-WEBHOOKS-WEB): của một hộp thư chung, và của toàn trang.
+# Webhooks (P6-WEBHOOKS-WEB): a list's, and the site's.
 web-title-webhooks = Webhook
 web-ls-group-webhooks = Webhook
 web-webhooks-title = Webhook
