@@ -23,7 +23,7 @@ contains deploy/Dockerfile '^FROM scratch$'
 contains deploy/Dockerfile 'cargo build --locked --release'
 contains deploy/Dockerfile '^USER 1000:1000$'
 not_contains deploy/Dockerfile '(curl|apt-get)'
-contains deploy/Dockerfile '^RUN apk add --no-cache musl=1\.2\.5-r12 musl-dev=1\.2\.5-r12$'
+contains deploy/Dockerfile '^RUN apk add --no-cache musl=1\.2\.5-r13 musl-dev=1\.2\.5-r13$'
 contains deploy/Dockerfile 'HEALTHCHECK.*listmngr.*status'
 
 contains deploy/docker-compose.yml 'POSTGRES_PASSWORD:.*POSTGRES_PASSWORD'

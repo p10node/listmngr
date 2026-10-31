@@ -26,7 +26,7 @@ Compose interpolates one `POSTGRES_PASSWORD` into both PostgreSQL and the applic
 
 The image is built from the repository root, produces a musl-linked release binary, and runs it in `scratch` as UID/GID 1000. Compose provides a read-only root filesystem, drops all capabilities, enables `no-new-privileges`, and supplies only a bounded `/tmp`. `listmngr status` is the in-image readiness probe, avoiding a shell/HTTP client.
 
-The digest-pinned Rust Alpine builder omits C library headers. It installs exactly `musl=1.2.5-r12` and `musl-dev=1.2.5-r12` for `ring` and bundled SQLite; neither the package manager nor development headers enter the runtime image. These exact package versions fail closed if removed from the Alpine repository and must be upgraded together through review. Base-image pinning alone does not supply a usable C toolchain.
+The digest-pinned Rust Alpine builder omits C library headers. It installs exactly `musl=1.2.5-r13` and `musl-dev=1.2.5-r13` for `ring` and bundled SQLite; neither the package manager nor development headers enter the runtime image. These exact package versions fail closed if removed from the Alpine repository and must be upgraded together through review. Base-image pinning alone does not supply a usable C toolchain.
 
 ## systemd
 
