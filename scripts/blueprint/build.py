@@ -36,11 +36,9 @@ def chip_cell(m):
     return ''.join(parts)
 body = re.sub(r'<td>.*?</td>', chip_cell, body, flags=re.S)
 
-# Legend under the parity matrix intro.
-legend = ('<div class="legend"><span>Phase</span>' + ''.join(f'<span class="ph ph{i}">P{i}</span>' for i in range(8)) + '<span>= phase dự kiến hoàn thành</span></div>')
-body = body.replace('Cột\n"Thay đổi" = khác Mailman thế nào.</p>', 'Cột\n"Thay đổi" = khác Mailman thế nào.</p>' + legend, 1)
-if 'class="legend"' not in body:
-    body = re.sub(r'(<h2 id="4-feature-parity-matrix">.*?</p>)', r'\1' + legend, body, count=1, flags=re.S)
+# Legend under the parity matrix intro (the first paragraph after the §4 heading).
+legend = ('<div class="legend"><span>Phase</span>' + ''.join(f'<span class="ph ph{i}">P{i}</span>' for i in range(8)) + '<span>= phase expected to complete it</span></div>')
+body = re.sub(r'(<h2 id="4-feature-parity-matrix">.*?</p>)', r'\1' + legend, body, count=1, flags=re.S)
 
 # Work-package ids in the first column read as identifiers.
 body = re.sub(r'<td>(P[0-7]-[A-Z0-9-]+)</td>', r'<td><code class="wp">\1</code></td>', body)
@@ -53,20 +51,20 @@ mast = '''<div class="airmail"></div>
 <header class="mast">
   <div>
     <p class="eyebrow">docs/PLAN.md · main @SHA@</p>
-    <h1>listmngr<small>Mailman 3 alternative viết bằng Rust</small></h1>
-    <p class="lede">Một binary thay cho mailman-core, Postorius, HyperKitty và mailman-web. Giữ nguyên tính năng và tên khái niệm, đổi runtime, UI và mô hình bảo mật.</p>
+    <h1>listmngr<small>Mailman 3 alternative written in Rust</small></h1>
+    <p class="lede">One binary in place of mailman-core, Postorius, HyperKitty and mailman-web. Same features and concept names; a different runtime, UI and security model.</p>
   </div>
-  <pre class="hdrs"><b>Status:</b>   Phase 0–3 implemented · Phase 4–5 in progress
-<b>Date:</b>     Mon, 14 Sep 2026
+  <pre class="hdrs"><b>Status:</b>   Phase 0–10 closed · 1.2.1 is the fourth release
+<b>Date:</b>     Sat, 31 Oct 2026
 <b>Replaces:</b> mailman-core, postorius, hyperkitty,
           mailman-web, django-mailman3
 <b>Stack:</b>    Rust 2024 · tokio · axum · sqlx
           askama + htmx · tantivy · mail-auth
-<b>Roadmap:</b>  <em>P0–P3</em> done → <em>P4</em> web UI → <em>P5</em> archive → <em>P7</em> 1.0
-<b>Gates:</b>    936 tests · PG 38/38 · mailmanclient PASS
+<b>Roadmap:</b>  <em>P0–P10</em> done → backlog after 1.1 (§7, Phase 8)
+<b>Gates:</b>    1192 tests · PG 101/101 · mailmanclient PASS
 <b>List-Id:</b>  &lt;plan.listmngr&gt;</pre>
 </header>
-<nav class="toc" id="TOC" aria-label="Mục lục">''' + toc + '''</nav><main>
+<nav class="toc" id="TOC" aria-label="Table of contents">''' + toc + '''</nav><main>
 ''' + body + '''
 </main></div>'''
 out = (head + mast + tail).replace('@SHA@', sys.argv[2])

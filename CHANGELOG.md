@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `docs/PLAN.md`, the product contract and roadmap, is written in English (it was Vietnamese), as are the comments of the Vietnamese locale `crates/i18n/locales/vi.ftl` and the page chrome of `scripts/blueprint/build.py`; the Vietnamese product texts (locale messages, built-in templates, test fixtures) are unchanged. No behaviour changes.
+
 ## [1.2.1] - 2026-10-09
 
 The release pipeline as it should have been for `1.2.0`, and one crash the fuzzer found: `1.2.0`'s tag has its images and chart on GHCR but no GitHub release, because its `publish` job failed twice (the chart's signature, then the artifact download) and its arm64 image took over three hours under emulation. This release builds the images natively per architecture, downloads only what it publishes, fixes a `multipart/alternative`-without-boundary panic in content filtering and two racy tests. No schema change: a `1.2.0` database is a `1.2.1` database.

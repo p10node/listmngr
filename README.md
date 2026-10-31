@@ -128,7 +128,7 @@ is [docs/MAILMAN_REPLACEMENT.md](docs/MAILMAN_REPLACEMENT.md).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): crates, processes, data and
   deployment boundaries.
 - [docs/PLAN.md](docs/PLAN.md): the product contract and roadmap, by phase
-  and acceptance ID (in Vietnamese).
+  and acceptance ID.
 - [docs/FEATURE_PARITY.md](docs/FEATURE_PARITY.md): the ledger, one row per
   acceptance ID with the test or command that proves it;
   [docs/ACCEPTANCE_NOTES.md](docs/ACCEPTANCE_NOTES.md): the prose record
