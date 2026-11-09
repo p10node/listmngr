@@ -2824,8 +2824,12 @@ come from `listmngr_mail::facts` and `visible_recipients`, so the pipeline
 never parses MIME. `Approved:` keys are verified in the runner against the
 list's Argon2id `moderator_password` and stripped by `cook_post` — the shared
 path for delivery, archive and digest — from both the header spellings and an
-unencoded first body line; an encoded body-line key is ignored rather than
-risk leaking it.
+first body line of every text part (plain, HTML and other `text/*`
+alternatives; byte-for-byte for unencoded and quoted-printable parts,
+decode-and-re-encode for base64). Only an unencoded first line of the first
+plain part is *recognized* as a key (`approved_key`); an encoded key never
+approves a post but is still removed from every copy that leaves the list
+(security finding F-11).
 
 The `header-match` chain is dynamic: it evaluates the list's rows in position
 order with the same bounded, case-insensitive regex compilation the repository

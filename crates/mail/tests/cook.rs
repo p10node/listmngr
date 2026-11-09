@@ -212,12 +212,70 @@ Approved: not text, untouched\r\n\
     }
 
     #[test]
-    fn does_not_touch_an_encoded_part_it_cannot_safely_rewrite() {
+    fn strips_the_key_from_a_html_alternative_too() {
+        let raw = b"From: a@example.invalid\r\n\
+Content-Type: multipart/alternative; boundary=b\r\n\
+\r\n\
+--b\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+Approved: s3cret\r\n\
+real body\r\n\
+--b\r\n\
+Content-Type: text/html\r\n\
+\r\n\
+Approved: s3cret\r\n\
+<p>real body</p>\r\n\
+--b--\r\n";
+        let stripped = strip_approved_line(raw);
+        let text = String::from_utf8_lossy(&stripped);
+        assert!(!text.contains("s3cret"), "{text}");
+        assert!(text.contains("real body</p>"));
+        assert_eq!(
+            stripped.len(),
+            raw.len() - 2 * b"Approved: s3cret\r\n".len()
+        );
+    }
+
+    #[test]
+    fn strips_the_key_from_a_base64_part_and_keeps_the_rest() {
+        use base64::Engine as _;
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode("Approved: s3cret\r\nreal body\r\n");
+        let raw = format!(
+            "From: a@example.invalid\r\nContent-Type: text/plain; charset=utf-8\r\n\
+Content-Transfer-Encoding: base64\r\n\r\n{encoded}\r\n"
+        );
+        let stripped = strip_approved_line(raw.as_bytes());
+        let text = String::from_utf8_lossy(&stripped);
+        let body = text.split("\r\n\r\n").nth(1).unwrap().trim();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(body)
+            .unwrap();
+        assert_eq!(decoded, b"real body\r\n");
+    }
+
+    #[test]
+    fn strips_the_key_from_a_quoted_printable_part() {
+        for key in ["s3cret", "s3=3Dcret"] {
+            let raw = format!(
+                "From: a@example.invalid\r\nContent-Type: text/plain\r\n\
+Content-Transfer-Encoding: quoted-printable\r\n\r\nApproved: {key}\r\nreal =E2=80=94 body\r\n"
+            );
+            let stripped = strip_approved_line(raw.as_bytes());
+            let text = String::from_utf8_lossy(&stripped);
+            assert!(!text.contains("Approved"), "{key}: {text}");
+            assert!(text.ends_with("\r\n\r\nreal =E2=80=94 body\r\n"), "{text}");
+        }
+    }
+
+    #[test]
+    fn leaves_an_encoded_part_alone_when_its_first_line_is_not_a_key() {
         let raw = b"From: a@example.invalid\r\n\
 Content-Type: text/plain\r\n\
 Content-Transfer-Encoding: base64\r\n\
 \r\n\
-QXBwcm92ZWQ6IHNlY3JldA0K\r\n";
+SGVsbG8gd29ybGQ=\r\n";
         assert_eq!(strip_approved_line(raw), raw);
     }
 

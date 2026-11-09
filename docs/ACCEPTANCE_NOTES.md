@@ -3310,8 +3310,12 @@ write-only: PATCH/PUT accept a plaintext that is stored as Argon2id, an empty
 string clears it, and no read ever returns it. A post carrying that key in an
 `Approved:`/`Approve:`/`X-Approved:`/`X-Approve:` header, or as the first line
 of an unencoded plain-text body, is accepted and the key is removed before
-delivery, archiving and digesting. A key inside a base64 or quoted-printable
-part is neither honored nor stripped; use the header form.
+delivery, archiving and digesting. The removal covers the first line of
+every text part: the `text/html` alternative and any other `text/*` part as
+well as the plain one, in 7bit/8bit, quoted-printable and base64 form
+(`crates/mail/tests/cook.rs`, `approved_line`, security finding F-11). A key
+inside a base64 or quoted-printable part is still not honored (it does not
+approve the post; use the header form) but it is no longer redistributed.
 
 Site-wide header checks live in `listmngr.toml`:
 
