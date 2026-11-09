@@ -1,5 +1,12 @@
 # Architecture
 
+## Rate limiter state is bounded
+
+`RateLimiter::check` caps its `DashMap` at `MAX_KEYS` (100 000) buckets:
+at the cap it `retain`s only unexpired buckets, and refuses a still-unknown key
+for one window if the map remains full, so unauthenticated peer-keyed requests
+cannot grow process memory without bound.
+
 ## 1.2.1 — bounded local acceptance verified
 
 The version is `[workspace.package] version` and the `version` beside
