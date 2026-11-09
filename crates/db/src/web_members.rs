@@ -346,9 +346,17 @@ impl Database {
                             subscription_mode: SubscriptionMode::AsAddress,
                             display_name: display_name.clone(),
                         };
+                        // pre_verified asserts delivery-level confirmation for a
+                        // subscription this call creates; it may mark only an address
+                        // this call introduces, never one that already exists, whose
+                        // `verified_on` is the account-level mailbox proof.
+                        let introduces = matches!(
+                            self.addresses().get(&address.email).await,
+                            Err(Error::NotFound(_))
+                        );
                         match self
                             .members()
-                            .subscribe_with_context(new, flags.pre_verified, &context)
+                            .subscribe_with_context(new, flags.pre_verified && introduces, &context)
                             .await
                         {
                             Ok(_) => MassOutcome::Subscribed,

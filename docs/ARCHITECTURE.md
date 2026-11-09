@@ -1707,6 +1707,8 @@ what they mean on the REST API, and `MemberRepo::subscribe_with_context`
 for the other roles; each address commits on its own and reports its
 outcome, so a refused address never rolls back the accepted ones.
 
+For the other roles, `browser_mass_subscribe` hands `pre_verified` to `subscribe_with_context` only when the address does not exist yet (audit F-01): the flag asserts the new subscription's confirmation, never the account-level proof in `addresses.verified_on` of an existing address.
+
 The roster page is the first progressive enhancement: `Shell::with_htmx`
 loads the vendored `htmx.min.js` (and, through `scripted`, widens the CSP
 to `script-src 'self'`), the search form carries `hx-get`/`hx-target`/
