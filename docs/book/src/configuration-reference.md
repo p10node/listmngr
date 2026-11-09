@@ -235,5 +235,5 @@ the effective values with secrets redacted; `listmngr conf --key section.key` pr
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `log` | `String` | `"info"` |  |
-| `metrics` | `bool` | `true` |  |
+| `metrics` | `bool` | `true` | Serves the unauthenticated `/metrics` exposition; `false` withdraws the route (404). |
 

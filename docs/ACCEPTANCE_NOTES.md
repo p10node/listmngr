@@ -2988,7 +2988,10 @@ needs the message re-encoded upstream. See `P2-LMTP-PARAMETERS` in
 ## Mail metrics — bounded acceptance verified
 
 `GET /metrics` (unauthenticated, Prometheus text) now reports the mail path
-next to `listmngr_up`:
+next to `listmngr_up`. `[observability] metrics = false` (or
+`LISTMNGR__OBSERVABILITY__METRICS=false`) withdraws the route: it is not
+registered and answers 404. Operators should still restrict `/metrics` at the
+proxy because the route carries no authentication:
 
 | Metric                                                                   | Kind      | Meaning                                                                                                    |
 |--------------------------------------------------------------------------|-----------|------------------------------------------------------------------------------------------------------------|
