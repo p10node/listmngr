@@ -4071,6 +4071,20 @@ password check draws from — login, password change, reset confirmation,
 deletion, and the second-factor management forms; it was previously fixed at
 five a minute regardless of configuration.
 
+That budget is per principal, not one bucket for the site. `POST /web/login`
+draws from two buckets at the login budget, `web-login:ip:<socket peer>` and
+`web-login:account:<trimmed, lower-cased email>`, so an anonymous client that
+exhausts its own allowance (or guesses one account) cannot make other clients'
+valid logins answer 429. The signed-in password forms (password change, account
+deletion, TOTP recovery codes and disable, passkey removal, OIDC unlink) use
+`web-login:user:<user id>`. Every password check also draws from a global Argon2
+ceiling of 60 times the login budget. The browser pre-auth buckets
+(`web-session-issue`, `web-totp`, `web-passkey`, `web-oidc`, `web-reset`,
+`web-signup`, `web-verify`, `public-workflows`) are suffixed with the socket
+peer address (`X-Forwarded-For` is still ignored; behind a reverse proxy the
+peer is the proxy, so the per-account and per-user keys are the controls that
+hold there). Tests: `crates/api/tests/webui/rate_buckets.rs`.
+
 Sessions use opaque random credentials, hashed storage, independent CSRF secrets,
 rotation at login, server-side logout revocation and password-version checks.
 Cookies are HttpOnly, SameSite=Strict, Path=/web, and Secure on HTTPS. Authenticated

@@ -1,7 +1,7 @@
 //! Authenticated password change; password reset/recovery is a separate workflow.
 use super::{
-    ApiError, ApiResult, AppState, Error, Form, HeaderMap, Response, Shell, State, header, html,
-    load, reader_language, write_session,
+    ApiResult, AppState, Error, Form, HeaderMap, Response, Shell, State, header, html, load,
+    reader_language, write_session,
 };
 use listmngr_web::Nav;
 use serde::Deserialize;
@@ -38,9 +38,7 @@ pub(super) async fn change(
     if f.new_password != f.confirm_password {
         return Err(Error::Validation("password confirmation does not match".into()).into());
     }
-    s.web_login_rate
-        .check("web-login")
-        .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
+    s.password_check_user(&session)?;
     s.db.browser_change_password(&session, &f.current_password, &f.new_password)
         .await?;
     let mut response = html(&listmngr_web::PasswordChanged {

@@ -30,6 +30,7 @@ use listmngr_core::{
     Config, DeliveryMode, DeliveryStatus, Error, ListId, MemberId, MemberRole, Preferences,
     SubscriptionMode, UserId, builtin_styles,
 };
+use listmngr_db::web_sessions::WebSession;
 use listmngr_db::{AuditContext, Database, NewList, NewMember, NewUser, TokenAuth};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -715,6 +716,9 @@ pub struct AppState {
     pre_auth_rate: Arc<RateLimiter>,
     post_auth_rate: Arc<RateLimiter>,
     web_login_rate: Arc<RateLimiter>,
+    /// A much wider ceiling over every browser password check, so aggregate
+    /// Argon2 work stays bounded without one client exhausting everyone's budget.
+    web_login_global: Arc<RateLimiter>,
     flavor: ApiFlavor,
     /// `[[web.oidc]]`: the identity providers the login page offers.
     oidc: Arc<oidc::Providers>,
@@ -732,6 +736,29 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// A pre-auth bucket of the browser surface, kept per peer.
+    fn pre_auth_check(&self, bucket: &str, headers: &HeaderMap) -> Result<(), u64> {
+        self.pre_auth_rate
+            .check(&format!("{bucket}:{}", peer_key(headers)))
+    }
+
+    /// One browser password check by a principal (`ip:` / `account:` /
+    /// `user:` key): the principal's own budget first, then the wide
+    /// global ceiling.
+    fn password_check(&self, principal: &str) -> ApiResult<()> {
+        self.web_login_rate
+            .check(&format!("web-login:{principal}"))
+            .and_then(|()| self.web_login_global.check("web-login"))
+            .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))
+    }
+
+    /// The same for a signed-in form: keyed by the session's user, which an
+    /// anonymous client cannot influence.
+    fn password_check_user(&self, session: &WebSession) -> ApiResult<()> {
+        let user = session.user_id.ok_or(Error::Authentication)?;
+        self.password_check(&format!("user:{user}"))
+    }
+
     /// The search index when `[archive]` is on and the runner or
     /// `listmngr archive reindex` has created it.
     fn search_index(&self) -> Option<Arc<listmngr_archive::search::SearchIndex>> {
@@ -880,6 +907,15 @@ impl RateLimiter {
         }
     }
 
+    /// The same window with `factor` times the budget and its own state.
+    fn scaled(&self, factor: u32) -> Self {
+        Self {
+            limit: self.limit.saturating_mul(factor),
+            window: self.window,
+            hits: DashMap::new(),
+        }
+    }
+
     fn check(&self, key: &str) -> Result<(), u64> {
         let now = Instant::now();
         let mut hit = self.hits.entry(key.to_owned()).or_insert((now, 0));
@@ -961,6 +997,36 @@ impl From<Error> for ApiError {
 }
 type ApiResult<T> = Result<T, ApiError>;
 
+/// The global password-check ceiling is this many times
+/// `security.rate_limit.login`.
+const WEB_LOGIN_GLOBAL_FACTOR: u32 = 60;
+/// Set by `stamp_peer` from the TCP socket peer; never taken from a client.
+const PEER_HEADER: &str = "x-listmngr-peer";
+
+/// Records the socket peer address (not `X-Forwarded-For`) in a private
+/// request header, replacing whatever the client sent, so the browser
+/// handlers can key their rate buckets by peer.
+async fn stamp_peer(mut request: Request, next: Next) -> Response {
+    request.headers_mut().remove(PEER_HEADER);
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| addr.ip().to_string());
+    if let Some(value) = peer.and_then(|peer| HeaderValue::from_str(&peer).ok()) {
+        request.headers_mut().insert(PEER_HEADER, value);
+    }
+    next.run(request).await
+}
+/// The stamped peer, or one shared `unknown` when the listener has no
+/// connect info.
+fn peer_key(headers: &HeaderMap) -> String {
+    headers
+        .get(PEER_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_owned()
+}
+
 pub fn router(db: Database, config: Config) -> Router {
     // `[site]` is one source of truth for the browser surface and the mail
     // the site sends: the public origin (passkeys, archive links, mailed
@@ -982,6 +1048,7 @@ pub fn router(db: Database, config: Config) -> Router {
     // `security.rate_limit.login`: one bucket for every password check the
     // browser surface performs, so an attacker cannot buy Argon2 time.
     let web_login_rate = RateLimiter::from_config(&config.security.rate_limit.login);
+    let web_login_global = web_login_rate.scaled(WEB_LOGIN_GLOBAL_FACTOR);
     // `Config::load` validated `[mta]`; a bad value here can only come from
     // a caller-built config and must not take the API down.
     let mta_maps = listmngr_mail::mta::MapWriter::from_config(&config.mta)
@@ -997,6 +1064,7 @@ pub fn router(db: Database, config: Config) -> Router {
         pre_auth_rate: Arc::new(pre_auth_rate),
         post_auth_rate: Arc::new(post_auth_rate),
         web_login_rate: Arc::new(web_login_rate),
+        web_login_global: Arc::new(web_login_global),
         flavor: ApiFlavor::V1,
         oidc,
         mta_maps,
@@ -1025,6 +1093,7 @@ pub fn router(db: Database, config: Config) -> Router {
         .merge(unsubscribe::routes())
         .merge(compat::routes())
         .layer(middleware::from_fn(trace_request))
+        .layer(middleware::from_fn(stamp_peer))
         .with_state(state)
 }
 

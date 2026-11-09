@@ -33,13 +33,13 @@ pub fn routes() -> Router<AppState> {
 async fn request(
     State(state): State<AppState>,
     Path(list): Path<ListId>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<Request>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
     // A single global bucket bounds unauthenticated work and limiter cardinality.
     // Durable DB notice budgets additionally apply across all server processes.
     state
-        .pre_auth_rate
-        .check("public-workflows")
+        .pre_auth_check("public-workflows", &headers)
         .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
     state
         .db
@@ -60,11 +60,11 @@ async fn request(
 async fn confirm(
     State(state): State<AppState>,
     Path(list): Path<ListId>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<Confirmation>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     state
-        .pre_auth_rate
-        .check("public-workflows")
+        .pre_auth_check("public-workflows", &headers)
         .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
     state
         .db

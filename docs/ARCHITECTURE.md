@@ -201,6 +201,17 @@ file is proved loadable), `records`, `dns` (the doctor's resolver,
 for exit 12); `Command::Dkim` runs without a database.
 `webui_domains::dkim_records` is unchanged and now lists every selector.
 
+## Rate buckets per principal
+
+`stamp_peer` (outermost layer of `router`) writes the TCP socket peer into a
+private request header, replacing any client-supplied value, and
+`peer_key` reads it back (`unknown` when the listener has no connect info).
+`AppState::pre_auth_check(bucket, headers)` keys the browser pre-auth buckets
+`<bucket>:<peer>`; `AppState::password_check(principal)` draws from
+`web-login:<principal>` and then from `web_login_global`
+(`RateLimiter::scaled(WEB_LOGIN_GLOBAL_FACTOR)`, 60x the login budget);
+`password_check_user` keys signed-in forms by the session's user id.
+
 ## Loop and abuse rules — bounded local acceptance verified
 
 `listmngr_core::RateLimit { count, window_secs }` (`parse(key, spec)`,

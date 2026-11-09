@@ -38,8 +38,7 @@ pub(super) async fn request(
     Form(form): Form<RequestForm>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &headers, &form.csrf).await?;
-    s.pre_auth_rate
-        .check("web-reset")
+    s.pre_auth_check("web-reset", &headers)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     if form.email.len() > 320 {
         return Err(Error::Validation("field too long".into()).into());
@@ -99,8 +98,7 @@ pub(super) async fn confirm(
     Form(form): Form<ConfirmForm>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &headers, &form.csrf).await?;
-    s.pre_auth_rate
-        .check("web-reset")
+    s.pre_auth_check("web-reset", &headers)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     if form.token.len() > 128 || form.password.len() > 1024 {
         return Err(Error::Validation("field too long".into()).into());

@@ -59,7 +59,7 @@ mod system;
 mod totp;
 #[path = "webui_users.rs"]
 mod users;
-use crate::{ApiError, ApiResult, AppState};
+use crate::{ApiError, ApiResult, AppState, peer_key};
 use askama::Template;
 use axum::{
     Form,
@@ -569,8 +569,7 @@ async fn anonymous(s: &AppState, h: &HeaderMap) -> ApiResult<WebSession> {
             Err(e) => return Err(e.into()),
         }
     }
-    s.pre_auth_rate
-        .check("web-session-issue")
+    s.pre_auth_check("web-session-issue", h)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     Ok(s.db.create_web_session(None, None, now()).await?)
 }
@@ -657,10 +656,10 @@ async fn login(
     Form(f): Form<Login>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &h, &f.csrf).await?;
-    // A bounded global bucket limits expensive password work without attacker-chosen keys.
-    s.web_login_rate
-        .check("web-login")
-        .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
+    // Per peer and per targeted account (each with the login budget), then a
+    // wide global ceiling: one client cannot spend everyone's allowance.
+    s.password_check(&format!("ip:{}", peer_key(&h)))?;
+    s.password_check(&format!("account:{}", f.email.trim().to_lowercase()))?;
     if f.password.len() > 1024 {
         return Err(Error::Authentication.into());
     }
@@ -803,8 +802,7 @@ async fn subscription_request(
     Form(f): Form<SubscriptionRequest>,
 ) -> ApiResult<Response> {
     write_session(&s, &h, &f.csrf).await?;
-    s.pre_auth_rate
-        .check("public-workflows")
+    s.pre_auth_check("public-workflows", &h)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     s.db.workflows()
         .request(&id, &f.email, f.action, now())
@@ -856,8 +854,7 @@ async fn confirm(
     Form(f): Form<Confirmation>,
 ) -> ApiResult<Response> {
     write_session(&s, &h, &f.csrf).await?;
-    s.pre_auth_rate
-        .check("public-workflows")
+    s.pre_auth_check("public-workflows", &h)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     s.db.workflows().confirm(&id, &f.token, now()).await?;
     Ok(html(&listmngr_web::Confirmed {

@@ -45,8 +45,7 @@ pub(super) async fn login(
     Form(form): Form<CodeForm>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &headers, &form.csrf).await?;
-    s.pre_auth_rate
-        .check("web-totp")
+    s.pre_auth_check("web-totp", &headers)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     if form.code.len() > 16 {
         return Err(Error::Authentication.into());
@@ -105,9 +104,7 @@ pub(super) async fn recovery(
     Form(form): Form<PasswordForm>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &headers, &form.csrf).await?;
-    s.web_login_rate
-        .check("web-login")
-        .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
+    s.password_check_user(&session)?;
     let codes =
         s.db.browser_totp_recovery_codes(&session, &form.password, now())
             .await?;
@@ -127,9 +124,7 @@ pub(super) async fn disable(
     Form(form): Form<PasswordForm>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &headers, &form.csrf).await?;
-    s.web_login_rate
-        .check("web-login")
-        .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
+    s.password_check_user(&session)?;
     s.db.browser_totp_disable(&session, &form.password).await?;
     Ok(Redirect::to("/web/account/totp").into_response())
 }

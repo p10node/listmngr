@@ -108,8 +108,7 @@ pub(super) async fn login_start(
     if !session.verifies_csrf(header_csrf(&headers)) {
         return Err(super::denied());
     }
-    s.pre_auth_rate
-        .check("web-passkey")
+    s.pre_auth_check("web-passkey", &headers)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     let options = s.db.browser_passkey_login_start(&session, now()).await?;
     let mut response = json_text(options);
@@ -127,8 +126,7 @@ pub(super) async fn login_finish(
     if !session.verifies_csrf(header_csrf(&headers)) {
         return Err(super::denied());
     }
-    s.pre_auth_rate
-        .check("web-passkey")
+    s.pre_auth_check("web-passkey", &headers)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     let fresh =
         s.db.browser_passkey_login_finish(&session, &body, now())
@@ -156,9 +154,7 @@ pub(super) async fn remove(
         return Err(Error::NotFound("passkey".into()).into());
     }
     let session = super::write_session(&s, &headers, &form.csrf).await?;
-    s.web_login_rate
-        .check("web-login")
-        .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
+    s.password_check_user(&session)?;
     s.db.browser_passkey_remove(&session, &id, &form.password)
         .await?;
     Ok(Redirect::to("/web/account/passkeys").into_response())
