@@ -131,7 +131,7 @@ impl Database {
             .await
     }
 
-    /// Seats the account behind `email` as an owner of the domain.
+    /// Seats the account that has verified `email` as an owner of the domain.
     /// # Errors
     /// Authority, `NotFound` for an unknown domain or an address without an
     /// account, `Conflict` when already an owner, database or audit failures.
@@ -141,12 +141,27 @@ impl Database {
         host: &str,
         email: &str,
     ) -> Result<UserId> {
-        let actor = self.site_owner_check(session).await?;
-        let owner = self.users().get_by_email(email.trim()).await?;
+        let email = email.trim().to_ascii_lowercase();
+        // The grantee is the account that has proven this mailbox; an address
+        // that is merely linked (unverified) or unowned identifies nobody.
+        let mut tx = self.browser_write_tx().await?;
+        let actor = Self::server_owner_tx(&mut tx, session).await?;
+        let owner: Option<String> = sqlx::query_scalar(
+            "SELECT user_id FROM addresses WHERE email=$1 AND user_id IS NOT NULL AND verified_on IS NOT NULL",
+        )
+        .bind(&email)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        let owner: UserId = owner
+            .ok_or_else(|| Error::NotFound(email.clone()))?
+            .parse()
+            .map_err(db_error)?;
+        tx.commit().await.map_err(db_error)?;
         self.domains()
-            .add_owner_with_context(host, owner.id, &AuditContext::new(Some(actor), None, None))
+            .add_owner_with_context(host, owner, &AuditContext::new(Some(actor), None, None))
             .await?;
-        Ok(owner.id)
+        Ok(owner)
     }
 
     /// Removes one owner of the domain.

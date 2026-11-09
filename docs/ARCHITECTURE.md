@@ -1672,6 +1672,8 @@ before it issues one, and the create handler maps `Conflict`/`NotFound`/
 keeps an encoded query string on page links. The create form renders through
 a `control` macro shared with no other page yet.
 
+`browser_domain_owner_add` resolves the grantee inside the server-owner transaction with `SELECT user_id FROM addresses WHERE email=$1 AND user_id IS NOT NULL AND verified_on IS NOT NULL` instead of `UserRepo::get_by_email`, which accepts any linked row (audit F-16): an authority grant must never land on an account that has not proven the mailbox.
+
 ## Moderator queues — bounded local acceptance verified
 
 `crates/db/src/web_moderation.rs` holds the moderator's reads and writes.

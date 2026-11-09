@@ -1968,6 +1968,8 @@ REST); DKIM keys are configuration, so the page shows their records and
 generates none; the account page does not delete or merge accounts
 (`P4-GDPR`), reset passwords or manage second factors.
 
+**Security audit F-16 (domain-owner grant by email).** Seating a domain owner from the typed email resolves only the account that has proven that mailbox (`addresses.verified_on IS NOT NULL` and `user_id` set), the rule login and the owner predicates already apply. An unowned address, or one merely linked to an account without proof, is refused as not found (the existing "unknown account" refusal) and `domain_owners` stays unchanged; once the mailbox owner verifies, the grant lands on that account. Regression: `crates/db/tests/domain_owner_grant_verified.rs`.
+
 ## List creation and the directory (`P4-LIST-CREATE-INDEX`) — bounded local acceptance verified
 
 The directory at `/web` now searches (`?q=`, a case-insensitive substring of
