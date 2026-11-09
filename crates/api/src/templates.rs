@@ -207,8 +207,20 @@ async fn assign_scope(
                 "unknown template name: {name}"
             ))));
         }
-        listmngr_mail::templates::parse_uri(uri)
+        let source = listmngr_mail::templates::parse_uri(uri)
             .map_err(|error| ApiError(Error::Validation(format!("{name}: {error}"))))?;
+        // `file://` reads a host file with the service's privileges at send
+        // time: only the operator (an unbound admin token) may point a
+        // template at one, at any scope.
+        if matches!(source, listmngr_mail::templates::Source::File(_))
+            && !(auth.scopes.contains("admin")
+                && auth.list_id.is_none()
+                && auth.domain_id.is_none())
+        {
+            return Err(ApiError(Error::Forbidden(format!(
+                "{name}: file:// template sources require an unbound admin token"
+            ))));
+        }
     }
     if replace {
         s.db.templates()

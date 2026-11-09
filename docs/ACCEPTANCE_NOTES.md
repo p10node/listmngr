@@ -3239,6 +3239,14 @@ is never notified) and the owners and moderators (`admin_immed_notify`,
 default true). Non-ASCII templates and subjects are encoded safely. See
 `P2-TEMPLATES` in `docs/FEATURE_PARITY.md`.
 
+A `file://` source reads a host file with the service's privileges, so only the
+operator may assign one: the REST write routes (list, domain and site scope,
+both prefixes, single-name and collection) answer 403 for it unless the token
+is an unbound `admin` token. List-bound and domain-bound tokens, and unbound
+tokens without `admin`, may still assign `mailman:///` and `https://` sources.
+Test `file_template_sources_need_an_unbound_admin_token` in
+`crates/api/tests/rest/template_uris.rs`.
+
 Mailman's `admin_notify_mchanges` (migration `0041`, default false, on the
 list configuration resource under both prefixes) tells every owner and
 moderator when a member is subscribed (`list:admin:notice:subscribe`,

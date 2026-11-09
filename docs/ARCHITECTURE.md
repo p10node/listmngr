@@ -814,6 +814,11 @@ English otherwise, per message. Every bundle also carries the generated
 list and member language pickers use. `notices::recipient_language` and
 `delivery` choose with `choose_notice`.
 
+`assign_scope` in `crates/api/src/templates.rs` refuses a `Source::File` URI
+unless the caller's token is unbound with the `admin` scope (`file://` reads a
+host file at send time), after the name and URI validation and before any
+write.
+
 Bodies: `listmngr_mail::templates::builtin_language(name, language)` →
 `(body, served language)` tries this project's `vi`, else
 `templates_mailman::builtin(language, name)` (generated, one `include_str!`

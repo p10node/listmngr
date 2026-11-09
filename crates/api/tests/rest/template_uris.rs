@@ -337,3 +337,107 @@ async fn template_writes_need_write_scope_and_site_uris_need_admin() {
         StatusCode::FORBIDDEN
     );
 }
+
+#[tokio::test]
+async fn file_template_sources_need_an_unbound_admin_token() {
+    let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+    db.migrate().await.unwrap();
+    let domain = db.domains().create("example.com", "", None).await.unwrap();
+    let list = db
+        .lists()
+        .create(listmngr_db::NewList {
+            list_id: "dev.example.com".parse().unwrap(),
+            display_name: "Dev".into(),
+            style: "legacy-default".into(),
+        })
+        .await
+        .unwrap();
+    let user = db
+        .users()
+        .create(NewUser {
+            display_name: "owner".into(),
+            email: "owner@example.com".into(),
+            password: "very secure password".into(),
+            server_owner: true,
+        })
+        .await
+        .unwrap();
+    let bound = db
+        .tokens()
+        .create_scoped(
+            user.id,
+            "bound",
+            &["lists:read", "lists:write"],
+            Some(&list.id),
+            Some(domain.id),
+            None,
+        )
+        .await
+        .unwrap()
+        .token;
+    let unbound_writer = db
+        .tokens()
+        .create(user.id, "writer", &["lists:read", "lists:write"], None)
+        .await
+        .unwrap()
+        .token;
+    let admin = db
+        .tokens()
+        .create(user.id, "admin", &["admin"], None)
+        .await
+        .unwrap()
+        .token;
+    let app = listmngr_api::router(db.clone(), config_with_rate(100));
+    let file = format!(r#"{{"{WELCOME}":"file:///etc/hostname"}}"#);
+    let list_path = "/api/v1/lists/dev.example.com/uris";
+    for (token, uri) in [
+        (&bound, list_path),
+        (&unbound_writer, list_path),
+        (&bound, "/3.1/lists/dev.example.com/uris"),
+        (&unbound_writer, "/api/v1/domains/example.com/uris"),
+    ] {
+        for method in ["PATCH", "PUT"] {
+            assert_eq!(
+                call(&app, method, uri, Some(token), Some(&file))
+                    .await
+                    .status(),
+                StatusCode::FORBIDDEN,
+                "{method} {uri}"
+            );
+        }
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                &format!("{uri}/{WELCOME}"),
+                Some(token),
+                Some(r#"{"uri":"file:///etc/hostname"}"#)
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN,
+            "{uri}"
+        );
+    }
+    // Nothing was stored, and non-file sources still work for the same token.
+    assert!(entries(&app, &admin, list_path).await.is_empty());
+    assert_eq!(
+        call(
+            &app,
+            "PATCH",
+            list_path,
+            Some(&bound),
+            Some(&format!(r#"{{"{WELCOME}":"mailman:///{WELCOME}"}}"#))
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    // The operator's admin token keeps file:// at every scope.
+    assert_eq!(
+        call(&app, "PATCH", list_path, Some(&admin), Some(&file))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+}
