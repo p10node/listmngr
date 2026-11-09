@@ -2802,6 +2802,15 @@ for posts. `/api/v1/system/pipelines` projects the registry as it is.
 
 ## P2-CHAIN-RULES — bounded acceptance verified
 
+Owner-supplied patterns (the `^` entries of the address lists
+`*_these_nonmembers`, `acceptable_aliases` and `dmarc_addresses`, header
+rules, topics, and bans) are compiled through
+`listmngr_pipeline::regex_cache::get_or_compile`, a process-wide table keyed
+by `(kind, pattern)` that also keeps a compile error. The shared `in` worker
+therefore compiles a pattern once, not once per message and recipient. The
+table holds at most 20,000 entries and starts over when full. The 10,000
+entries an address list accepts are unchanged (security finding F-22).
+
 The `default-posting-chain` follows Mailman 3's built-in chain (the
 `dmarc-mitigation` link came with `P2-VALIDATE-AUTHENTICITY`, the
 `news-moderation` link with `P6-NNTP-SETTINGS`): `dmarc-mitigation` →

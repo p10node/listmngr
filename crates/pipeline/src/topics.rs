@@ -65,7 +65,7 @@ pub fn hits<'a>(topics: &'a [Topic], lines: &[String]) -> Vec<&'a str> {
     topics
         .iter()
         .filter(|topic| {
-            compile_topic_pattern(&topic.pattern)
+            crate::regex_cache::get_or_compile("topic", &topic.pattern, compile_topic_pattern)
                 .is_ok_and(|regex| lines.iter().any(|line| regex.is_match(line)))
         })
         .map(|topic| topic.name.as_str())

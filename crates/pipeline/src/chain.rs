@@ -295,7 +295,7 @@ pub fn header_matches(
     header: &str,
     pattern: &str,
 ) -> Result<bool, regex::Error> {
-    let regex = compile_header_pattern(pattern)?;
+    let regex = crate::regex_cache::get_or_compile("header", pattern, compile_header_pattern)?;
     Ok(ctx.headers(header).any(|value| regex.is_match(value)))
 }
 
