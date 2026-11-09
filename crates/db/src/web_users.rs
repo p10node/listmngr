@@ -172,6 +172,39 @@ impl Database {
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
+        if current == 1 && !server_owner {
+            // The API authorizes on the token alone, so demotion has to end the
+            // authority the tokens carry: every live unbound or domain-bound
+            // token, and every list-bound one for a list the account does not
+            // own as a verified list owner. Same transaction, one audit event
+            // per token.
+            let stale: Vec<String> = sqlx::query_scalar(
+                "SELECT t.id FROM api_tokens t WHERE t.user_id=$1 AND t.revoked_at IS NULL AND (t.list_id IS NULL OR NOT EXISTS (SELECT 1 FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=t.list_id AND m.role='owner' AND a.user_id=t.user_id AND a.verified_on IS NOT NULL AND (m.subscription_mode='as_address' OR m.user_id=t.user_id)))",
+            )
+            .bind(id.to_string())
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            for token in stale {
+                sqlx::query(
+                    "UPDATE api_tokens SET revoked_at=$1 WHERE id=$2 AND revoked_at IS NULL",
+                )
+                .bind(chrono::Utc::now().to_rfc3339())
+                .bind(&token)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_error)?;
+                Self::record_tx_with_context(
+                    &mut tx,
+                    &AuditContext::new(Some(actor), None, None),
+                    "token.revoke",
+                    "token",
+                    &token,
+                    serde_json::json!({"reason": "server owner demoted", "user": id.to_string()}),
+                )
+                .await?;
+            }
+        }
         Self::record_tx_with_context(
             &mut tx,
             &AuditContext::new(Some(actor), None, None),

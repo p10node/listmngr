@@ -1962,6 +1962,12 @@ address and pages with the search. An account's page
 one audited write (the last server owner with a verified address cannot be
 demoted), marks any of its addresses verified or unverified without a mailbox
 proof, and lists its memberships with a link to each member's options.
+Demoting a server owner revokes, in the same transaction and with one
+`token.revoke` event per token, every live API token of that account that
+is unbound or domain-bound, and every list-bound one for a list the account
+does not own as a verified list owner (the API authorizes on the token alone).
+Test `demoting_a_server_owner_revokes_their_server_level_tokens` in
+`crates/db/tests/demotion_revokes_tokens.rs`.
 
 Limits: no domain edit after creation (description and alias are fixed, as on
 REST); DKIM keys are configuration, so the page shows their records and
