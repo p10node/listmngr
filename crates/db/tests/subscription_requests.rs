@@ -354,14 +354,15 @@ async fn a_pending_request_survives_the_confirmation_expiry_sweep() {
         )
         .await
         .unwrap();
-    // Another list's request, far in the future, drives the sweep that
-    // deletes expired confirmation rows.
+    // A later request, past the 24 h token window but inside the 30-day
+    // moderation lapse, drives the sweep that deletes expired confirmation
+    // rows.
     db.workflows()
         .request(
             &list,
             "later@example.invalid",
             SubscriptionAction::Join,
-            now() + 90 * 86_400_000,
+            now() + 20 * 86_400_000,
         )
         .await
         .unwrap();
@@ -372,7 +373,7 @@ async fn a_pending_request_survives_the_confirmation_expiry_sweep() {
             .unwrap()
             .len(),
         2,
-        "moderation requests never expire with confirmation tokens"
+        "moderation requests outlive confirmation tokens"
     );
 }
 

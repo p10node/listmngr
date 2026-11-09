@@ -364,6 +364,10 @@ impl<'a> WorkflowRepo<'a> {
                 return self.commit_command(tx, lease, now_ms).await;
             }
         }
+        // Bounded queue (see `moderation_queue_refuses`); a drop is silent.
+        if moderation_queue_refuses(&mut tx, list, &policy, &address.email, action).await? {
+            return self.commit_command(tx, lease, now_ms).await;
+        }
         let updated=sqlx::query("UPDATE subscription_rate SET requests=CASE WHEN window_start<=$1 THEN 1 ELSE requests+1 END,window_start=CASE WHEN window_start<=$1 THEN $2 ELSE window_start END WHERE id=1 AND (window_start<=$1 OR requests<100)")
             .bind(now_ms.saturating_sub(60_000)).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
         if updated.rows_affected() == 0 {
@@ -1669,11 +1673,37 @@ fn invalid_token() -> Error {
     Error::Validation("invalid or expired confirmation".into())
 }
 
-// Indexed, capped, and committed with the request. Used tokens remain until
-// expiry so confirming cannot bypass the address cooldown.
+/// Whether a `moderate` list takes no new parked request: one is already
+/// undecided for this (address, action), or the list holds the maximum.
+async fn moderation_queue_refuses(
+    tx: &mut Transaction<'_, Any>,
+    list: &ListId,
+    policy: &str,
+    email: &str,
+    action: SubscriptionAction,
+) -> Result<bool> {
+    if policy != "moderate" {
+        return Ok(false);
+    }
+    let parked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND state='pending_moderation'")
+        .bind(list.as_str()).fetch_one(&mut **tx).await.map_err(db_error)?;
+    let same: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND email=$2 AND action=$3 AND state='pending_moderation'")
+        .bind(list.as_str()).bind(email).bind(action.name()).fetch_one(&mut **tx).await.map_err(db_error)?;
+    Ok(same > 0 || parked >= MAX_PENDING_MODERATION)
+}
+
+/// Most undecided requests a `moderate` list parks; later ones are dropped.
+pub const MAX_PENDING_MODERATION: i64 = 1_000;
+/// How long a request waits for a moderator before it lapses.
+const PENDING_MODERATION_TTL_MS: i64 = 30 * 24 * 3_600_000;
+
+// Capped and committed with the request. Used tokens remain until expiry so
+// confirming cannot bypass the address cooldown. A request parked for a
+// moderator outlives the 24 h token window and lapses after
+// PENDING_MODERATION_TTL_MS counted from its creation.
 async fn cleanup_expired(tx: &mut Transaction<'_, Any>, now_ms: i64) -> Result<()> {
-    let deleted=sqlx::query("DELETE FROM subscription_workflows WHERE id IN (SELECT id FROM subscription_workflows WHERE expires_at<=$1 AND state<>'pending_moderation' ORDER BY expires_at,id LIMIT 100)")
-        .bind(now_ms).execute(&mut **tx).await.map_err(db_error)?.rows_affected();
+    let deleted=sqlx::query("DELETE FROM subscription_workflows WHERE id IN (SELECT id FROM subscription_workflows WHERE (expires_at<=$1 AND state<>'pending_moderation') OR (state='pending_moderation' AND created_at<=$2) ORDER BY expires_at,id LIMIT 100)")
+        .bind(now_ms).bind(now_ms.saturating_sub(PENDING_MODERATION_TTL_MS)).execute(&mut **tx).await.map_err(db_error)?.rows_affected();
     if deleted > 0 {
         Database::record_tx_with_context(
             tx,
