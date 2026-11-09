@@ -1864,9 +1864,17 @@ round trip through a mailbox the site cannot reach yet
 
 `crates/db/src/web_addresses.rs` manages the reader's addresses under
 `browser_write_tx` + `browser_user_tx`. Adding shares `issue_verification`
-with signup (token row, hourly cooldown, site notice) and links an address
-nobody owns while clearing any earlier `verified_on`, because verification is
-proof for *this* account; an address another account owns commits nothing.
+with signup (token row, hourly cooldown, site notice) but links nothing and
+touches no `verified_on` (audit F-10): a new or unowned address stays
+`user_id NULL` and the requester travels on the token (`account_tokens.claimant_user_id`,
+migration `0056`). `browser_verify_address` then sets `user_id` to the claimant
+and `verified_on` in one `UPDATE … WHERE user_id IS NULL OR user_id = claimant`,
+so a mailed token never moves an address another account took meanwhile; zero
+rows is an invalid token. Signup's `claim_account` deletes unconsumed claimant
+tokens of an address it links, so a pending request neither blocks nor
+outlives the mailbox owner's own signup. `export_user` counts an address link
+only when `verified_on` is set. An address another account owns commits
+nothing.
 Removal unlinks (`user_id = NULL`) and clears `verified_on`, deletes the
 address's pending tokens and keeps memberships, which reference the address
 row with `ON DELETE RESTRICT` anyway. Signup's `claim_account` applies the

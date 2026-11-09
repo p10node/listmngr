@@ -1,4 +1,5 @@
 C|account_tokens|address_id|text|required|-
+C|account_tokens|claimant_user_id|text|optional|-
 C|account_tokens|consumed_at|integer|optional|-
 C|account_tokens|created_at|integer|required|-
 C|account_tokens|expires_at|integer|required|-
@@ -6,5 +7,6 @@ C|account_tokens|id|text|required|-
 C|account_tokens|purpose|text|required|-
 C|account_tokens|token_hash|text|required|-
 F|account_tokens|address_id|addresses|id|cascade
+F|account_tokens|claimant_user_id|users|id|cascade
 U|account_tokens|token_hash
 U|account_tokens|id
