@@ -237,7 +237,7 @@ async fn what_the_site_may_not_reach_is_refused_before_a_connection() {
     };
     let (delivery, outcome) = deliver_due(&db, &strict).await.unwrap().unwrap();
     assert!(
-        matches!(&outcome, Outcome::Failed { status: None, error } if error.contains("private")),
+        matches!(&outcome, Outcome::Failed { status: None, error } if error == "target cannot be used by this site"),
         "{outcome:?}"
     );
     assert_eq!(delivery.state, DeliveryState::Failed);
@@ -257,7 +257,7 @@ async fn what_the_site_may_not_reach_is_refused_before_a_connection() {
         "{outcome:?}"
     );
     assert!(received.lock().unwrap().is_empty());
-    // A name nobody resolves: transient, tried again later.
+    // A name nobody resolves: the same refusal as a private target.
     let (unresolvable, _) = db
         .webhooks()
         .create_with_context(
@@ -277,10 +277,10 @@ async fn what_the_site_may_not_reach_is_refused_before_a_connection() {
         .unwrap();
     let (delivery, outcome) = deliver_due(&db, &config()).await.unwrap().unwrap();
     assert!(
-        matches!(&outcome, Outcome::Retry { status: None, error, .. } if error.contains("resolve")),
+        matches!(&outcome, Outcome::Failed { status: None, error } if error == "target cannot be used by this site"),
         "{outcome:?}"
     );
-    assert_eq!(delivery.state, DeliveryState::Pending);
+    assert_eq!(delivery.state, DeliveryState::Failed);
 }
 
 #[tokio::test]
@@ -401,4 +401,48 @@ async fn postgres_webhook_claim_contract() {
     let _ = received;
     db.pool().close().await;
     schema.drop().await.unwrap();
+}
+
+/// A list owner reads the delivery rows back, so a name the site's
+/// resolver cannot find and a name that resolves to an internal address
+/// must look the same: one refusal, one disposition.
+#[tokio::test]
+async fn an_unresolvable_name_and_a_private_target_are_refused_identically() {
+    let db = fixture().await;
+    let strict = WebhooksConfig {
+        allow_private_targets: false,
+        ..config()
+    };
+    let mut seen = Vec::new();
+    for url in [
+        "https://localhost/hook",
+        "https://hooks.nowhere.invalid/hook",
+    ] {
+        let (webhook, _) = db
+            .webhooks()
+            .create_with_context(
+                NewWebhook {
+                    url: url.into(),
+                    events: vec!["domain.*".into()],
+                    list_id: None,
+                    description: String::new(),
+                },
+                &AuditContext::system(),
+            )
+            .await
+            .unwrap();
+        db.webhooks()
+            .ping_with_context(webhook.id, &AuditContext::system())
+            .await
+            .unwrap();
+        let (delivery, outcome) = deliver_due(&db, &strict).await.unwrap().unwrap();
+        seen.push((
+            delivery.state,
+            delivery.attempts,
+            delivery.last_status,
+            delivery.last_error,
+            format!("{outcome:?}"),
+        ));
+    }
+    assert_eq!(seen[0], seen[1]);
 }

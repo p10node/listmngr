@@ -727,8 +727,11 @@ client with no redirects, the configured timeout, `User-Agent:
 listmngr` and `resolve_to_addrs(host, found)` so the connection goes
 to what was checked, and posts the payload with the `X-Listmngr-*`
 headers and `signature(secret, timestamp, body)` = `sha256=` HMAC of
-`timestamp.body`. A resolution failure and a transport error are
-transient; the error text is reqwest's, which names the URL and never
+`timestamp.body`. Every refusal before a connection (no host, a failed
+lookup, no address, a private target) is the one permanent
+`UNUSABLE_TARGET` outcome with the reason only in a debug log, so the delivery
+row the owner reads is no resolver oracle; a transport error is
+transient, and its text is reqwest's, which names the URL and never
 a header or the body. `listmngr_core::metrics::Metrics` gained
 `webhook_deliveries` (`delivered`/`retried`/`failed`).
 

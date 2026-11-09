@@ -974,7 +974,13 @@ later, then twenty, doubling to an hour, jittered, until `max_attempts`
 target the site may never reach is given up at once: a scheme other
 than `https://` (unless `allow_http`), or a name that resolves to a
 loopback, link-local, private, shared or unspecified address (unless
-`allow_private_targets`). The name is resolved before the check and
+`allow_private_targets`). A name that does not resolve, or has no
+address, is given up at once as well and with the same text,
+`target cannot be used by this site`, as a private target, so a list owner
+reading the delivery row cannot tell the site's internal names from
+unknown ones (the real reason goes to the operator's debug log); the price
+is that a webhook is not retried through a transient resolver outage and
+must be pinged again. The name is resolved before the check and
 the connection pinned to the addresses found, so a name that changes
 between the two cannot steer a delivery elsewhere. A disabled webhook
 keeps its deliveries until it is enabled again.
