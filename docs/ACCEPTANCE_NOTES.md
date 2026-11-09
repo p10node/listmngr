@@ -2921,6 +2921,13 @@ join or leave request becomes, the way Mailman does:
 | `moderate`              | the request waits for a moderator; the requester gets no token          |
 | `confirm_then_moderate` | the address is confirmed first, then a moderator decides                |
 
+For an e-mail `-join` or `-leave` the sender is only the unauthenticated
+envelope address, so `open` acts at once only when that address is already
+verified; any other mailbox is sent a confirmation token as under `confirm`,
+and the hourly per-address cooldown applies to `open` lists too
+(`crates/db/tests/open_policy_email.rs`, security finding F-19). The
+public API request route is unchanged.
+
 Moderators work the queue with the CLI:
 
 ```sh
