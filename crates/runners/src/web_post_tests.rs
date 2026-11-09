@@ -1,74 +1,50 @@
-//! A web post is approved like an `Approved:` post only for the verified
-//! sender it was recorded for, never when banned, and never for a member
-//! the list or an owner moderates.
-use crate::policy_facts::{WebPost, approve_web_post};
+//! A web post carries member authority only (security finding F-23): it is
+//! not an `Approved:` post, so emergency moderation, the size check and the
+//! posting-rate limit decide it exactly as they decide the member's mail,
+//! and a moderated member's web post is held like their mail.
 use listmngr_core::ModerationAction;
-use listmngr_pipeline::policy::PostingContext;
+use listmngr_pipeline::policy::{Disposition, PostingContext, decide_posting};
 
-/// A member's context: `member` false for a non-member, else their own
-/// moderation override.
-fn context(sender: &str, member: bool, own: Option<ModerationAction>) -> PostingContext {
-    PostingContext {
-        envelope_sender: Some(sender.into()),
-        member_moderation_action: member.then_some(own),
+/// A verified member's context, with their own moderation override.
+fn member(own: Option<ModerationAction>) -> PostingContext {
+    let mut ctx = PostingContext {
+        envelope_sender: Some("alice@example.org".into()),
+        member_moderation_action: Some(own),
         ..PostingContext::default()
-    }
+    };
+    ctx.message
+        .headers
+        .push(("From".into(), "alice@example.org".into()));
+    ctx.message.headers.push(("Subject".into(), "hello".into()));
+    ctx.list.posting_address = "dev@example.org".into();
+    ctx.message.recipients.push("dev@example.org".into());
+    ctx
 }
 
-fn web(address: &str) -> WebPost {
-    WebPost {
-        user_id: "u1".into(),
-        address: address.into(),
-    }
+fn is_hold(ctx: &PostingContext) -> bool {
+    matches!(decide_posting(ctx), Disposition::Hold(_))
 }
 
 #[test]
-fn a_deferred_member_is_approved_and_others_are_not() {
-    let mut ctx = context("alice@example.org", true, None);
-    assert!(approve_web_post(&mut ctx, Some(&web("Alice@Example.org"))));
-    assert!(ctx.sender.is_approved);
-    let mut ctx = context("alice@example.org", true, Some(ModerationAction::Accept));
-    assert!(approve_web_post(&mut ctx, Some(&web("alice@example.org"))));
-    for held in [
-        ModerationAction::Hold,
-        ModerationAction::Reject,
-        ModerationAction::Discard,
-    ] {
-        let mut ctx = context("alice@example.org", true, Some(held));
-        assert!(!approve_web_post(&mut ctx, Some(&web("alice@example.org"))));
-        assert!(!ctx.sender.is_approved, "{held:?}");
-    }
-    // The list's default applies to a member without an override.
-    let mut ctx = context("alice@example.org", true, None);
-    ctx.default_member_action = ModerationAction::Hold;
-    assert!(!approve_web_post(&mut ctx, Some(&web("alice@example.org"))));
-    // Not a member, not the same sender, banned, or no web origin at all.
-    let mut ctx = context("alice@example.org", false, None);
-    assert!(!approve_web_post(&mut ctx, Some(&web("alice@example.org"))));
-    let mut ctx = context("mallory@example.org", true, None);
-    assert!(!approve_web_post(&mut ctx, Some(&web("alice@example.org"))));
-    let mut ctx = context("alice@example.org", true, None);
-    ctx.sender.is_banned = true;
-    assert!(!approve_web_post(&mut ctx, Some(&web("alice@example.org"))));
-    let mut ctx = context("alice@example.org", true, None);
-    assert!(!approve_web_post(&mut ctx, None));
+fn a_web_post_is_not_an_approved_post() {
+    let ctx = member(None);
     assert!(!ctx.sender.is_approved);
-}
-
-#[test]
-fn the_context_names_the_web_origin_or_nothing() {
-    let context = serde_json::json!({"version":1,"list_id":"dev.example.org","web_post":{"user_id":"u1","address":"alice@example.org","reply":null}});
-    assert_eq!(
-        WebPost::from_context(&context),
-        Some(web("alice@example.org"))
+    assert!(
+        matches!(decide_posting(&ctx), Disposition::Accept),
+        "{:?}",
+        decide_posting(&ctx)
     );
-    assert_eq!(
-        WebPost::from_context(&serde_json::json!({"version":1})),
-        None
-    );
-    assert_eq!(
-        WebPost::from_context(&serde_json::json!({"web_post":{"user_id":"u1"}})),
-        None,
-        "an address is required"
+    let mut ctx = member(None);
+    ctx.list.emergency = true;
+    assert!(is_hold(&ctx), "emergency moderation holds it");
+    let mut ctx = member(None);
+    ctx.list.message_too_large = true;
+    assert!(is_hold(&ctx), "the size limit holds it");
+    let mut ctx = member(Some(ModerationAction::Hold));
+    assert!(is_hold(&ctx), "a moderated member is held");
+    ctx.sender.is_approved = true;
+    assert!(
+        matches!(decide_posting(&ctx), Disposition::Accept),
+        "only a verified posting key approves"
     );
 }

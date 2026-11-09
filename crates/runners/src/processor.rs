@@ -5,7 +5,7 @@
 //! Transitions are atomic, with audit, exactly like the tested
 //! `listmngr_db::mail_queue`/`moderation` primitives.
 use crate::MailRoleConfig;
-use crate::policy_facts::{WebPost, approve_web_post, gather_context};
+use crate::policy_facts::gather_context;
 use listmngr_core::{Config, ListId, ResponseAction};
 use listmngr_db::Database;
 use listmngr_db::autoresponse::ResponseKind;
@@ -288,8 +288,6 @@ struct Posting<'a> {
     list_id: &'a ListId,
     envelope_sender: Option<&'a str>,
     raw: &'a [u8],
-    /// The web origin the web layer recorded, if any.
-    web_post: Option<&'a WebPost>,
     /// Mailman's `fromusenet`: gated in from the list's newsgroup.
     from_usenet: bool,
 }
@@ -305,12 +303,10 @@ async fn admit_post(
         list_id,
         envelope_sender,
         raw,
-        web_post,
         from_usenet,
     } = *posting;
     let subject = listmngr_mail::header_value(raw, "subject").unwrap_or_default();
     let mut ctx = gather_context(db, config, list_id, envelope_sender, raw).await?;
-    approve_web_post(&mut ctx, web_post);
     let verdict = authenticity_verdict(role, raw, envelope_sender).await;
     ctx.sender.dmarc_policy_restrictive = verdict.dmarc_policy_restrictive;
     let outcome = decide_posting_traced(&ctx);
@@ -423,7 +419,6 @@ async fn process_one(
         metrics.posts.inc("command");
         return Ok(());
     }
-    let web_post = WebPost::from_context(&context);
     let disposition = admit_post(
         db,
         config,
@@ -433,7 +428,6 @@ async fn process_one(
             list_id: &list_id,
             envelope_sender: envelope_sender.as_deref(),
             raw: &message.raw,
-            web_post: web_post.as_ref(),
             from_usenet: context["fromusenet"] == true,
         },
     )

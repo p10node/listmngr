@@ -1437,15 +1437,13 @@ enqueues into `Queue::In` through the same `enqueue` as LMTP intake and
 REST injection, with the context `{version, list_id, envelope_sender,
 message_id_hash, web_post: {user_id, address, reply}}`.
 
-In the runners, `policy_facts::WebPost::from_context` reads that object
-and `approve_web_post` sets `SenderChecks::is_approved` — the `approved`
-rule's fact — only when the envelope sender is the recorded address, the
-address is not banned, and the member's effective moderation action
-(their own override, else the list's `default_member_action`) is `defer`
-or `accept`; `processor::admit_post` applies it after `gather_context`,
-so the posting chain, the pipeline, delivery and archiving are otherwise
-unchanged. The `Approved:` header path and its moderator-password check
-are untouched.
+In the runners the `web_post` context object is not consulted for
+admission: a web post is the verified member's own mail (envelope sender
+the recorded address) and takes the ordinary posting chain, so emergency
+moderation, header rules, `max_message_size` and the site posting-rate
+limit apply to it. `SenderChecks::is_approved` is set only by a verified
+`Approved:` moderator key (`gather_context`); there is no web shortcut to
+it (security finding F-23).
 
 ## Archive interactions — bounded local acceptance verified
 
