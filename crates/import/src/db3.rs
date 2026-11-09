@@ -889,7 +889,13 @@ impl Reader<'_> {
                 ));
                 continue;
             };
-            let file = var_dir.join("messages").join(&path);
+            let Some(file) = store_file(&var_dir.join("messages"), &path) else {
+                warnings.push(format!(
+                    "{}: the held message {message_id} names a path outside the core's message store; not imported",
+                    list_id.as_str()
+                ));
+                continue;
+            };
             let raw = match std::fs::read(&file).map_err(|error| error.to_string()).and_then(|pickled| {
                 render_message(&pickled).map_err(|error| error.to_string())
             }) {
@@ -959,6 +965,21 @@ struct AddressRow {
     display_name: String,
     verified: bool,
     user_id: Option<i64>,
+}
+
+/// The file a source row's `message.path` names inside the message
+/// store, or `None` when the path is empty, absolute or climbs out of it
+/// (any component other than a plain name). Source rows are untrusted.
+fn store_file(store: &Path, path: &str) -> Option<std::path::PathBuf> {
+    let relative = Path::new(path);
+    if path.is_empty()
+        || !relative
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(store.join(relative))
 }
 
 #[cfg(test)]

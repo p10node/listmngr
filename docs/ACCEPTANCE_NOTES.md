@@ -1097,6 +1097,12 @@ listmngr import3 --db postgres://mailman:…@127.0.0.1/mailman \
     --var-dir /var/lib/mailman
 ```
 
+A held message's `message.path` is untrusted source data: it must be a
+relative path of plain names under `var/messages`. An absolute path or
+one containing `..` is refused with a warning (`names a path outside the
+core's message store; not imported`) and the file is never opened
+(`crates/import/tests/held_path.rs`, security finding F-21).
+
 Both read the same site into the same plan: the database path decodes
 what Mailman stores — its enums as integers, its intervals, the pickled
 lists, the pending key/values, the pickled `email.message.Message` of
