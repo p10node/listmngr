@@ -1896,7 +1896,7 @@ layer redacts the `password` value as it does for every credential event.
 before the writer reservation; inside `browser_write_tx` the anonymous session
 that anchors the CSRF token is re-checked on the writer's own connection, the
 address row decides what the signup is (`claim_account`: create; link an
-address nobody owns; re-arm an account that was never proven; or, for an
+address nobody owns; re-arm the verification of an account that was never proven without touching its name, locale or credential (audit F-02: the token is not bound to a credential, so a stranger's repeat signup must not replace the password the first signer's mailbox proof will activate); or, for an
 address a verified account owns, do nothing), a 32-byte token is issued into
 `account_tokens` (migration `0044`, digest only, 24-hour expiry, one per
 address per hour) and mailed through `site_notices().enqueue_tx`, and one

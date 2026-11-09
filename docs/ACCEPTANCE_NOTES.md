@@ -3933,7 +3933,9 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   The response is the same whether or not the address already had an account:
   a verified account is neither recreated, changed nor mailed; an account that
   was never proven belongs to whoever proves the address, so a repeat signup
-  re-arms it with the new name and password; at most one verification mail
+  re-arms only its verification (the existing name, locale and password are
+  kept, because the mailed token is not bound to a credential: audit F-02,
+  `crates/db/tests/signup_rearm_credential.rs`); at most one verification mail
   per address per hour. Password strength, name and mailbox validation are the
   same as everywhere else, and the whole write — account, credential, token,
   mail — is one audited transaction (`user.signup`, then `address.verify`).
