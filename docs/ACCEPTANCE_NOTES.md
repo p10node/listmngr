@@ -1942,6 +1942,14 @@ shows ids, not names, and does not export.
 
 ## Domains and accounts (`P4-DOMAINS-USERS`) — bounded local acceptance verified
 
+Token lifecycle: a token bound to a list is list-owner authority, so it ends
+with that authority. When an owner membership is removed (REST delete, leave,
+unsubscribe) or an owner's role is changed (REST patch, browser member
+options), the live tokens bound to that list whose user is neither a verified
+server owner nor still a verified owner of the list are revoked in the same
+transaction, one `token.revoke` event each. Owners who stay owners keep their
+tokens. Tests in `crates/db/tests/stale_owner_tokens.rs`.
+
 Two site-wide pages for server owners, linked from the administration index.
 
 **Domains** (`/web/admin/domains`) lists every domain with its description,

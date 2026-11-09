@@ -223,6 +223,12 @@ impl Database {
         .execute(&mut *tx)
         .await
         .map_err(db_error)?;
+        crate::web_tokens::revoke_stale_list_tokens_tx(
+            &mut tx,
+            list,
+            &AuditContext::new(Some(user), None, None),
+        )
+        .await?;
         PreferencesRepo::set_tx(
             &mut tx,
             preferences_id.parse().map_err(db_error)?,
