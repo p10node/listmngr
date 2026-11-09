@@ -1,6 +1,7 @@
 //! Mailman's probe step: at the bounce threshold a member is sent a probe
 //! from a one-time VERP address, and only that probe's own bounce disables
-//! delivery. Off, the threshold disables at once, as before.
+//! delivery. Off, the server's own SMTP-time failures still disable at once;
+//! an unauthenticated bounce (a bare VERP address) is probed regardless.
 // Scores are exact integers stored as doubles; equality is the assertion.
 #![allow(clippy::float_cmp)]
 use listmngr_core::{MemberRole, SubscriptionMode};
@@ -228,13 +229,14 @@ async fn an_expired_probe_is_inert_and_probes_are_off_by_default() {
     assert!(outcome.scored.is_empty());
     assert_eq!(member_state(&db).await.1, "enabled");
 
-    // Without the configuration the threshold disables at once, as before.
+    // Without the configuration a bounce attributed from a bare VERP address
+    // (unauthenticated) still probes instead of disabling at once (F-07).
     let db = fixture(false).await;
     verp_bounce(&db, DAY_MS).await;
-    assert_eq!(member_state(&db).await, (0.0, "by_bounces".into()));
+    assert_eq!(member_state(&db).await, (0.0, "enabled".into()));
     let probes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bounce_probes")
         .fetch_one(db.pool())
         .await
         .unwrap();
-    assert_eq!(probes, 0);
+    assert_eq!(probes, 1);
 }
