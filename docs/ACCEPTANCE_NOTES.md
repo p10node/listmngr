@@ -1797,6 +1797,16 @@ at a time; each hit is then read back through the archive's own policy, so a
 post the reader may not see is never shown — and falls back to the substring
 search over the database until then.
 
+The list's archive policy is applied before the index is queried (audit F-06):
+the index holds every list's posts and knows nothing of policy, so a private
+archive answers a search with 403 and a `never` archive with 404 whatever the
+words match and whichever page is asked, and neither a hit nor a total is
+disclosed to a reader who may not browse the archive. Hits are still read back
+through the policy afterwards. Test: `archive_search_uses_the_index_when_present`
+(`policy_comes_before_the_index`). A post hidden or deleted after indexing can
+still be counted in the total shown to a reader who may read the archive, until
+`listmngr archive reindex`.
+
 The archive runner keeps the index current while `serve` runs: every post it
 archives is added, and changes commit in batches (a hundred changes or two
 seconds, whichever first; always on shutdown). `listmngr archive reindex`

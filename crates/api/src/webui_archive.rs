@@ -342,6 +342,11 @@ async fn select_messages(
         && query.format == ArchiveFormat::Html
         && let Some(index) = s.search_index()
     {
+        // The index holds every list's posts and knows nothing of archive
+        // policy, so the list is authorized before the index is queried: a
+        // private archive is 403 and a `never` archive 404 for every search,
+        // whatever the words match, so neither hits nor the total leak.
+        s.db.archive().browser_authorize(id, session).await?;
         // The index ranks; the archive's own authorization then reads each
         // hit, so a hit the reader may not see is simply not shown.
         let results = index.search(&listmngr_archive::search::Query {
