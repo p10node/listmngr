@@ -1244,7 +1244,8 @@ add_to_user_with_context` (create, adopt, or absorb) and
 `UserRepo::set_preferred_address_with_context` and `create_with_context`
 adopting a bare subscriber's address; `MemberRepo::all` and a patchable
 `moderation_action`; `ListRepo::delete_tx` removing the list's
-`moderation_log` and `held_messages`; and `ResponseAction` renamed to
+`moderation_log`, `held_messages` and bound `api_tokens` (`DomainRepo::delete_with_context`
+does the same for domain-bound tokens, since both foreign keys restrict); and `ResponseAction` renamed to
 Mailman's `RespondAndContinue` on the wire while the row keeps migration
 0037's `respond` under its CHECK constraint (`stored_response_action`,
 `response_action_from_stored`). `listmngr_pipeline::rules` names the two
