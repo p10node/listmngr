@@ -2054,6 +2054,60 @@ async fn scoped_tokens_cannot_cross_route_resource_boundaries() {
 }
 
 #[tokio::test]
+async fn list_bound_tokens_never_act_on_their_domain() {
+    let (app, token, _) = scoped_app().await;
+    for prefix in ["/api/v1", "/3.1"] {
+        // The domain record its own list lives in stays readable.
+        assert_eq!(
+            call(
+                &app,
+                "GET",
+                &format!("{prefix}/domains/first.example"),
+                Some(&token),
+                None
+            )
+            .await
+            .status(),
+            StatusCode::OK,
+            "{prefix}"
+        );
+        for (method, path, body) in [
+            ("GET", "/domains/first.example/owners", None),
+            (
+                "PATCH",
+                "/domains/first.example/uris",
+                Some(r#"{"list:member:regular:footer":"mailman:///list:user:notice:welcome"}"#),
+            ),
+            (
+                "PUT",
+                "/domains/first.example/uris",
+                Some(r#"{"list:member:regular:header":"mailman:///list:user:notice:welcome"}"#),
+            ),
+            ("DELETE", "/domains/first.example/uris", None),
+            (
+                "PATCH",
+                "/domains/first.example/uris/list:user:notice:welcome",
+                Some(r#"{"uri":"mailman:///list:user:notice:goodbye"}"#),
+            ),
+            (
+                "DELETE",
+                "/domains/first.example/uris/list:user:notice:welcome",
+                None,
+            ),
+            ("DELETE", "/domains/first.example", None),
+        ] {
+            assert_eq!(
+                call(&app, method, &format!("{prefix}{path}"), Some(&token), body)
+                    .await
+                    .status(),
+                StatusCode::FORBIDDEN,
+                "{method} {prefix}{path}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn token_expiry_revoke_and_last_used_are_enforced_across_both_prefixes() {
     let db = Database::connect("sqlite::memory:", 1).await.unwrap();
     db.migrate().await.unwrap();

@@ -1944,6 +1944,14 @@ shows ids, not names, and does not export.
 
 Two site-wide pages for server owners, linked from the administration index.
 
+REST: a token bound to a list never acts on domain-level resources. The
+domain record its own list lives in stays readable (`GET /domains/{host}`),
+but every write on a domain (`PATCH`/`PUT`/`DELETE` on `/domains/{host}/uris`
+and `/uris/{name}`, `DELETE /domains/{host}`) and the owner roster
+(`GET /domains/{host}/owners`) answer 403 under both prefixes. Domain-level
+authority needs an unbound or domain-bound token. Test
+`list_bound_tokens_never_act_on_their_domain` in `crates/api/tests/rest.rs`.
+
 **Domains** (`/web/admin/domains`) lists every domain with its description,
 alias domain, owners and list count, and adds one from a form (mail host,
 description, optional alias; a bad host or a taken one is refused inline with
