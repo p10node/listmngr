@@ -114,6 +114,44 @@ async fn authority(
     })
 }
 
+/// Revokes the live tokens bound to `list` whose user is no longer a verified
+/// server owner or a verified owner of the list (the minting predicate of
+/// [`OWNED`]). Called in the transaction that changes or removes an owner
+/// membership, with one `token.revoke` event per token.
+pub(crate) async fn revoke_stale_list_tokens_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    list: &ListId,
+    context: &AuditContext,
+) -> Result<()> {
+    let stale: Vec<String> = sqlx::query_scalar(
+        "SELECT t.id FROM api_tokens t WHERE t.list_id=$1 AND t.revoked_at IS NULL \
+         AND NOT EXISTS (SELECT 1 FROM users u JOIN addresses a ON a.user_id=u.id WHERE u.id=t.user_id AND u.is_server_owner=1 AND a.verified_on IS NOT NULL) \
+         AND NOT EXISTS (SELECT 1 FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.list_id=t.list_id AND m.role='owner' AND a.user_id=t.user_id AND a.verified_on IS NOT NULL AND (m.subscription_mode='as_address' OR m.user_id=t.user_id))",
+    )
+    .bind(list.as_str())
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    for token in stale {
+        sqlx::query("UPDATE api_tokens SET revoked_at=$1 WHERE id=$2 AND revoked_at IS NULL")
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(&token)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        Database::record_tx_with_context(
+            tx,
+            context,
+            "token.revoke",
+            "token",
+            &token,
+            serde_json::json!({"reason": "list owner role ended", "list": list.as_str()}),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 impl Database {
     /// The reader's tokens, newest first, and what they may mint.
     /// # Errors

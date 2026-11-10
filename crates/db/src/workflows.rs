@@ -919,7 +919,18 @@ pub(crate) async fn delete_member_with_goodbye(
     let Some(removed) = removed else {
         return Ok(false);
     };
-    if removed.try_get::<String, _>("role").map_err(db_error)? != "member" {
+    let role: String = removed.try_get("role").map_err(db_error)?;
+    if role == "owner" {
+        // Tokens bound to the list are owner authority: end the ones whose
+        // minter no longer owns it. The caller's audit event names the actor;
+        // the revocations are system-attributed.
+        let list: ListId = removed
+            .try_get::<String, _>("list_id")
+            .map_err(db_error)?
+            .parse()?;
+        crate::web_tokens::revoke_stale_list_tokens_tx(tx, &list, &AuditContext::system()).await?;
+    }
+    if role != "member" {
         return Ok(true);
     }
     let list: ListId = removed

@@ -1858,6 +1858,17 @@ domain record its list belongs to, but a write scope is refused, and
 `domain_owners` additionally refuses any list binding. Domain-level state
 (template URIs, the owner roster, the domain itself) is domain/server
 authority.
+=======
+Because authorization reads the token alone, authority is ended at the role
+change instead: `web_tokens::revoke_stale_list_tokens_tx` revokes the live
+tokens bound to a list whose user is neither a verified server owner nor a
+verified owner of that list (the `OWNED` predicate), one `token.revoke` event
+each, in the transaction of the change. It runs from `delete_member_with_goodbye`
+(an owner membership removed: REST delete, leave, unsubscribe, list delete),
+`MemberRepo::update_with_context` (an owner's role patched) and
+`browser_member_options`. Not covered: an address unverified or unlinked from
+its account.
+>>>>>>> fix/stale-owner-tokens
 
 ## The operator's account — bounded local acceptance verified
 

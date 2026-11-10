@@ -3594,6 +3594,9 @@ impl MemberRepo<'_> {
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
+        if current.role == MemberRole::Owner {
+            web_tokens::revoke_stale_list_tokens_tx(&mut tx, &current.list_id, context).await?;
+        }
         if preferences.delivery_mode.is_some() || preferences.delivery_status.is_some() {
             // Member UPDATE above is the shared scorer boundary. Only requested
             // fields are changed, using the current row after any preference wait.
