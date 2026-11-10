@@ -4240,6 +4240,10 @@ was executed during integration. Existing fixture unit/DB/runner tests are
 permitted regression evidence; they do not establish live email-only acceptance
 or the broader Mailman product contract.
 
+## Bundled SQLite
+
+The SQLite engine is the amalgamation bundled by `libsqlite3-sys`. Because sqlx pins that crate below 0.39, the workspace (and the fuzz workspace) patch it to the vendored 0.39.1 copy in `vendor/libsqlite3-sys`, which bundles SQLite 3.54.0 and so carries the CVE-2026-119375 fix (RUSTSEC-2026-0459). The container build copies the whole tree, so no Dockerfile change is needed. Removal condition and the exact diff against the published crate: `vendor/README.md`.
+
 ## Dependency direction
 
 The intended direction is:

@@ -44,6 +44,10 @@ Two advisories are recorded exceptions, each with its reason in `deny.toml`, and
 - RUSTSEC-2023-0071 (`rsa`, Marvin timing attack on RSA *private-key* operations) has no fixed release. The only `rsa` use in this tree is `webauthn_rp` verifying RS256 passkey signatures with the credential's *public* key; listmngr holds no RSA private key. Remove the exception when a fixed `rsa` is available.
 - RUSTSEC-2026-0387 (`crypto-bigint` 0.5, timing variability in operations meant to be constant-time) is reached only through `webauthn_rp` 0.3.0, the latest release, which pins `p256`/`p384` 0.13 and so `elliptic-curve` 0.13. Both uses verify ECDSA signatures with a *public* key (passkey assertions; OpenID Connect ES256 tokens, which share the `p256` 0.13 line); no secret scalar is handled, so timing leaks nothing. Remove the exception when `webauthn_rp` moves to the 0.14 stack.
 
+### Patched dependency: bundled SQLite
+
+RUSTSEC-2026-0459 (SQLite CVE-2026-119375, fixed in SQLite 3.54.0) is fixed rather than ignored. `sqlx-sqlite` 0.8 and 0.9 require `libsqlite3-sys` below 0.39, the first release that bundles the fix, so `vendor/libsqlite3-sys` carries 0.39.1 with only its `version` changed to 0.30.1, wired in through `[patch.crates-io]` in the root `Cargo.toml` and `fuzz/Cargo.toml`. The test `crates/db/tests/bundled_sqlite_version.rs` fails if the linked SQLite is older than 3.54. Remove the vendored copy and the patch when sqlx accepts `libsqlite3-sys` 0.39 or later; `vendor/README.md` lists the exact changes.
+
 ### The chart's Postfix sidecar
 
 With `mta.enabled`, the Helm chart runs Postfix in the application pod as
