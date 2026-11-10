@@ -338,7 +338,7 @@ impl Database {
         let token = crate::web_sessions::secret();
         let csrf = crate::web_sessions::secret();
         sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at,second_factor) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(digest(&token)).bind(&csrf).bind(user.to_string()).bind(&version).bind(now_ms + 28_800_000)
+            .bind(digest(&token)).bind(&csrf).bind(user.to_string()).bind(&version).bind(self.signed_in_expiry_ms(now_ms))
             .bind(crate::web_session_inventory::session_id()).bind(now_ms).bind(factor)
             .execute(&mut *tx).await.map_err(db_error)?;
         Self::record_tx_with_context(

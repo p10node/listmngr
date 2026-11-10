@@ -63,6 +63,12 @@ impl std::fmt::Debug for LoginOutcome {
 pub const SECOND_FACTOR_WINDOW_MS: i64 = 10 * 60 * 1000;
 
 impl Database {
+    /// When a session signed in at `now_ms` first lapses if it is never used
+    /// again: the idle window, or the absolute life when that is shorter.
+    pub(crate) fn signed_in_expiry_ms(&self, now_ms: i64) -> i64 {
+        now_ms.saturating_add(self.session_idle_ms.min(self.session_absolute_ms))
+    }
+
     /// Verify a browser password and rotate its live CSRF session.
     /// # Errors
     /// Rejects invalid credentials, revoked authority, or database failures.
@@ -183,7 +189,7 @@ impl Database {
             }));
         }
         sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)")
-            .bind(digest(&token)).bind(&csrf).bind(proof.user.to_string()).bind(&proof.version).bind(now_ms+28_800_000)
+            .bind(digest(&token)).bind(&csrf).bind(proof.user.to_string()).bind(&proof.version).bind(self.signed_in_expiry_ms(now_ms))
             .bind(crate::web_session_inventory::session_id()).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
         Self::record_tx_with_context(
             &mut tx,
@@ -239,7 +245,7 @@ impl Database {
                 .await
                 .map_err(db_error)?;
         }
-        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)").bind(digest(&token)).bind(&csrf).bind(user.map(|u|u.to_string())).bind(version).bind(now_ms+if user.is_some(){28_800_000}else{1_800_000}).bind(crate::web_session_inventory::session_id()).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
+        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)").bind(digest(&token)).bind(&csrf).bind(user.map(|u|u.to_string())).bind(version).bind(if user.is_some(){self.signed_in_expiry_ms(now_ms)}else{now_ms+1_800_000}).bind(crate::web_session_inventory::session_id()).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
         if let Some(user_id) = user {
             Self::record_tx_with_context(
                 &mut tx,
@@ -268,8 +274,33 @@ impl Database {
         // Evaluate the clock after waiting for a pooled connection, not before it.
         let mut connection = self.pool().acquire().await.map_err(db_error)?;
         let effective_now = now_ms.max(chrono::Utc::now().timestamp_millis());
-        let row=sqlx::query("SELECT s.csrf,s.user_id FROM web_sessions s LEFT JOIN user_credentials c ON c.user_id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND (s.user_id IS NULL OR s.credential_version=c.password_updated_at)").bind(digest(token)).bind(effective_now).fetch_optional(&mut *connection).await.map_err(db_error)?.ok_or(Error::Authentication)?;
+        let row=sqlx::query("SELECT s.csrf,s.user_id,s.expires_at,s.created_at FROM web_sessions s LEFT JOIN user_credentials c ON c.user_id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND (s.user_id IS NULL OR s.credential_version=c.password_updated_at)").bind(digest(token)).bind(effective_now).fetch_optional(&mut *connection).await.map_err(db_error)?.ok_or(Error::Authentication)?;
         let user: Option<String> = row.try_get("user_id").map_err(db_error)?;
+        if user.is_some() {
+            // Use extends the idle deadline, never past the absolute one. The
+            // write happens only once a quarter of the idle window has passed
+            // since the last extension, so a busy session costs one UPDATE per
+            // quarter window, and the effective idle limit is between 3/4 and
+            // 1 times `web.session_idle`.
+            let expires: i64 = row.try_get("expires_at").map_err(db_error)?;
+            let created: i64 = row
+                .try_get::<Option<i64>, _>("created_at")
+                .map_err(db_error)?
+                .unwrap_or(effective_now);
+            let slid = (effective_now + self.session_idle_ms)
+                .min(created.saturating_add(self.session_absolute_ms));
+            if slid - expires > self.session_idle_ms / 4 {
+                // Best effort: a busy writer must not fail a read.
+                let _ = sqlx::query(
+                    "UPDATE web_sessions SET expires_at=$1 WHERE token_hash=$2 AND user_id IS NOT NULL AND expires_at>$3",
+                )
+                .bind(slid)
+                .bind(digest(token))
+                .bind(effective_now)
+                .execute(&mut *connection)
+                .await;
+            }
+        }
         Ok(WebSession {
             token: token.into(),
             csrf: row.try_get("csrf").map_err(db_error)?,

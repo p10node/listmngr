@@ -2019,6 +2019,15 @@ failure page and the compatibility archive path keep the browser negotiation.
 
 ## Session inventory — bounded local acceptance verified
 
+Signed-in session lifetime (audit F-17): `Database::with_session_limits` carries
+`web.session_idle` / `web.session_absolute` (parsed by `WebConfig::session_limits_ms`
+at `Config::load`, wired in `router`). Every signed-in insert sets
+`expires_at = now + min(idle, absolute)` (`signed_in_expiry_ms`), and
+`Database::web_session` slides `expires_at` to `min(now + idle, created_at + absolute)`
+on use, with a best-effort `UPDATE` only after a quarter of the idle window, so a
+session can never outlive `created_at + absolute` and every `expires_at > now`
+check in the repositories enforces both limits. No schema change.
+
 `web_sessions` rows carry an opaque `id` and a `created_at` since migration
 `0043`, so a reader can be shown their own sessions and name one for
 revocation without the page ever carrying the token digest that authenticates

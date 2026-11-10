@@ -1067,6 +1067,12 @@ pub fn router(db: Database, config: Config) -> Router {
         .with_webhooks(config.webhooks.signing_key(), config.webhooks.allow_http)
         .with_mail_archive_address(&config.archive.archivers.mail_archive_address)
         .with_site(&config.site.name, &config.site.site_owner);
+    // Validated by `Config::load`; a hand-built Config that skipped it keeps
+    // the documented defaults.
+    let db = match config.web.session_limits_ms() {
+        Ok((idle, absolute)) => db.with_session_limits(idle, absolute),
+        Err(_) => db,
+    };
     let pre_auth_rate = RateLimiter::from_config(
         config
             .security
