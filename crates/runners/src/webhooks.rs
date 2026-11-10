@@ -191,6 +191,17 @@ const fn transient(error: String) -> Attempt {
     }
 }
 
+/// One refusal for every target that cannot be used before a connection is
+/// made, whatever the reason: the owner of a webhook reads the delivery row
+/// back and must not learn from its text or its retry behaviour how this
+/// site's resolver sees a name. The real reason goes to the operator's log.
+const UNUSABLE_TARGET: &str = "target cannot be used by this site";
+
+fn unusable(reason: &str) -> Attempt {
+    tracing::debug!(reason, "webhook target refused before connecting");
+    permanent(UNUSABLE_TARGET)
+}
+
 /// Where the target resolves to, checked against the site's policy.
 async fn addresses(
     config: &WebhooksConfig,
@@ -202,15 +213,15 @@ async fn addresses(
         Some(url::Host::Ipv6(ip)) => vec![SocketAddr::new(IpAddr::V6(ip), port)],
         Some(url::Host::Domain(name)) => tokio::net::lookup_host((name, port))
             .await
-            .map_err(|error| transient(format!("resolve {name}: {error}")))?
+            .map_err(|error| unusable(&format!("resolve {name}: {error}")))?
             .collect(),
-        None => return Err(permanent("url has no host")),
+        None => return Err(unusable("url has no host")),
     };
     if found.is_empty() {
-        return Err(transient("resolve: no address".into()));
+        return Err(unusable("resolve: no address"));
     }
     if !config.allow_private_targets && found.iter().any(|address| is_private(address.ip())) {
-        return Err(permanent(
+        return Err(unusable(
             "target resolves to a private, loopback or link-local address",
         ));
     }
