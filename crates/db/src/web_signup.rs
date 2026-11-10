@@ -260,23 +260,11 @@ async fn claim_account(
     if proven > 0 {
         return Ok(None);
     }
+    // Re-arm only the verification: the existing display name, locale and
+    // credential stay exactly as the first signer chose them. The mailed token
+    // is not bound to a credential, so replacing it here would let a stranger's
+    // password be activated by the first signer's own mailbox proof.
     let user: UserId = owner.parse().map_err(db_error)?;
-    sqlx::query("UPDATE users SET display_name=$1,locale=$2 WHERE id=$3")
-        .bind(&address.display_name)
-        .bind(locale)
-        .bind(user.to_string())
-        .execute(&mut **tx)
-        .await
-        .map_err(db_error)?;
-    sqlx::query(
-        "UPDATE user_credentials SET password_hash=$1,password_updated_at=$2 WHERE user_id=$3",
-    )
-    .bind(hash)
-    .bind(crate::now())
-    .bind(user.to_string())
-    .execute(&mut **tx)
-    .await
-    .map_err(db_error)?;
     Ok(Some((id, user, true)))
 }
 
