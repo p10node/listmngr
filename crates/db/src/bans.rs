@@ -25,7 +25,10 @@ where
     let sender_identity = identity(sender);
     Ok(patterns.iter().any(|pattern| {
         if pattern.starts_with('^') {
-            regex::Regex::new(pattern).is_ok_and(|expression| expression.is_match(sender))
+            listmngr_pipeline::regex_cache::get_or_compile("ban", pattern, |pattern| {
+                regex::Regex::new(pattern)
+            })
+            .is_ok_and(|expression| expression.is_match(sender))
         } else {
             identity(pattern) == sender_identity
         }

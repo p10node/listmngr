@@ -3409,6 +3409,12 @@ naming the row instead of ignoring it. See `P2-CHAIN-RULES` in
 `docs/FEATURE_PARITY.md` for evidence and the full list of deliberate
 deviations.
 
+Owner patterns (address lists, header rows, topics, bans) are compiled once
+and cached for the life of the process, so a message costs matching, not
+compilation; a list near the 10,000-entry cap pays its compile cost on the
+first message only (`crates/pipeline/tests/regex_cache.rs`, security finding
+F-22).
+
 Rows are managed through Mailman's `header-matches` resource on both prefixes
 (`P2-HEADER-MATCHES-REST`): `GET`/`POST`/`DELETE /lists/{id}/header-matches`,
 `GET`/`PATCH`/`PUT`/`DELETE /lists/{id}/header-matches/{position}` and

@@ -22,11 +22,13 @@ fn address_list_matches(entries: &[String], address: &str) -> bool {
         entry.strip_prefix('^').map_or_else(
             || entry.eq_ignore_ascii_case(address),
             |pattern| {
-                regex::RegexBuilder::new(&format!("^{pattern}"))
-                    .case_insensitive(true)
-                    .size_limit(1 << 20)
-                    .build()
-                    .is_ok_and(|regex| regex.is_match(address))
+                crate::regex_cache::get_or_compile("address-list", pattern, |pattern| {
+                    regex::RegexBuilder::new(&format!("^{pattern}"))
+                        .case_insensitive(true)
+                        .size_limit(1 << 20)
+                        .build()
+                })
+                .is_ok_and(|regex| regex.is_match(address))
             },
         )
     })

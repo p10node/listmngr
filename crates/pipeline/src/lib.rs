@@ -12,6 +12,7 @@ pub mod chain;
 pub mod handlers;
 pub mod plugins;
 pub mod policy;
+pub mod regex_cache;
 pub mod rules;
 pub mod topics;
 
