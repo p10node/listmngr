@@ -2206,9 +2206,14 @@ async fn browser_left_the_database_consistent(db: &Database) {
             "one live reset token for the verified browser account",
         ),
         (
-            "SELECT COUNT(*) FROM addresses WHERE email='browser-second@example.com' AND verified_on IS NULL AND user_id IS NOT NULL",
+            "SELECT COUNT(*) FROM addresses WHERE email='browser-second@example.com' AND verified_on IS NULL AND user_id IS NULL",
             1,
-            "the added address is linked and unverified",
+            "the added address stays unlinked before the mailbox proof (audit F-10)",
+        ),
+        (
+            "SELECT COUNT(*) FROM account_tokens t JOIN addresses a ON a.id=t.address_id JOIN addresses c ON c.user_id=t.claimant_user_id WHERE t.purpose='verify_address' AND t.consumed_at IS NULL AND a.email='browser-second@example.com' AND c.email='browser@example.com'",
+            1,
+            "the request rides on the added address's live token, naming the browser account",
         ),
         (
             "SELECT COUNT(*) FROM api_tokens WHERE name='browser token' AND list_id='public.example.com' AND revoked_at IS NOT NULL",
