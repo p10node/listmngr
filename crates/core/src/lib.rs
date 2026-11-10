@@ -2327,5 +2327,6 @@ pub fn is_header_name(name: &str) -> bool {
 }
 config_struct!(ObservabilityConfig {
     log: String = "info".into(),
+    // Serves the unauthenticated `/metrics` exposition; `false` withdraws the route (404).
     metrics: bool = true
 });
