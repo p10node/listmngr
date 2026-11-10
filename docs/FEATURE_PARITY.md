@@ -115,7 +115,7 @@
 
 | Acceptance ID | Behavior                                                                                         | Evidence/status |
 |---------------|--------------------------------------------------------------------------------------------------|-----------------|
-| P4-MEMBERS    | The owner's member management at `/web/lists/{id}/members`. Rosters of every role (`?role=member | owner           |
+| P4-MEMBERS    | The owner's member management at `/web/lists/{id}/members`. Rosters of every role (`?role=member | owner **Security audit F-01 fix:** owner mass-subscribe `pre_verified` no longer sets `addresses.verified_on` on an existing address (`crates/db/tests/mass_subscribe_pre_verified.rs`; RED first on `main`, GREEN after). Not a release-verification claim. |
 
 ## List settings — bounded local acceptance verified
 

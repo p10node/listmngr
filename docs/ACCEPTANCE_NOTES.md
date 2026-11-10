@@ -2136,6 +2136,8 @@ so nothing inline is ever needed.
 Every page needs a live session of a list owner or server owner and, under
 `security.require_2fa_for`, an enrolled second factor.
 
+**Security audit F-01 (mass subscribe never verifies an existing address).** On the owner's mass-subscribe form, `pre_verified` asserts delivery-level confirmation for the subscription being created. For a non-member role it may mark only an address that the call itself introduces; it never writes `addresses.verified_on` of an address that already exists, because that column is the account-level mailbox proof (login and the owner predicates require it) and only the mailed token may set it. Regression: `crates/db/tests/mass_subscribe_pre_verified.rs`.
+
 ## List settings (`P4-LIST-SETTINGS`) — bounded local acceptance verified
 
 Every list setting Mailman's REST configuration accepts is now editable from
