@@ -2561,8 +2561,12 @@ async fn pg_authority_case(db: &Database, app: &axum::Router, review: bool, chan
         .unwrap();
     let expiry = chrono::Utc::now().timestamp_millis() + 1000;
     if change == "expiry" {
-        sqlx::query("UPDATE web_sessions SET expires_at=$1 WHERE user_id=$2")
+        // A used session slides its idle deadline, but never past
+        // `created_at + web.session_absolute` (7 d by default): age the row so
+        // the absolute cap is the deadline under test.
+        sqlx::query("UPDATE web_sessions SET expires_at=$1, created_at=$2 WHERE user_id=$3")
             .bind(expiry)
+            .bind(expiry - 7 * 24 * 60 * 60 * 1000)
             .bind(u.id.to_string())
             .execute(db.pool())
             .await
