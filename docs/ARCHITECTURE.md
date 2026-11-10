@@ -1564,7 +1564,9 @@ completes (in `spawn_blocking`), commits when the batch is due and on
 shutdown; the API opens a reader lazily (`AppState::search_index`) once
 `meta.json` exists and otherwise searches the database. `listmngr archive
 reindex` (`crates/cli/src/archive.rs`) clears and rebuilds through
-`reindex`. The `ordered-float` transitive dependency is pinned to 5.4.0 in
+`reindex`. `select_messages` (`crates/api/src/webui_archive.rs`) calls
+`ArchiveRepo::browser_authorize` before it touches the index, so archive policy
+decides before any hit or total can be produced. The `ordered-float` transitive dependency is pinned to 5.4.0 in
 `Cargo.lock` for the 1.88 toolchain.
 
 ## Archive rendering — bounded local acceptance verified

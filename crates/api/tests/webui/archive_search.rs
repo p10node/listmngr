@@ -79,6 +79,7 @@ async fn matrix(db: Database) {
     drop(index);
     ranked(&app).await;
     private_policy(&db, &app).await;
+    policy_comes_before_the_index(&db, &app).await;
 }
 
 /// Four posts on two public lists, indexed through the runner path.
@@ -199,4 +200,41 @@ async fn private_policy(db: &Database, app: &axum::Router) {
     let html = page(app, private, &reader).await;
     assert_eq!(html.matches("<article ").count(), 1);
     has(&html, "mirrors");
+}
+
+/// The index knows nothing of archive policy, so the list is authorized
+/// before it is queried: a private archive is 403 and a disabled one 404
+/// for every search, whatever the words match and whichever page is asked.
+async fn policy_comes_before_the_index(db: &Database, app: &axum::Router) {
+    let private = "/web/lists/private.example.com/archive";
+    for query in [
+        "?q=mirrors",
+        "?q=nothingmatchesthis",
+        "?q=mirrors&page=5001",
+        "?q=poster%40example.org&page=5001",
+    ] {
+        assert_eq!(
+            call(app, "GET", &format!("{private}{query}"), "", "")
+                .await
+                .status(),
+            StatusCode::FORBIDDEN,
+            "{query}"
+        );
+    }
+    db.lists()
+        .update(
+            &"private.example.com".parse().unwrap(),
+            &serde_json::json!({"archive_policy": "never"}),
+        )
+        .await
+        .unwrap();
+    for query in ["?q=mirrors", "?q=nothingmatchesthis&page=5001"] {
+        assert_eq!(
+            call(app, "GET", &format!("{private}{query}"), "", "")
+                .await
+                .status(),
+            StatusCode::NOT_FOUND,
+            "{query}"
+        );
+    }
 }
