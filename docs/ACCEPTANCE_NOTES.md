@@ -4092,7 +4092,10 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   keeps the address row and its list subscriptions, which still deliver to
   that mailbox. The primary address and the last verified address cannot be
   removed. Every write is one audited transaction (`address.add`,
-  `address.primary`, `address.remove`).
+  `address.primary`, `address.remove`). The Chromium harness adds a second
+  address and sees the reloaded page still list the primary alone; the
+  harness then finds that address unowned and unverified, with one live
+  token naming the browser account as claimant.
 - `/web/account/tokens`: the account's API tokens — name, scopes, binding,
   expiry, last use, revoke — and a form to mint one. Scope follows authority,
   because the API authorizes on the token alone: a list owner may only choose
