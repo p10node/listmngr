@@ -1788,8 +1788,12 @@ applies. Registration requests `residentKey: required`,
 `userVerification: required` and credential protection without enforcement;
 verification pins the origin to `site.base_url`. A login rotates the anonymous
 session into a signed-in one in the same transaction as the counter update and
-the `web.login` audit event, and `browser_second_factor_missing` counts a
-passkey as a second factor. The browser side is `crates/web/assets/passkeys.js`
+the `web.login` audit event, and the session is marked
+`web_sessions.second_factor = 'passkey'`. `browser_second_factor_missing`
+requires an enrolled factor *and* that mark on the current session (audit F-18;
+migration `0057`): the mark is also set by `browser_second_factor` (`totp` or
+`recovery`), by `browser_totp_confirm` and by passkey registration for the
+session that just proved the factor, and never by the password or OIDC doors. The browser side is `crates/web/assets/passkeys.js`
 using `PublicKeyCredential.parseCreationOptionsFromJSON` and `toJSON()`; the
 handlers read the CSRF token from an `X-CSRF-Token` header and apply the same
 Origin check as forms. Tests drive the ceremonies with a software ES256

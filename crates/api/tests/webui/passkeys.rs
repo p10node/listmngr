@@ -118,6 +118,14 @@ async fn matrix(db: Database, app: axum::Router) {
         StatusCode::OK,
         "a passkey satisfies the second-factor policy"
     );
+    let password_only = login_as(&app, "root@example.com").await;
+    assert_eq!(
+        call(&app, "GET", "/web/admin", &password_only, "")
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "a password-only session is not two-factor because a passkey is enrolled (audit F-18)"
+    );
     let signed_in = passkey_login(&db, &app, &mut passkey).await;
     removed(&db, &app, &signed_in, &passkey).await;
 }
