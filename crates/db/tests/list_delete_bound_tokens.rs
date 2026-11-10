@@ -55,7 +55,14 @@ async fn bound_tokens_do_not_block_list_and_domain_deletion() {
     db.tokens().revoke(revoked.id).await.unwrap();
     let domain_only = db
         .tokens()
-        .create_scoped(user.id, "domain", &["lists:read"], None, Some(domain.id), None)
+        .create_scoped(
+            user.id,
+            "domain",
+            &["lists:read"],
+            None,
+            Some(domain.id),
+            None,
+        )
         .await
         .unwrap();
     let unbound = db

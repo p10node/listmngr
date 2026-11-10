@@ -378,19 +378,17 @@ impl<'a> WorkflowRepo<'a> {
         // longer counts, so a member who has just confirmed a join can ask
         // to leave again. The public API route (no lease) keeps `open`
         // exempt, as it acts for the caller's own request.
-        if policy != "open" || lease.is_some() {
-            let recent:i64=sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND email=$2 AND consumed=0 AND created_at>$3").bind(list.as_str()).bind(&address.email).bind(now_ms.saturating_sub(3_600_000)).fetch_one(&mut *tx).await.map_err(db_error)?;
-            if recent > 0 {
-                return self.commit_command(tx, lease, now_ms).await;
-            }
-        }
-        // Bounded queue (see `moderation_queue_refuses`); a drop is silent.
-        if moderation_queue_refuses(&mut tx, list, &policy, &address.email, action).await? {
-            return self.commit_command(tx, lease, now_ms).await;
-        }
-        let updated=sqlx::query("UPDATE subscription_rate SET requests=CASE WHEN window_start<=$1 THEN 1 ELSE requests+1 END,window_start=CASE WHEN window_start<=$1 THEN $2 ELSE window_start END WHERE id=1 AND (window_start<=$1 OR requests<100)")
-            .bind(now_ms.saturating_sub(60_000)).bind(now_ms).execute(&mut *tx).await.map_err(db_error)?;
-        if updated.rows_affected() == 0 {
+        if request_throttled(
+            &mut tx,
+            list,
+            &address,
+            &policy,
+            action,
+            lease.is_some(),
+            now_ms,
+        )
+        .await?
+        {
             return self.commit_command(tx, lease, now_ms).await;
         }
         let mut secret = [0_u8; 32];
@@ -1702,6 +1700,31 @@ pub(crate) async fn enqueue_raw_notice(
 
 fn invalid_token() -> Error {
     Error::Validation("invalid or expired confirmation".into())
+}
+
+/// True when a subscription request is dropped silently: the per-address
+/// hourly cooldown, the bounded moderation queue or the site-wide rate window.
+async fn request_throttled(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    list: &ListId,
+    address: &Address,
+    policy: &str,
+    action: SubscriptionAction,
+    is_command: bool,
+    now_ms: i64,
+) -> Result<bool> {
+    if policy != "open" || is_command {
+        let recent:i64=sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND email=$2 AND consumed=0 AND created_at>$3").bind(list.as_str()).bind(&address.email).bind(now_ms.saturating_sub(3_600_000)).fetch_one(&mut **tx).await.map_err(db_error)?;
+        if recent > 0 {
+            return Ok(true);
+        }
+    }
+    if moderation_queue_refuses(tx, list, policy, &address.email, action).await? {
+        return Ok(true);
+    }
+    let updated=sqlx::query("UPDATE subscription_rate SET requests=CASE WHEN window_start<=$1 THEN 1 ELSE requests+1 END,window_start=CASE WHEN window_start<=$1 THEN $2 ELSE window_start END WHERE id=1 AND (window_start<=$1 OR requests<100)")
+        .bind(now_ms.saturating_sub(60_000)).bind(now_ms).execute(&mut **tx).await.map_err(db_error)?;
+    Ok(updated.rows_affected() == 0)
 }
 
 /// Whether a `moderate` list takes no new parked request: one is already

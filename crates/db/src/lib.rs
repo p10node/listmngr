@@ -845,11 +845,13 @@ impl DomainRepo<'_> {
                 .await?;
             }
         }
-        sqlx::query("DELETE FROM api_tokens WHERE domain_id IN (SELECT id FROM domains WHERE mail_host=$1)")
-            .bind(host.to_ascii_lowercase())
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
+        sqlx::query(
+            "DELETE FROM api_tokens WHERE domain_id IN (SELECT id FROM domains WHERE mail_host=$1)",
+        )
+        .bind(host.to_ascii_lowercase())
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
         let changed = sqlx::query("DELETE FROM domains WHERE mail_host=$1")
             .bind(host.to_ascii_lowercase())
             .execute(&mut *tx)
