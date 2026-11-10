@@ -4117,7 +4117,15 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   and a response for another origin or a stale challenge is refused. "Sign in
   with a passkey" on the login page is passwordless and needs no further
   step — user verification on the device is the second factor — so a passkey
-  also satisfies `security.require_2fa_for`. Removal needs the password. These
+  also satisfies `security.require_2fa_for`. The policy is met by how the
+  *session* was established, not by what the account has enrolled (audit
+  F-18): a session counts only when it carries `web_sessions.second_factor`
+  (migration `0057`), set by a passkey sign-in, by the second step (`totp`
+  or `recovery`), and by the confirmation of a TOTP or the registration of a
+  passkey made in that very session. A password-only or OIDC-only sign-in of
+  an owner who merely has a passkey enrolled is signed in but stays gated
+  until they sign in with the passkey (sessions that predate the migration
+  carry no mark and are gated the same way). Removal needs the password. These
   two pages are the only ones that load a script: `/web/passkeys.js`,
   first-party, with a CSP of `script-src 'self'; connect-src 'self'`; every
   form still works without it, and the button is hidden until it runs. The

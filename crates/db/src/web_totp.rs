@@ -197,8 +197,10 @@ impl Database {
         if !policy_requires(&mut tx, user, required_roles).await? {
             return Ok(false);
         }
-        // A confirmed one-time password or a passkey (verified on the
-        // authenticator) is a second factor.
+        // The policy is met by how this session was established, not by what
+        // the account has enrolled: a confirmed one-time password or a passkey
+        // must be enrolled AND this session must carry the mark that a
+        // second-step code, a recovery code or a passkey ceremony sets.
         let enrolled: i64 = sqlx::query_scalar(
             "SELECT (SELECT COUNT(*) FROM user_totp WHERE user_id=$1 AND confirmed_at IS NOT NULL)
                   + (SELECT COUNT(*) FROM user_passkeys WHERE user_id=$1)",
@@ -207,7 +209,15 @@ impl Database {
         .fetch_one(&mut *tx)
         .await
         .map_err(db_error)?;
-        Ok(enrolled == 0)
+        let strong: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM web_sessions WHERE token_hash=$1 AND user_id=$2 AND second_factor IS NOT NULL",
+        )
+        .bind(digest(&session.token))
+        .bind(user.to_string())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        Ok(enrolled == 0 || strong == 0)
     }
 
     /// Confirm the pending secret with a code from the authenticator; returns
@@ -247,6 +257,12 @@ impl Database {
             .bind(now_ms)
             .bind(step)
             .bind(user.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        // The code just presented is a second factor for this very session.
+        sqlx::query("UPDATE web_sessions SET second_factor='totp' WHERE token_hash=$1")
+            .bind(digest(&session.token))
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
@@ -321,9 +337,9 @@ impl Database {
             .map_err(db_error)?;
         let token = crate::web_sessions::secret();
         let csrf = crate::web_sessions::secret();
-        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)")
+        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at,second_factor) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
             .bind(digest(&token)).bind(&csrf).bind(user.to_string()).bind(&version).bind(now_ms + 28_800_000)
-            .bind(crate::web_session_inventory::session_id()).bind(now_ms)
+            .bind(crate::web_session_inventory::session_id()).bind(now_ms).bind(factor)
             .execute(&mut *tx).await.map_err(db_error)?;
         Self::record_tx_with_context(
             &mut tx,

@@ -261,6 +261,12 @@ impl Database {
         if inserted.is_err() {
             return Err(Error::Conflict("this passkey is already registered".into()));
         }
+        // The authenticator just verified the user for this very session.
+        sqlx::query("UPDATE web_sessions SET second_factor='passkey' WHERE token_hash=$1")
+            .bind(digest(&session.token))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
         Self::record_tx_with_context(
             &mut tx,
             &AuditContext::new(Some(user), None, None),
@@ -390,7 +396,7 @@ impl Database {
             .map_err(db_error)?;
         let token = crate::web_sessions::secret();
         let csrf = crate::web_sessions::secret();
-        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)")
+        sqlx::query("INSERT INTO web_sessions(token_hash,csrf,user_id,credential_version,expires_at,id,created_at,second_factor) VALUES($1,$2,$3,$4,$5,$6,$7,'passkey')")
             .bind(digest(&token)).bind(&csrf).bind(user.to_string()).bind(&version).bind(now_ms + 28_800_000)
             .bind(crate::web_session_inventory::session_id()).bind(now_ms)
             .execute(&mut *tx).await.map_err(db_error)?;
