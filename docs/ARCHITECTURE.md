@@ -2486,6 +2486,14 @@ workflow row and no audit event, finishing the job rather than retrying it.
 
 ## P3-SUBSCRIPTION-POLICY — bounded acceptance verified
 
+An e-mail `-join`/`-leave` is authorised only by the unauthenticated
+envelope sender, so `request_owned` (called with a lease) treats `open` as a
+moderation waiver, not as proof of the mailbox: the roster changes at once
+only when `addresses.verified_on` is set for that address; otherwise the
+request becomes `pending_confirmation` and the mailbox gets the token.
+The hourly per-(list, address) cooldown applies to `open` for these commands
+too. The public API route (no lease) is unchanged (security finding F-19).
+
 `subscription_workflows` gains `state`
 (`pending_confirmation` → `pending_moderation` → `closed`), which is the
 request's own lifecycle; `consumed` stays the confirmation token's flag. The

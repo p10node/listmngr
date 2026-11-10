@@ -2988,6 +2988,13 @@ with each request deletes it). No setting and no schema change; the cap is
 `listmngr_db::workflows::MAX_PENDING_MODERATION`. Tests:
 `crates/db/tests/pending_moderation_bounds.rs`.
 
+For an e-mail `-join` or `-leave` the sender is only the unauthenticated
+envelope address, so `open` acts at once only when that address is already
+verified; any other mailbox is sent a confirmation token as under `confirm`,
+and the hourly per-address cooldown applies to `open` lists too
+(`crates/db/tests/open_policy_email.rs`, security finding F-19). The
+public API request route is unchanged.
+
 Moderators work the queue with the CLI:
 
 ```sh

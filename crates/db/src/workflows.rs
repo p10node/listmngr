@@ -171,6 +171,19 @@ pub(crate) async fn lock(tx: &mut Transaction<'_, Any>) -> Result<()> {
         .map_err(db_error)?;
     Ok(())
 }
+/// Whether the system already verified this mailbox (a confirmed token, a
+/// verified account address), so a bare envelope sender may act for it.
+async fn address_is_verified(tx: &mut Transaction<'_, Any>, address: &Address) -> Result<bool> {
+    let verified: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM addresses WHERE email=$1 AND verified_on IS NOT NULL",
+    )
+    .bind(&address.email)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    Ok(verified > 0)
+}
+
 impl<'a> WorkflowRepo<'a> {
     /// Use the canonical post-lock clock for command lease authority.
     #[must_use]
@@ -352,13 +365,20 @@ impl<'a> WorkflowRepo<'a> {
         {
             return self.commit_command(tx, lease, now_ms).await;
         }
+        // An e-mail command (`lease` present) is authorised by nothing but
+        // the unauthenticated envelope sender, so `open` waives moderation
+        // only for an address the system already verified; any other mailbox
+        // is sent the confirmation token like the `confirm` policy.
+        let proven =
+            lease.is_none() || policy != "open" || address_is_verified(&mut tx, &address).await?;
         // The per-address hourly cooldown bounds what an unauthenticated
-        // request can produce: a confirmation mail, or a row in the
-        // moderator's queue. An `open` list produces neither — it acts on
-        // the roster — so the cooldown does not apply there; and a request
-        // the mailbox has answered (its token spent) no longer counts, so a
-        // member who has just confirmed a join can ask to leave again.
-        if policy != "open" {
+        // request can produce: a confirmation mail, a row in the moderator's
+        // queue, or (e-mail commands on an `open` list) an immediate roster
+        // change. A request the mailbox has answered (its token spent) no
+        // longer counts, so a member who has just confirmed a join can ask
+        // to leave again. The public API route (no lease) keeps `open`
+        // exempt, as it acts for the caller's own request.
+        if policy != "open" || lease.is_some() {
             let recent:i64=sqlx::query_scalar("SELECT COUNT(*) FROM subscription_workflows WHERE list_id=$1 AND email=$2 AND consumed=0 AND created_at>$3").bind(list.as_str()).bind(&address.email).bind(now_ms.saturating_sub(3_600_000)).fetch_one(&mut *tx).await.map_err(db_error)?;
             if recent > 0 {
                 return self.commit_command(tx, lease, now_ms).await;
@@ -385,7 +405,7 @@ impl<'a> WorkflowRepo<'a> {
         // other rows keep its hash so the unique column stays populated by a
         // secret nobody was given.
         let state = match policy.as_str() {
-            "open" => "closed",
+            "open" if proven => "closed",
             "moderate" => "pending_moderation",
             _ => "pending_confirmation",
         };
