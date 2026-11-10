@@ -959,7 +959,12 @@ already held on that list, audits `moderation.import` — never
 migration; `WorkflowRepo::import_request_with_context` inserts a
 `subscription_workflows` row in `pending_moderation` with a token hash
 nobody holds, refuses a banned address, and audits
-`subscription.import`. `import3::plan` keeps only the requests whose
+`subscription.import`. `WorkflowRepo::request_owned` bounds the `moderate`
+queue: it skips the insert when an undecided `pending_moderation` row of the
+same (list, address, action) exists or the list already holds
+`MAX_PENDING_MODERATION` (1 000) of them, and `cleanup_expired` now also
+deletes `pending_moderation` rows created more than 30 days ago.
+`import3::plan` keeps only the requests whose
 `token_owner` is `moderator` and reports the confirmations the
 subscriber still owed, whose tokens belong to the other site.
 A member Mailman had `as_user` is then subscribed `SubscriptionMode::AsUser`,

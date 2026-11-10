@@ -2958,6 +2958,15 @@ join or leave request becomes, the way Mailman does:
 | `moderate`              | the request waits for a moderator; the requester gets no token          |
 | `confirm_then_moderate` | the address is confirmed first, then a moderator decides                |
 
+The `moderate` queue is bounded (audit F-20) because anyone can fill it: a
+repeated request for an address that already has an undecided request of the
+same action adds no row, a list parks at most 1 000 undecided requests (later
+ones are dropped silently, the sender sees the same answer as always), and a
+request nobody decides lapses 30 days after it was made (the sweep that runs
+with each request deletes it). No setting and no schema change; the cap is
+`listmngr_db::workflows::MAX_PENDING_MODERATION`. Tests:
+`crates/db/tests/pending_moderation_bounds.rs`.
+
 Moderators work the queue with the CLI:
 
 ```sh
