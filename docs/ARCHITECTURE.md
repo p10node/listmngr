@@ -904,7 +904,10 @@ JSON strings), and each held message as a pickled
 `render_message` writes back the way Python's generator would (headers,
 `Header` chunks, preamble, boundaries, epilogue). A held message the
 store cannot give — no `--var-dir`, no file — is a warning on the `Site`
-and left behind. `listmngr import3 --db URL [--var-dir DIR]` is the
+and left behind. The `message.path` of a source row is untrusted: only
+plain relative components are joined onto `var/messages` (`store_file`);
+an absolute path or one with `..` is a warning and the message is left
+behind, so a row cannot make the importer read a file outside the store. `listmngr import3 --db URL [--var-dir DIR]` is the
 command; `--rest` and `--db` exclude each other, and a database nobody
 can open exits `11` with the URL's userinfo scrubbed.
 
