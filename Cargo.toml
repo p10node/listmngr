@@ -1,8 +1,16 @@
 [workspace]
 members = ["crates/core", "crates/i18n", "crates/db", "crates/mail", "crates/pipeline", "crates/runners", "crates/archive", "crates/api", "crates/web", "crates/import", "crates/plugins", "crates/cli"]
 # The cargo-fuzz targets build on a pinned nightly with their own lock.
-exclude = ["fuzz"]
+exclude = ["fuzz", "vendor/libsqlite3-sys"]
 resolver = "2"
+
+# RUSTSEC-2026-0459 (SQLite CVE-2026-119375, fixed in SQLite 3.54.0): sqlx 0.8
+# and 0.9 pin libsqlite3-sys below 0.39, the first release that bundles the
+# fix. The vendored copy is libsqlite3-sys 0.39.1 unmodified except for its
+# `version`, which is set to 0.30.1 so the pinned requirement accepts it. Drop
+# this patch once sqlx allows libsqlite3-sys >= 0.39 (see vendor/README.md).
+[patch.crates-io]
+libsqlite3-sys = { path = "vendor/libsqlite3-sys" }
 
 [workspace.package]
 version = "1.2.1"

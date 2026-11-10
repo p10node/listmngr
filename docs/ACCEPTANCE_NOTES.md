@@ -2755,6 +2755,10 @@ records the timed-out orchestration and sequential continuation on unchanged
 source. LOGIN/XOAUTH2, opportunistic/implicit TLS, live production-relay cutover
 and full Mailman replacement remain outside this increment.
 
+## Bundled SQLite fix (RUSTSEC-2026-0459)
+
+`cargo audit` reported RUSTSEC-2026-0459 for `libsqlite3-sys` 0.30.1. The fix is real, not an exception: a vendored `libsqlite3-sys` 0.39.1 (SQLite 3.54.0) replaces the registry crate through `[patch.crates-io]`. Evidence: `cargo test --locked -p listmngr-db --test bundled_sqlite_version`, and `cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0387` reporting nothing further.
+
 ## Outgoing dependency recovery
 
 Database failures while reading the durable message or resolving DKIM signing

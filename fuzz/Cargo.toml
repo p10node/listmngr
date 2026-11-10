@@ -80,3 +80,7 @@ debug = 1
 # Its own workspace: the root excludes `fuzz`, so the nightly-only build
 # never touches the workspace lock.
 [workspace]
+
+# Same RUSTSEC-2026-0459 patch as the root workspace; see ../vendor/README.md.
+[patch.crates-io]
+libsqlite3-sys = { path = "../vendor/libsqlite3-sys" }
