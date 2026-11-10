@@ -22,3 +22,5 @@ docs/HANDOFF.md
 
 # `cargo cyclonedx` writes one SBOM per workspace member; the release job uploads crates/cli/listmngr.cdx.json.
 *.cdx.json
+
+.claude
