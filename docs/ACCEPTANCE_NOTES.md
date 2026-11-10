@@ -4074,7 +4074,16 @@ five a minute regardless of configuration.
 Sessions use opaque random credentials, hashed storage, independent CSRF secrets,
 rotation at login, server-side logout revocation and password-version checks.
 Cookies are HttpOnly, SameSite=Strict, Path=/web, and Secure on HTTPS. Authenticated
-sessions expire after eight hours; anonymous forms after thirty minutes. Every
+sessions are bounded by `web.session_idle` (default `12h`: use extends it) and
+`web.session_absolute` (default `7d`: the hard limit from sign-in), both
+parsed and validated by `Config::load` (a positive duration `Ns`/`Nm`/`Nh`/`Nd`,
+at most `365d`, absolute not shorter than idle; a bad value refuses to start;
+audit F-17, `crates/db/tests/session_lifetime.rs`,
+`crates/core/tests/domain.rs`). The idle deadline is extended on use, but only
+once a quarter of the window has passed since the last extension, so the
+effective idle limit is between three quarters of and the full
+`web.session_idle`. These replace the former fixed eight hours; anonymous forms
+still last thirty minutes and a pending second step ten. Every
 form POST requires both a session-bound CSRF secret and the exact configured
 Origin. The `strict-origin` referrer policy strips paths/queries while retaining
 Chromium's same-origin form Origin; accepting `Origin: null` is not a workaround.

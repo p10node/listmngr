@@ -168,6 +168,35 @@ fn config_accepts_only_enforced_second_factor_roles() {
 }
 
 #[test]
+fn session_limits_are_parsed_and_fail_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("listmngr.toml");
+    let load = |body: &str| {
+        std::fs::write(&path, body).unwrap();
+        Config::load(Some(&path))
+    };
+    let config = load("[web]\nsession_idle = \"1h\"\nsession_absolute = \"2d\"\n").unwrap();
+    assert_eq!(
+        config.web.session_limits_ms().unwrap(),
+        (3_600_000, 172_800_000)
+    );
+    assert_eq!(
+        Config::default().web.session_limits_ms().unwrap(),
+        (12 * 3_600_000, 7 * 86_400_000)
+    );
+    for body in [
+        "[web]\nsession_idle = \"soon\"\n",
+        "[web]\nsession_idle = \"0h\"\n",
+        "[web]\nsession_absolute = \"-1d\"\n",
+        "[web]\nsession_absolute = \"9999d\"\n",
+        "[web]\nsession_idle = \"2d\"\nsession_absolute = \"1d\"\n",
+    ] {
+        let error = load(body).unwrap_err().to_string();
+        assert!(error.contains("web.session_"), "{body}: {error}");
+    }
+}
+
+#[test]
 fn oidc_providers_are_validated_and_secrets_come_from_files() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("listmngr.toml");

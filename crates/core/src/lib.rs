@@ -1056,6 +1056,52 @@ impl RateLimit {
     }
 }
 
+/// `12h`, `7d`, `90m`, `30s` as milliseconds; positive, at most one year.
+fn parse_span_ms(key: &str, spec: &str) -> Result<i64> {
+    let bad = || {
+        Error::Validation(format!(
+            "{key} must be a positive duration such as \"30m\", \"12h\" or \"7d\" (at most 365d)"
+        ))
+    };
+    let spec = spec.trim();
+    let unit = spec.chars().last().ok_or_else(bad)?;
+    let scale: i64 = match unit {
+        's' => 1_000,
+        'm' => 60_000,
+        'h' => 3_600_000,
+        'd' => 86_400_000,
+        _ => return Err(bad()),
+    };
+    let digits = &spec[..spec.len() - 1];
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(bad());
+    }
+    let count: i64 = digits.parse().map_err(|_| bad())?;
+    let ms = count.checked_mul(scale).ok_or_else(bad)?;
+    if ms <= 0 || ms > 365 * 86_400_000 {
+        return Err(bad());
+    }
+    Ok(ms)
+}
+
+impl WebConfig {
+    /// `web.session_idle` and `web.session_absolute` in milliseconds.
+    ///
+    /// # Errors
+    /// A value that is not a positive duration (`30s`, `15m`, `12h`, `7d`; at
+    /// most `365d`), or an absolute lifetime shorter than the idle one.
+    pub fn session_limits_ms(&self) -> Result<(i64, i64)> {
+        let idle = parse_span_ms("web.session_idle", &self.session_idle)?;
+        let absolute = parse_span_ms("web.session_absolute", &self.session_absolute)?;
+        if absolute < idle {
+            return Err(Error::Validation(
+                "web.session_absolute must not be shorter than web.session_idle".into(),
+            ));
+        }
+        Ok((idle, absolute))
+    }
+}
+
 fn validate_rate_limit(key: &str, spec: &str) -> Result<()> {
     RateLimit::parse(key, spec).map(|_| ())
 }
@@ -1125,6 +1171,7 @@ impl Config {
             }
         }
         validate_oidc(&mut config.web.oidc)?;
+        config.web.session_limits_ms()?;
         validate_rate_limit("login", &config.security.rate_limit.login)?;
         validate_rate_limit("subscribe", &config.security.rate_limit.subscribe)?;
         validate_rate_limit("api", &config.security.rate_limit.api)?;

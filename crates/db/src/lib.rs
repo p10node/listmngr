@@ -174,6 +174,10 @@ pub struct Database {
     /// `site.site_owner`: the `From:` of mail the site sends outside any list,
     /// and the domain such mail is signed for.
     site_owner: String,
+    /// `web.session_idle` / `web.session_absolute` in milliseconds: how long
+    /// a signed-in browser session may sit unused, and its total life.
+    session_idle_ms: i64,
+    session_absolute_ms: i64,
 }
 
 impl Database {
@@ -244,7 +248,16 @@ impl Database {
             verp_format: listmngr_core::verp::DEFAULT_FORMAT.into(),
             site_name: "Example Lists".into(),
             site_owner: "postmaster@example.com".into(),
+            session_idle_ms: 12 * 3_600_000,
+            session_absolute_ms: 7 * 86_400_000,
         })
+    }
+    /// Carry `web.session_idle` and `web.session_absolute`, in milliseconds.
+    #[must_use]
+    pub const fn with_session_limits(mut self, idle_ms: i64, absolute_ms: i64) -> Self {
+        self.session_idle_ms = idle_ms;
+        self.session_absolute_ms = absolute_ms;
+        self
     }
     /// Carry `[mailman] bounce_probes` / `bounce_probe_lifetime_secs` and the
     /// `[mta] verp_format` the probe sender must follow.
