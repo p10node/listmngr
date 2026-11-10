@@ -823,6 +823,33 @@ impl DomainRepo<'_> {
             return Err(Error::Conflict("domain owns lists".into()));
         }
         let mut tx = self.db.write_tx().await?;
+        // `api_tokens.domain_id` restricts: the domain's bound tokens go with
+        // it (list-bound ones went with their lists), live ones audited.
+        let tokens: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT id,revoked_at FROM api_tokens WHERE domain_id IN (SELECT id FROM domains WHERE mail_host=$1)",
+        )
+        .bind(host.to_ascii_lowercase())
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        for (token, revoked_at) in tokens {
+            if revoked_at.is_none() {
+                Database::record_tx_with_context(
+                    &mut tx,
+                    context,
+                    "token.revoke",
+                    "token",
+                    &token,
+                    serde_json::json!({"reason": "domain.delete", "domain": host}),
+                )
+                .await?;
+            }
+        }
+        sqlx::query("DELETE FROM api_tokens WHERE domain_id IN (SELECT id FROM domains WHERE mail_host=$1)")
+            .bind(host.to_ascii_lowercase())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
         let changed = sqlx::query("DELETE FROM domains WHERE mail_host=$1")
             .bind(host.to_ascii_lowercase())
             .execute(&mut *tx)
@@ -2431,6 +2458,32 @@ impl ListRepo<'_> {
                 .await
                 .map_err(db_error)?;
         }
+        // `api_tokens.list_id` restricts: tokens bound to the list (revoked or
+        // not) go with it, each live one with its own `token.revoke` event.
+        let tokens: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT id,revoked_at FROM api_tokens WHERE list_id=$1")
+                .bind(id.as_str())
+                .fetch_all(&mut **tx)
+                .await
+                .map_err(db_error)?;
+        for (token, revoked_at) in tokens {
+            if revoked_at.is_none() {
+                Database::record_tx_with_context(
+                    tx,
+                    context,
+                    "token.revoke",
+                    "token",
+                    &token,
+                    serde_json::json!({"reason": "list.delete", "list": id.as_str()}),
+                )
+                .await?;
+            }
+        }
+        sqlx::query("DELETE FROM api_tokens WHERE list_id=$1")
+            .bind(id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
         sqlx::query("DELETE FROM mailing_lists WHERE list_id=$1")
             .bind(id.as_str())
             .execute(&mut **tx)

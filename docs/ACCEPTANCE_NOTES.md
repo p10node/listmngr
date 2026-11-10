@@ -2137,7 +2137,12 @@ Beyond the groups, the same navigation reaches:
 - **Delete list** (`…/settings/delete`): the consequences are listed with the
   current archive policy; the owner types the list id back, and the deletion
   runs the same list-owned graph removal as `DELETE /api/v1/lists/<id>`,
-  attributed to the owner (`list.delete`).
+  attributed to the owner (`list.delete`). API tokens bound to the list (live or
+  revoked) are deleted in the same transaction, each live one with a
+  `token.revoke` event, because `api_tokens.list_id` restricts; deleting a
+  domain likewise removes the tokens bound to it. Test
+  `bound_tokens_do_not_block_list_and_domain_deletion` in
+  `crates/db/tests/list_delete_bound_tokens.rs`.
 
 Every page needs a live session of a list owner or server owner (a moderator
 is refused) and, under `security.require_2fa_for`, an enrolled second factor.
