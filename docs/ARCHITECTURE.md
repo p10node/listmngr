@@ -1844,6 +1844,12 @@ audit event are written, shared with the CLI path; the secret exists in the
 result and nowhere else. Revocation is an ownership-guarded `UPDATE` with its
 `token.revoke` audit event.
 
+`authorize_domain` confines a list-bound token to its list: it may read the
+domain record its list belongs to, but a write scope is refused, and
+`domain_owners` additionally refuses any list binding. Domain-level state
+(template URIs, the owner roster, the domain itself) is domain/server
+authority.
+
 ## The operator's account — bounded local acceptance verified
 
 `UserRepo::create_with_context` and `create_verified_with_context` share

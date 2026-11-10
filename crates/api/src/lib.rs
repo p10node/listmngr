@@ -1430,10 +1430,14 @@ async fn authorize_domain(
 ) -> ApiResult<TokenAuth> {
     let auth = authenticate_for_authorization(state, headers, addr, scope).await?;
     let domain = state.db.domains().get(host).await?;
+    // A list binding confines the token to its list. It may read the domain
+    // record its list lives in, but every write on a domain (template URIs,
+    // the domain itself) is domain/server authority and is refused.
+    let write = scope.ends_with(":write");
     let list_matches = auth
         .list_id
         .as_ref()
-        .is_none_or(|list| list.mail_host() == domain.mail_host);
+        .is_none_or(|list| !write && list.mail_host() == domain.mail_host);
     if !auth.allows_domain(domain.id) || !list_matches {
         return Err(ApiError(Error::Forbidden(scope.into())));
     }
@@ -1974,7 +1978,11 @@ async fn domain_owners(
     h: HeaderMap,
     c: ConnectInfo<SocketAddr>,
 ) -> ApiResult<Json<Value>> {
-    authorize_domain(&s, &h, peer(c), "lists:read", &host).await?;
+    let auth = authorize_domain(&s, &h, peer(c), "lists:read", &host).await?;
+    // The owner roster serialises user records: not list-level data.
+    if auth.list_id.is_some() {
+        return Err(ApiError(Error::Forbidden("lists:read".into())));
+    }
     Ok(Json(paged(
         s.flavor,
         s.db.domains().owners(&host).await?,
