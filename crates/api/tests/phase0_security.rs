@@ -264,3 +264,18 @@ async fn basic_allowlist_uses_real_socket_peer_and_never_x_forwarded_for() {
     server.abort();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
 }
+
+#[tokio::test]
+async fn metrics_route_honours_the_observability_switch() {
+    let (app, _, _) = app_and_token(Config::default()).await;
+    assert_eq!(oneshot(&app, "/metrics").await.status(), StatusCode::OK);
+
+    let mut config = Config::default();
+    config.observability.metrics = false;
+    let (app, _, _) = app_and_token(config).await;
+    assert_eq!(
+        oneshot(&app, "/metrics").await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(oneshot(&app, "/healthz").await.status(), StatusCode::OK);
+}

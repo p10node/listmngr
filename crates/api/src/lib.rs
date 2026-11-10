@@ -1006,13 +1006,17 @@ pub fn router(db: Database, config: Config) -> Router {
     };
     let mut compat_state = state.clone();
     compat_state.flavor = ApiFlavor::Compat31;
-    Router::new()
+    let mut app = Router::new()
         .merge(archive::routes())
         .route("/healthz", get(health))
         .merge(workflows::routes())
-        .route("/readyz", get(ready))
-        .route("/metrics", get(metrics))
-        .route("/openapi.json", get(openapi))
+        .route("/readyz", get(ready));
+    // `[observability] metrics` withdraws the unauthenticated exposition:
+    // when false the path answers 404.
+    if state.config.observability.metrics {
+        app = app.route("/metrics", get(metrics));
+    }
+    app.route("/openapi.json", get(openapi))
         .route("/api/docs", get(api_documentation))
         .nest("/3.1", phase_one_routes().with_state(compat_state))
         .nest(

@@ -2508,7 +2508,8 @@ runner loop on a processing error, and the out runner per transaction
 (duration, completed/failed) and per delivery (recipient outcomes, and the
 acceptance-to-relay latency from `messages.created_at`). The API renders the
 registry plus queue gauges from `MailQueueRepo::stats`, cached five seconds
-in `AppState` because `/metrics` is unauthenticated.
+in `AppState` because `/metrics` is unauthenticated. `router` registers the
+route only when `config.observability.metrics` is true (404 otherwise).
 
 ## P2-VALIDATE-AUTHENTICITY — bounded acceptance verified
 
