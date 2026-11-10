@@ -38,9 +38,7 @@ pub(super) async fn delete(
     // The account is gone after this, so the page language comes from the
     // browser alone.
     let language = language(&s, &headers);
-    s.web_login_rate.check("web-login").map_err(|retry_after| {
-        super::ApiError(listmngr_core::Error::RateLimited { retry_after })
-    })?;
+    s.password_check_user(&session)?;
     s.db.browser_delete_account(&session, &form.password)
         .await?;
     let mut response = html(&listmngr_web::AccountDeleted {

@@ -52,6 +52,8 @@ mod passkeys;
 mod posting_limits;
 #[path = "webui/profile.rs"]
 mod profile;
+#[path = "webui/rate_buckets.rs"]
+mod rate_buckets;
 #[path = "webui/reset.rs"]
 mod reset;
 #[path = "webui/sessions.rs"]

@@ -51,8 +51,7 @@ pub(super) async fn create(
 ) -> ApiResult<Response> {
     offered(&s)?;
     let session = write_session_anonymous(&s, &headers, &form.csrf).await?;
-    s.pre_auth_rate
-        .check("web-signup")
+    s.pre_auth_check("web-signup", &headers)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     if form.password != form.confirm_password {
         return Err(Error::Validation("password confirmation does not match".into()).into());
@@ -132,8 +131,7 @@ pub(super) async fn verify(
     Form(form): Form<VerifyForm>,
 ) -> ApiResult<Response> {
     let session = write_session(&s, &headers, &form.csrf).await?;
-    s.pre_auth_rate
-        .check("web-verify")
+    s.pre_auth_check("web-verify", &headers)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     if form.token.len() > 128 {
         return Err(Error::Validation("token".into()).into());

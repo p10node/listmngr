@@ -43,12 +43,12 @@ pub(super) fn offered(s: &AppState) -> Vec<listmngr_web::ProviderLink> {
 /// Send the browser to the provider, keeping the ceremony on its session.
 async fn send_out(
     s: &AppState,
+    headers: &HeaderMap,
     session: &listmngr_db::web_sessions::WebSession,
     provider: &Provider,
     purpose: &str,
 ) -> ApiResult<Response> {
-    s.pre_auth_rate
-        .check("web-oidc")
+    s.pre_auth_check("web-oidc", headers)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     let (ceremony, authorize) = s
         .oidc
@@ -66,7 +66,7 @@ pub(super) async fn start(
 ) -> ApiResult<Response> {
     let provider = provider(&s, &name)?;
     let session = anonymous(&s, &h).await?;
-    let mut r = send_out(&s, &session, provider, "login").await?;
+    let mut r = send_out(&s, &h, &session, provider, "login").await?;
     set_cookie(&s, &session, &mut r)?;
     Ok(r)
 }
@@ -103,8 +103,7 @@ pub(super) async fn callback(
         // The provider's own error code is not shown: it is theirs, not ours.
         return Err(Error::Validation("the provider declined".into()).into());
     }
-    s.pre_auth_rate
-        .check("web-oidc")
+    s.pre_auth_check("web-oidc", &h)
         .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
     let identity = s
         .oidc
@@ -210,7 +209,7 @@ pub(super) async fn link(
 ) -> ApiResult<Response> {
     let provider = provider(&s, &name)?;
     let session = write_session(&s, &h, &f.csrf).await?;
-    send_out(&s, &session, provider, "link").await
+    send_out(&s, &h, &session, provider, "link").await
 }
 
 #[derive(Deserialize)]
@@ -230,9 +229,7 @@ pub(super) async fn unlink(
 ) -> ApiResult<Response> {
     provider(&s, &name)?;
     let session = write_session(&s, &h, &f.csrf).await?;
-    s.web_login_rate
-        .check("web-login")
-        .map_err(|retry_after| ApiError(Error::RateLimited { retry_after }))?;
+    s.password_check_user(&session)?;
     s.db.browser_oidc_unlink(&session, &name, &f.password)
         .await?;
     Ok(Redirect::to("/web/account/oidc").into_response())
