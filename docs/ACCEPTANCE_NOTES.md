@@ -2916,7 +2916,18 @@ bounce), resets the score, and disables delivery only when that probe
 bounces — a bounce that names the token, verified against its stored hash,
 inside `mailman.bounce_probe_lifetime_secs` (7 days). Everything else about
 the probe token is inert: unknown, spent, expired, or for another list. Set
-`mailman.bounce_probes = false` to disable at the threshold at once instead.
+`mailman.bounce_probes = false` to disable at the threshold at once instead,
+but only for failures bound to a delivery this server made: its own SMTP-time
+failures and reports carrying a verified `Original-Envelope-Id`. A bounce
+attributed from a bare VERP address, a report's own claims or the prose
+heuristics can be forged by anyone who can mail the list domain (the VERP
+address carries no MAC), so it never disables a member by itself: at the
+threshold such a bounce always probes (seven-day token when probes are off)
+and only the probe's own bounce disables
+(`crates/db/tests/bounce_processing.rs`, `bounce_probes.rs`, security finding
+F-07). Residual: a forged bounce can still raise a score and trigger one
+probe; an HMAC-signed VERP token, as `docs/PLAN.md` section 5.2 describes,
+is not implemented.
 
 ```toml
 [mailman]

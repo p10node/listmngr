@@ -109,7 +109,7 @@ async fn member_state(db: &Database) -> (f64, String) {
 }
 
 #[tokio::test]
-async fn a_verp_bounce_from_the_mta_disables_the_member_and_tells_the_owner() {
+async fn a_verp_bounce_from_the_mta_probes_the_member_and_does_not_disable_them() {
     let (db, mut handler) = fixture().await;
     let raw = b"From: MAILER-DAEMON@mx.example.net\r\nTo: dev-bounces+member=example.net@example.invalid\r\nSubject: Undelivered Mail Returned to Sender\r\nMessage-ID: <dsn-1@mx.example.net>\r\nAuto-Submitted: auto-replied\r\n\r\nUser unknown.\r\n";
     let outcome = handler
@@ -127,7 +127,9 @@ async fn a_verp_bounce_from_the_mta_disables_the_member_and_tells_the_owner() {
     assert_eq!(queued, 1);
 
     run_bounces(&db).await;
-    assert_eq!(member_state(&db).await, (0.0, "by_bounces".into()));
+    // A bare VERP address is unauthenticated: the threshold only probes
+    // (security finding F-07); the probe's own bounce would disable.
+    assert_eq!(member_state(&db).await, (0.0, "enabled".into()));
     let jobs: Vec<(String, String)> =
         sqlx::query_as("SELECT queue, state FROM queue_jobs ORDER BY id")
             .fetch_all(db.pool())
@@ -137,14 +139,14 @@ async fn a_verp_bounce_from_the_mta_disables_the_member_and_tells_the_owner() {
         jobs.contains(&("bounces".into(), "done".into())),
         "{jobs:?}"
     );
-    // The owner's disable notice is the one outgoing message.
+    // The probe to the member is the one outgoing message; no disable notice.
     let notices: Vec<String> = sqlx::query_scalar(
         "SELECT r.email FROM delivery_recipients r JOIN queue_jobs q ON q.id=r.job_id WHERE q.queue='out'",
     )
     .fetch_all(db.pool())
     .await
     .unwrap();
-    assert_eq!(notices, ["owner@example.invalid"]);
+    assert_eq!(notices, ["member@example.net"]);
     let events: Vec<(String, String)> =
         sqlx::query_as("SELECT recipient, source FROM bounce_events")
             .fetch_all(db.pool())

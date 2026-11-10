@@ -2379,6 +2379,16 @@ REST paths, with the form normalizer parsing the float and the two booleans.
 
 ## P3-BOUNCE-PROBES — bounded acceptance verified
 
+`smtp_bounces::score` takes `trusted`: true for the server's own SMTP-time
+failure and for a report with a verified ENVID (`named.source ==
+"dsn_envid"`), false for the `verp`, `dsn` and `heuristic` sources, whose
+recipient comes from attacker-supplied data. At the threshold an untrusted
+bounce always sends a probe (with a seven-day token when
+`bounce_probe_lifetime_ms()` is `None`) and never calls `disable_member`; only
+`disable_after_probe`, which checks the stored token hash, disables on that
+path. The unsigned VERP address of PLAN section 5.2 remains a documented gap
+(security finding F-07).
+
 The threshold branch of `smtp_bounces::score` now forks on
 `Database::bounce_probe_lifetime_ms()`, which `serve` sets from
 `[mailman] bounce_probes` / `bounce_probe_lifetime_secs` (and the

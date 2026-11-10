@@ -140,7 +140,9 @@ async fn a_verp_bounce_names_its_member_and_scores_them() {
     );
 
     // A second bounce the same day does not count twice; the next day it
-    // reaches the threshold and delivery is disabled.
+    // reaches the threshold. Nothing authenticates a VERP address, so it
+    // never disables delivery by itself, even with probes off: the member
+    // is probed and only the probe's own bounce disables (F-07).
     bounce(
         &db,
         b"Subject: again\r\n\r\n".to_vec(),
@@ -156,7 +158,7 @@ async fn a_verp_bounce_names_its_member_and_scores_them() {
         2 * DAY_MS,
     )
     .await;
-    assert_eq!(score(&db).await, (0.0, "by_bounces".into()));
+    assert_eq!(score(&db).await, (0.0, "enabled".into()));
     let audit: Vec<String> = sqlx::query_scalar(
         "SELECT action FROM audit_log WHERE action LIKE 'bounce.%' ORDER BY at,id",
     )
@@ -164,7 +166,8 @@ async fn a_verp_bounce_names_its_member_and_scores_them() {
     .await
     .unwrap();
     assert!(audit.contains(&"bounce.process".to_owned()), "{audit:?}");
-    assert!(audit.contains(&"bounce.disable".to_owned()), "{audit:?}");
+    assert!(audit.contains(&"bounce.probe".to_owned()), "{audit:?}");
+    assert!(!audit.contains(&"bounce.disable".to_owned()), "{audit:?}");
 }
 
 #[tokio::test]

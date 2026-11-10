@@ -314,7 +314,9 @@ async fn score_member(
     }
     let at = chrono::DateTime::from_timestamp_millis(now)
         .ok_or_else(|| Error::Validation("timestamp out of range".into()))?;
-    crate::smtp_bounces::score(tx, db, list, &address.original_email, &id, at).await?;
+    // Only a verified ENVID binds the report to a delivery this server made.
+    let trusted = named.source == "dsn_envid";
+    crate::smtp_bounces::score(tx, db, list, &address.original_email, &id, at, trusted).await?;
     let processed: i64 = sqlx::query_scalar("SELECT processed FROM bounce_events WHERE id=$1")
         .bind(&id)
         .fetch_one(&mut **tx)

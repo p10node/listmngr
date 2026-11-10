@@ -41,7 +41,8 @@ pub async fn record(
             .bind(Uuid::now_v7().to_string()).bind(at.to_rfc3339()).bind(&id)
             .execute(&mut **tx).await.map_err(db_error)?;
         if failure.is_some_and(|f| f.stage.as_str() == "rcpt" && (500..600).contains(&f.code)) {
-            score(tx, db, &list, recipient, &id, at).await?;
+            // The server's own delivery attempt failed: authenticated.
+            score(tx, db, &list, recipient, &id, at, true).await?;
         }
     }
     Ok(())
@@ -65,6 +66,18 @@ pub async fn lock_preferences(tx: &mut Transaction<'_, Any>, member: &str) -> Re
     Ok(())
 }
 
+/// How long a probe forced by an unauthenticated bounce stays valid when
+/// `[mailman] bounce_probes` is off: Mailman's default of seven days.
+const FORCED_PROBE_LIFETIME_MS: i64 = 7 * 86_400_000;
+
+/// Raise the score of the member `recipient` names.
+///
+/// `trusted` is true when the failure is bound to a delivery this server made
+/// (its own SMTP-time failure, or a report carrying an ENVID it issued and
+/// can verify). A bounce attributed from a bare VERP address, a report's
+/// claims or the prose heuristics is attacker-supplied data: it may score,
+/// but at the threshold it only ever probes the member (whatever
+/// `bounce_probes` says), never disables at once.
 pub async fn score(
     tx: &mut Transaction<'_, Any>,
     db: &crate::Database,
@@ -72,6 +85,7 @@ pub async fn score(
     recipient: &str,
     id: &str,
     at: chrono::DateTime<chrono::Utc>,
+    trusted: bool,
 ) -> Result<()> {
     let email = listmngr_core::Address::new(recipient, String::new())?.email;
     // Reserve the member row before reading its score, including on PostgreSQL.
@@ -143,11 +157,23 @@ pub async fn score(
                 // Mailman probes first and disables only when the probe
                 // bounces; without that configuration the threshold
                 // disables at once.
-                match db.bounce_probe_lifetime_ms() {
-                    Some(lifetime) => {
+                match (db.bounce_probe_lifetime_ms(), trusted) {
+                    (Some(lifetime), _) => {
                         send_probe(tx, db, list, &member, recipient, at, lifetime).await?;
                     }
-                    None => disable_member(tx, db, list, &member, recipient, at).await?,
+                    (None, false) => {
+                        send_probe(
+                            tx,
+                            db,
+                            list,
+                            &member,
+                            recipient,
+                            at,
+                            FORCED_PROBE_LIFETIME_MS,
+                        )
+                        .await?;
+                    }
+                    (None, true) => disable_member(tx, db, list, &member, recipient, at).await?,
                 }
             }
         }
