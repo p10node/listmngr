@@ -4073,9 +4073,16 @@ logs free of query strings: confirmation tokens may be entered in a URL or form.
   at most 256 characters and free of control characters; the language must be
   a shipped catalog (`en`, `vi`); the zone must be an IANA name.
 - `/web/account/addresses`: the account's addresses, primary first. Adding one
-  links it unverified and mails a token (the same `/web/verify` flow as
-  signup); an address another account owns links nothing and mails nothing,
-  and the page looks the same either way. Any verified address can become
+  mails a token (the same `/web/verify` flow as signup) and links nothing: a
+  new or unowned address stays unowned, with its `verified_on` untouched, and
+  the requesting account is recorded on the token (`claimant_user_id`,
+  migration `0056`). Only the mailbox owner using the token links the address
+  to that account and verifies it, in one statement, and only while the
+  address is still unowned (audit F-10); until then it widens no reader (the
+  own export names only verified links) and does not block the mailbox
+  owner's own signup, which voids the pending request. An address another
+  account owns links nothing and mails nothing, and the page looks the same
+  either way. Any verified address can become
   primary and can be used to log in. Removing an address unlinks it and
   forgets its verification — whoever claims it next must prove it again — but
   keeps the address row and its list subscriptions, which still deliver to

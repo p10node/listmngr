@@ -61,8 +61,10 @@ impl Database {
             .collect()
     }
 
-    /// Add `email` to the account and mail a verification token — or, for an
-    /// address the account already holds unverified, mail a fresh one. An
+    /// Ask to add `email` to the account and mail a verification token. The
+    /// address is linked to the account only when the mailbox owner uses the
+    /// token; until then a new or unowned address stays unowned, and an
+    /// address the account already holds unverified gets a fresh token. An
     /// address another account owns changes nothing.
     /// # Errors
     /// An invalid mailbox, a stale session or failed CSRF binding, or a
@@ -83,12 +85,15 @@ impl Database {
             .fetch_optional(&mut *tx)
             .await
             .map_err(db_error)?;
-        let (address_id, linked) = match existing {
+        // Nothing is linked or verified here. A new or unowned address stays
+        // unowned; the request rides on the mailed token and only the mailbox
+        // owner's proof (`browser_verify_address`) links it to this account.
+        let address_id = match existing {
             None => {
-                sqlx::query("INSERT INTO addresses(id,email,original_email,display_name,user_id,registered_on) VALUES($1,$2,$3,'',$4,$5)")
-                    .bind(address.id.to_string()).bind(&address.email).bind(&address.original_email).bind(user.to_string()).bind(address.registered_on.to_rfc3339())
+                sqlx::query("INSERT INTO addresses(id,email,original_email,display_name,user_id,registered_on) VALUES($1,$2,$3,'',NULL,$4)")
+                    .bind(address.id.to_string()).bind(&address.email).bind(&address.original_email).bind(address.registered_on.to_rfc3339())
                     .execute(&mut *tx).await.map_err(db_error)?;
-                (address.id.to_string(), true)
+                address.id.to_string()
             }
             Some(row) => {
                 let id: String = row.try_get("id").map_err(db_error)?;
@@ -99,32 +104,25 @@ impl Database {
                         if verified.is_some() {
                             return tx.commit().await.map_err(db_error);
                         }
-                        (id, false)
+                        id
                     }
+                    // Another account's address changes nothing and says nothing.
                     Some(_) => return tx.commit().await.map_err(db_error),
-                    None => {
-                        sqlx::query("UPDATE addresses SET user_id=$1,verified_on=NULL WHERE id=$2")
-                            .bind(user.to_string())
-                            .bind(&id)
-                            .execute(&mut *tx)
-                            .await
-                            .map_err(db_error)?;
-                        (id, true)
-                    }
+                    None => id,
                 }
             }
         };
         let mailed = self
-            .issue_verification(&mut tx, &address_id, &address, language, now_ms)
+            .issue_verification(&mut tx, &address_id, &address, language, now_ms, Some(user))
             .await?;
-        if linked || mailed {
+        if mailed {
             Self::record_tx_with_context(
                 &mut tx,
                 &AuditContext::new(Some(user), None, None),
                 "address.add",
                 "address",
                 &address.email,
-                serde_json::json!({"linked": linked, "verification_mailed": mailed}),
+                serde_json::json!({"linked": false, "verification_mailed": true}),
             )
             .await?;
         }

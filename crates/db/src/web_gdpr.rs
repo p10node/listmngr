@@ -65,7 +65,7 @@ async fn preferences_row(db: &Database, id: &str) -> Result<Value> {
 }
 
 async fn exported_memberships(db: &Database, id: &str) -> Result<Vec<Value>> {
-    let rows = sqlx::query("SELECT m.id, m.list_id, m.role, m.subscription_mode, m.display_name, m.moderation_action, m.bounce_score, m.created_at, m.preferences_id, a.email FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.user_id=$1 OR a.user_id=$1 ORDER BY m.list_id, m.role, a.email")
+    let rows = sqlx::query("SELECT m.id, m.list_id, m.role, m.subscription_mode, m.display_name, m.moderation_action, m.bounce_score, m.created_at, m.preferences_id, a.email FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.user_id=$1 OR (a.user_id=$1 AND a.verified_on IS NOT NULL) ORDER BY m.list_id, m.role, a.email")
             .bind(id)
             .fetch_all(db.pool())
             .await
@@ -115,7 +115,7 @@ async fn exported_tokens(db: &Database, id: &str) -> Result<Vec<Value>> {
 }
 
 async fn exported_audit(db: &Database, id: &str) -> Result<Vec<Value>> {
-    let rows = sqlx::query("SELECT at, action, target_type, target_id, diff FROM audit_log WHERE actor_user_id=$1 OR (target_type='user' AND target_id=$1) OR (target_type='member' AND target_id IN (SELECT m.id FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.user_id=$1 OR a.user_id=$1)) OR (target_type='address' AND target_id IN (SELECT a.email FROM addresses a WHERE a.user_id=$1)) ORDER BY at DESC, id DESC LIMIT $2")
+    let rows = sqlx::query("SELECT at, action, target_type, target_id, diff FROM audit_log WHERE actor_user_id=$1 OR (target_type='user' AND target_id=$1) OR (target_type='member' AND target_id IN (SELECT m.id FROM members m JOIN addresses a ON a.id=m.address_id WHERE m.user_id=$1 OR (a.user_id=$1 AND a.verified_on IS NOT NULL))) OR (target_type='address' AND target_id IN (SELECT a.email FROM addresses a WHERE a.user_id=$1 AND a.verified_on IS NOT NULL)) ORDER BY at DESC, id DESC LIMIT $2")
             .bind(id)
             .bind(EXPORTED_AUDIT_EVENTS)
             .fetch_all(db.pool())

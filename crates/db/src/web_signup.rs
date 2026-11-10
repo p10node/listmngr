@@ -106,7 +106,7 @@ impl Database {
         .await
         .map_err(db_error)?;
         if !self
-            .issue_verification(&mut tx, &address_id, &address, &locale, now_ms)
+            .issue_verification(&mut tx, &address_id, &address, &locale, now_ms, None)
             .await?
         {
             return tx.commit().await.map_err(db_error);
@@ -134,6 +134,7 @@ impl Database {
         address: &Address,
         language: &str,
         now_ms: i64,
+        claimant: Option<UserId>,
     ) -> Result<bool> {
         let recent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM account_tokens WHERE address_id=$1 AND purpose='verify_address' AND created_at>$2")
             .bind(address_id).bind(now_ms.saturating_sub(COOLDOWN_MS))
@@ -142,8 +143,8 @@ impl Database {
             return Ok(false);
         }
         let (token, digest) = fresh_token()?;
-        sqlx::query("INSERT INTO account_tokens(id,purpose,address_id,token_hash,created_at,expires_at) VALUES($1,'verify_address',$2,$3,$4,$5)")
-            .bind(Uuid::now_v7().to_string()).bind(address_id).bind(digest).bind(now_ms).bind(now_ms.saturating_add(TOKEN_LIFE_MS))
+        sqlx::query("INSERT INTO account_tokens(id,purpose,address_id,token_hash,created_at,expires_at,claimant_user_id) VALUES($1,'verify_address',$2,$3,$4,$5,$6)")
+            .bind(Uuid::now_v7().to_string()).bind(address_id).bind(digest).bind(now_ms).bind(now_ms.saturating_add(TOKEN_LIFE_MS)).bind(claimant.map(|u| u.to_string()))
             .execute(&mut **tx).await.map_err(db_error)?;
         let verify_url = format!("{}/web/verify", self.base_url().unwrap_or_default());
         self.site_notices()
@@ -180,13 +181,26 @@ impl Database {
         let digest = token_digest(token).ok_or_else(invalid_token)?;
         let mut tx = self.browser_write_tx().await?;
         live_anonymous_session(&mut tx, session, now_ms).await?;
-        let address_id: Option<String> = sqlx::query_scalar("UPDATE account_tokens SET consumed_at=$1 WHERE token_hash=$2 AND purpose='verify_address' AND consumed_at IS NULL AND expires_at>$1 RETURNING address_id")
+        let consumed = sqlx::query("UPDATE account_tokens SET consumed_at=$1 WHERE token_hash=$2 AND purpose='verify_address' AND consumed_at IS NULL AND expires_at>$1 RETURNING address_id,claimant_user_id")
             .bind(now_ms).bind(digest)
-            .fetch_optional(&mut *tx).await.map_err(db_error)?;
-        let address_id = address_id.ok_or_else(invalid_token)?;
-        let row = sqlx::query("UPDATE addresses SET verified_on=COALESCE(verified_on,$1) WHERE id=$2 RETURNING email,user_id")
-            .bind(crate::now()).bind(&address_id)
-            .fetch_one(&mut *tx).await.map_err(db_error)?;
+            .fetch_optional(&mut *tx).await.map_err(db_error)?
+            .ok_or_else(invalid_token)?;
+        let address_id: String = consumed.try_get("address_id").map_err(db_error)?;
+        let claimant: Option<String> = consumed.try_get("claimant_user_id").map_err(db_error)?;
+        // A token that carries a claimant links the address to that account in
+        // the same statement that verifies it, but only while the address is
+        // still unowned (or already the claimant's): someone else's address is
+        // never moved by a mailed token.
+        let row = if let Some(claimant) = claimant {
+            sqlx::query("UPDATE addresses SET verified_on=COALESCE(verified_on,$1),user_id=$3 WHERE id=$2 AND (user_id IS NULL OR user_id=$3) RETURNING email,user_id")
+                .bind(crate::now()).bind(&address_id).bind(claimant)
+                .fetch_optional(&mut *tx).await.map_err(db_error)?
+        } else {
+            sqlx::query("UPDATE addresses SET verified_on=COALESCE(verified_on,$1) WHERE id=$2 RETURNING email,user_id")
+                .bind(crate::now()).bind(&address_id)
+                .fetch_optional(&mut *tx).await.map_err(db_error)?
+        }
+        .ok_or_else(invalid_token)?;
         let email: String = row.try_get("email").map_err(db_error)?;
         let user: Option<String> = row.try_get("user_id").map_err(db_error)?;
         let user: Option<UserId> = user.map(|u| u.parse()).transpose().map_err(db_error)?;
@@ -235,6 +249,9 @@ async fn claim_account(
         // Nobody's address: whoever proves it from its mailbox gets the
         // account, so an earlier administrative verification no longer counts.
         let user = insert_account(tx, address, locale, hash).await?;
+        // Whoever signs up for the mailbox owns the claim: an earlier
+        // signed-in account's pending request for it is void.
+        drop_claims(tx, &id).await?;
         sqlx::query("UPDATE addresses SET user_id=$1,display_name=$2,verified_on=NULL WHERE id=$3")
             .bind(user.to_string())
             .bind(&address.display_name)
@@ -266,6 +283,17 @@ async fn claim_account(
     // password be activated by the first signer's own mailbox proof.
     let user: UserId = owner.parse().map_err(db_error)?;
     Ok(Some((id, user, true)))
+}
+
+/// Forget the unconsumed verification requests that signed-in accounts made
+/// for an address, so they can neither link it nor delay the owner's own mail.
+async fn drop_claims(tx: &mut sqlx::Transaction<'_, sqlx::Any>, address_id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM account_tokens WHERE address_id=$1 AND purpose='verify_address' AND consumed_at IS NULL AND claimant_user_id IS NOT NULL")
+        .bind(address_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    Ok(())
 }
 
 /// The session that anchors the CSRF token must still be live, checked on

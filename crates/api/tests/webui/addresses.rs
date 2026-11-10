@@ -132,7 +132,7 @@ async fn matrix(db: Database, app: axum::Router) {
 }
 
 /// Adding: a foreign address links nothing and mails nothing; an unowned one
-/// created elsewhere is linked and mailed; a repeat within the hour mails
+/// created elsewhere is mailed and linked only by the token; a repeat within the hour mails
 /// nothing more; nothing works without the session's CSRF token.
 async fn added(db: &Database, app: &axum::Router, cookie: &str) {
     assert_eq!(
@@ -164,8 +164,18 @@ async fn added(db: &Database, app: &axum::Router, cookie: &str) {
         StatusCode::SEE_OTHER
     );
     let html = page(app, cookie).await;
-    assert!(html.contains("<h2>second@example.org</h2>"), "{html}");
-    assert!(html.contains("Unverified"), "{html}");
+    assert!(
+        !html.contains("second@example.org"),
+        "a requested address is not linked before the mailbox proof: {html}"
+    );
+    assert_eq!(
+        count(
+            db,
+            "SELECT COUNT(*) FROM addresses WHERE email='second@example.org' AND user_id IS NULL AND verified_on IS NULL"
+        )
+        .await,
+        1
+    );
     for (sql, expected) in [
         ("SELECT COUNT(*) FROM workflow_notices", 1),
         (
