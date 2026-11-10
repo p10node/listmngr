@@ -139,22 +139,172 @@ pub fn approved_key(raw: &[u8]) -> Option<String> {
     approved_line_value(line.trim_end_matches(['\r', '\n'])).map(str::to_owned)
 }
 
-/// Remove a leading `Approved:` line from the first unencoded plain part.
+/// One byte-range replacement inside the raw message.
+struct Edit {
+    start: usize,
+    end: usize,
+    with: Vec<u8>,
+}
+
+/// A leaf text part (plain, HTML or any other `text/*`) that is not an
+/// attachment.
+fn is_text_part(part: &MessagePart<'_>) -> bool {
+    matches!(part.body, PartType::Text(_) | PartType::Html(_))
+        && !part
+            .content_disposition()
+            .is_some_and(mail_parser::ContentType::is_attachment)
+        && part
+            .content_type()
+            .is_none_or(|ct| ct.ctype().eq_ignore_ascii_case("text"))
+}
+
+/// The bytes of `body` up to and including its first line, and that line
+/// without its terminator.
+fn first_line(body: &[u8]) -> (usize, &[u8]) {
+    let end = body
+        .iter()
+        .position(|b| *b == b'\n')
+        .map_or(body.len(), |i| i + 1);
+    (end, body[..end].trim_ascii_end())
+}
+
+fn is_approved_line(line: &[u8]) -> bool {
+    std::str::from_utf8(line)
+        .ok()
+        .and_then(approved_line_value)
+        .is_some()
+}
+
+/// Quoted-printable decoding of one logical line (soft breaks already joined).
+fn qp_decode(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        if input[i] == b'='
+            && let Some(hex) = input.get(i + 1..i + 3)
+            && let Ok(text) = std::str::from_utf8(hex)
+            && let Ok(byte) = u8::from_str_radix(text, 16)
+        {
+            out.push(byte);
+            i += 3;
+        } else {
+            out.push(input[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// What removes a leading `Approved:` line from the body of a text part, in
+/// whatever transfer encoding the part carries.
+fn approved_edit(encoding: Encoding, body: &[u8]) -> Option<Edit> {
+    match encoding {
+        Encoding::None => {
+            let (end, line) = first_line(body);
+            is_approved_line(line).then(|| Edit {
+                start: 0,
+                end,
+                with: Vec::new(),
+            })
+        }
+        Encoding::QuotedPrintable => {
+            // The first logical line: physical lines joined across `=` soft breaks.
+            let mut end = 0;
+            let mut logical = Vec::new();
+            while end < body.len() {
+                let (len, line) = first_line(&body[end..]);
+                end += len;
+                match line.strip_suffix(b"=") {
+                    Some(joined) if end < body.len() => logical.extend_from_slice(joined),
+                    _ => {
+                        logical.extend_from_slice(line);
+                        break;
+                    }
+                }
+            }
+            is_approved_line(&qp_decode(&logical)).then(|| Edit {
+                start: 0,
+                end,
+                with: Vec::new(),
+            })
+        }
+        Encoding::Base64 => {
+            use base64::Engine as _;
+            let compact: Vec<u8> = body
+                .iter()
+                .copied()
+                .filter(|b| !b.is_ascii_whitespace())
+                .collect();
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(&compact)
+                .ok()?;
+            let (line_end, line) = first_line(&decoded);
+            if !is_approved_line(line) {
+                return None;
+            }
+            let eol = if body.windows(2).any(|w| w == b"\r\n") {
+                "\r\n"
+            } else {
+                "\n"
+            };
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&decoded[line_end..]);
+            let mut with = Vec::with_capacity(encoded.len() + encoded.len() / 76 * 2 + 2);
+            for chunk in encoded.as_bytes().chunks(76) {
+                with.extend_from_slice(chunk);
+                with.extend_from_slice(eol.as_bytes());
+            }
+            if !body.ends_with(b"\n") {
+                with.truncate(with.len().saturating_sub(eol.len()));
+            }
+            Some(Edit {
+                start: 0,
+                end: body.len(),
+                with,
+            })
+        }
+    }
+}
+
+/// Remove a leading `Approved:` line from every text part.
 ///
-/// A posting key must never reach subscribers or the archive. Header spellings
-/// are removed separately by [`crate::cook_headers`]. Bytes are otherwise
+/// A posting key must never reach subscribers, the digest or the archive,
+/// whichever alternative of the message a reader sees. The first line of each
+/// text part (plain, HTML, any `text/*`, attachments excepted) is removed when
+/// it is an `Approved:` line, byte-for-byte for unencoded and quoted-printable
+/// parts, and by decoding and re-encoding for base64. Header spellings are
+/// removed separately by [`crate::cook_headers`]. Bytes are otherwise
 /// untouched.
 #[must_use]
 pub fn strip_approved_line(raw: &[u8]) -> Vec<u8> {
-    strippable_body_line(raw).map_or_else(
-        || raw.to_vec(),
-        |range| {
-            let mut output = Vec::with_capacity(raw.len() - range.len());
-            output.extend_from_slice(&raw[..range.start]);
-            output.extend_from_slice(&raw[range.end..]);
-            output
-        },
-    )
+    let Some(message) = mail_parser::MessageParser::default().parse(raw) else {
+        return raw.to_vec();
+    };
+    let mut edits: Vec<Edit> = Vec::new();
+    for part in message.parts.iter().filter(|part| is_text_part(part)) {
+        let (start, end) = (part.offset_body as usize, part.offset_end as usize);
+        if let Some(body) = raw.get(start..end)
+            && let Some(edit) = approved_edit(part.encoding, body)
+        {
+            edits.push(Edit {
+                start: start + edit.start,
+                end: start + edit.end,
+                with: edit.with,
+            });
+        }
+    }
+    edits.sort_by_key(|edit| edit.start);
+    let mut output = Vec::with_capacity(raw.len());
+    let mut at = 0;
+    for edit in edits {
+        if edit.start < at {
+            continue;
+        }
+        output.extend_from_slice(&raw[at..edit.start]);
+        output.extend_from_slice(&edit.with);
+        at = edit.end;
+    }
+    output.extend_from_slice(&raw[at..]);
+    output
 }
 
 /// Read every unfolded List-Post and X-BeenThere field from uncooked headers.
