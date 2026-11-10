@@ -1644,6 +1644,9 @@ the domain template set and delete through `TemplateRepo::set_body_tx` and
 `delete_tx`) are one browser write transaction each. Domain template
 resolution for the editor is `templates::resolve_domain_tx` (domain scope,
 then site, then built-in), a sibling of the list and site resolvers.
+`browser_user_update` also revokes the demoted account's tokens in its
+transaction (`token.revoke` per token): unbound, domain-bound, and list-bound
+tokens whose list the account does not own as a verified member owner.
 `listmngr_mail::dkim::SigningKeys::dns_record` derives the public key of a
 configured signing key (`rsa` PKCS#8 or PKCS#1 DER after the same file
 checks as `load`) and returns the `<selector>._domainkey.<domain>` name with
