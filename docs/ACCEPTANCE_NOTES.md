@@ -4109,6 +4109,12 @@ password check draws from — login, password change, reset confirmation,
 deletion, and the second-factor management forms; it was previously fixed at
 five a minute regardless of configuration.
 
+The in-memory rate limiter (`RateLimiter` in `crates/api/src/lib.rs`) is bounded:
+it keeps at most 100 000 live buckets. When the map is full and a new key
+arrives, buckets whose window has elapsed are swept first; if it is still full
+the new key is refused with `Retry-After` of one window. Existing keys keep
+working. Unit test `rate_limiter_tests::expired_buckets_are_reclaimed_and_the_map_is_capped`.
+
 Sessions use opaque random credentials, hashed storage, independent CSRF secrets,
 rotation at login, server-side logout revocation and password-version checks.
 Cookies are HttpOnly, SameSite=Strict, Path=/web, and Secure on HTTPS. Authenticated

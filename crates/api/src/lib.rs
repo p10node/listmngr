@@ -880,13 +880,24 @@ impl RateLimiter {
         }
     }
 
+    /// Upper bound on live buckets. Expired buckets are swept first; while
+    /// the map stays full a new key is refused for one window.
+    const MAX_KEYS: usize = 100_000;
+
     fn check(&self, key: &str) -> Result<(), u64> {
         let now = Instant::now();
+        if self.hits.len() >= Self::MAX_KEYS && !self.hits.contains_key(key) {
+            self.hits
+                .retain(|_, (start, _)| now.duration_since(*start) < self.window);
+            if self.hits.len() >= Self::MAX_KEYS {
+                return Err(self.window.as_secs().max(1));
+            }
+        }
         let mut hit = self.hits.entry(key.to_owned()).or_insert((now, 0));
         if now.duration_since(hit.0) >= self.window {
             *hit = (now, 0);
         }
-        hit.1 += 1;
+        hit.1 = hit.1.saturating_add(1);
         if hit.1 <= self.limit {
             Ok(())
         } else {
@@ -896,6 +907,26 @@ impl RateLimiter {
                 .as_secs()
                 .max(1))
         }
+    }
+}
+
+#[cfg(test)]
+mod rate_limiter_tests {
+    use super::RateLimiter;
+
+    #[test]
+    fn expired_buckets_are_reclaimed_and_the_map_is_capped() {
+        let limiter = RateLimiter::from_config("1/s");
+        for i in 0..RateLimiter::MAX_KEYS {
+            assert!(limiter.check(&format!("socket-ip:{i}")).is_ok());
+        }
+        // Full and nothing expired: a new key is refused, existing keys still work.
+        assert!(limiter.check("socket-ip:new").is_err());
+        assert!(limiter.hits.len() <= RateLimiter::MAX_KEYS);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Window elapsed: the sweep frees space and the new key is admitted.
+        assert!(limiter.check("socket-ip:new").is_ok());
+        assert!(limiter.hits.len() < RateLimiter::MAX_KEYS);
     }
 }
 
