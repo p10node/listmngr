@@ -113,7 +113,15 @@ pub async fn tick(db: &Database, worker: &str, force: bool) -> Result<usize> {
     }
     let mut count = 0;
     for list in db.lists().list(None).await? {
-        count += send(db, &list.id, force).await?;
+        // One list that cannot be flushed (an issue that will not render,
+        // for instance) must not stop the lists sorting after it: its posts
+        // stay pending, the failure is logged with the list, the sweep goes on.
+        match send(db, &list.id, force).await {
+            Ok(sent) => count += sent,
+            Err(error) => {
+                tracing::error!(list = %list.id, %error, "digest flush failed; posts retained");
+            }
+        }
     }
     Ok(count)
 }

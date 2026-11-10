@@ -1207,6 +1207,12 @@ an `IsolatedSchema`, in `scripts/test-postgres.sh`.
 
 ## Digest snapshot — bounded local acceptance verified
 
+The periodic sweep (`listmngr_runners::digests::tick`) isolates lists: a
+flush error for one list (an issue that will not render, say) is logged
+with the list id (`digest flush failed; posts retained`), that list's
+posts stay pending, and the sweep goes on to every later list. Only
+collection errors still end the tick.
+
 `listmngr_mail::digest` is a port of Mailman's two digesters
 (`mailman/runners/digest.py`, 3.3.10) rather than a layout of its own.
 `build` wraps the masthead (`wrap`, Mailman's

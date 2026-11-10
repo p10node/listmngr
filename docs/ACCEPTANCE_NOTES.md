@@ -1406,6 +1406,14 @@ a stranger can produce for an address.
 
 ## Digest snapshot (`P3-DIGEST-SNAPSHOT`) — bounded local acceptance verified
 
+A list whose due issue cannot be rendered (for example a `display_name`
+over 200 bytes that its owner set) no longer stops the automatic sweep
+for the lists sorting after it: the failure is logged with the list id,
+the posts stay pending for the owner to fix, and every other due list is
+published (`crates/runners/tests/digest_isolation.rs`, security finding
+F-12). The configuration layer still accepts such a text; refusing it at
+write time is not part of this change.
+
 The two digest issues are now compared with what Mailman 3.3.10 itself
 writes. `tests/compat/generate_mailman_digest.py` runs Mailman core's own
 `RFC1153Digester` and `MIMEDigester` under Mailman's test configuration
